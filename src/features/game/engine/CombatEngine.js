@@ -1,7 +1,7 @@
 // RUTA: js/engine/CombatEngine.js
 import { gameData, NON_TARGETABLE_BUILDINGS } from '../core/GameData.js';
 import { CombatFormulas } from '../core/CombatFormulas.js';
-import { MemoryManager } from '../ai/MemoryManager.js';
+import { MemoryManager } from '../ai/index.js';
 
 export class CombatEngine {
     _gameState;

@@ -1,8 +1,19 @@
 // RUTA: js/ai/AIGoalManager.js
 import { gameData } from '../core/GameData.js';
-
-const RECURRING_GOAL_COOLDOWN_MS = 10 * 60 * 1000;
-const STEP_TIME_SLICE_MS = 5 * 60 * 1000;
+import { AI_GOAL_MANAGER_CONSTANTS } from './config/AIConstants.js';
+import { RESOURCE_FIELD_BUILDING_TYPES, STORAGE_BUILDING_BY_RESOURCE } from '../core/data/constants.js';
+import { evaluateCondition } from './goal-manager/conditions.js';
+import {
+    areResourceFieldsBalanced,
+    getPrerequisites,
+    getStepCost,
+    isStepCompleted,
+} from './goal-manager/steps.js';
+import {
+    buildVillageGoalState,
+    createEmptyVillageGoalState,
+    serializeVillageGoalStates,
+} from './goal-manager/state.js';
 
 class AIGoalManager {
     #controller;
@@ -22,47 +33,13 @@ class AIGoalManager {
             if (!goalState[village.id]) {
                 goalState[village.id] = persistentVillageState;
             }
-            
-            const initializeScheduler = (goal) => {
-                delete goal.stepPointer;
-                goal.proportionalUnitPointer = goal.proportionalUnitPointer ?? 0;
-                goal.currentStepIndex = goal.currentStepIndex ?? 0;
-                goal.stepStartTime = goal.stepStartTime ?? Date.now();
-                if (!goal.incompleteStepIndices || goal.incompleteStepIndices.length === 0) {
-                     goal.incompleteStepIndices = goal.plan ? goal.plan.map((_, i) => i) : [];
-                }
-            };
 
-            persistentVillageState.economicGoalStack?.forEach(initializeScheduler);
-            persistentVillageState.militaryGoalStack?.forEach(initializeScheduler);
-
-            this.#villageGoalStates.set(village.id, {
-                economicGoalStack: persistentVillageState.economicGoalStack || [],
-                militaryGoalStack: persistentVillageState.militaryGoalStack || [],
-                completedGoals: new Set(persistentVillageState.completedGoals || []),
-                goalCooldowns: new Map(persistentVillageState.goalCooldowns || []),
-                lastUpgradedResourceType: persistentVillageState.lastUpgradedResourceType || null
-            });
+            this.#villageGoalStates.set(village.id, buildVillageGoalState(persistentVillageState));
         });
     }
     
     getState() {
-        const serializableState = {};
-        for (const [villageId, villageState] of this.#villageGoalStates.entries()) {
-            const cleanStack = (stack) => stack.map(g => {
-                const { currentStep, ...rest } = g;
-                return rest;
-            });
-
-            serializableState[villageId] = {
-                economicGoalStack: cleanStack(villageState.economicGoalStack),
-                militaryGoalStack: cleanStack(villageState.militaryGoalStack),
-                completedGoals: Array.from(villageState.completedGoals),
-                goalCooldowns: Array.from(villageState.goalCooldowns.entries()),
-                lastUpgradedResourceType: villageState.lastUpgradedResourceType
-            };
-        }
-        return serializableState;
+        return serializeVillageGoalStates(this.#villageGoalStates);
     }
     
     getGoalStackInfo(villageId) {
@@ -82,13 +59,7 @@ class AIGoalManager {
     
     ensureVillageStateExists(villageId) {
         if (!this.#villageGoalStates.has(villageId)) {
-            this.#villageGoalStates.set(villageId, { 
-                economicGoalStack: [], 
-                militaryGoalStack: [], 
-                completedGoals: new Set(),
-                goalCooldowns: new Map(),
-                lastUpgradedResourceType: null
-            });
+            this.#villageGoalStates.set(villageId, createEmptyVillageGoalState());
         }
     }
     
@@ -124,27 +95,6 @@ class AIGoalManager {
         }
     }
 
-    // NUEVO MÉTODO: Verifica si todos los campos de recursos están "parejos"
-    #areResourceFieldsBalanced(village) {
-        const resourceTypes = ['woodcutter', 'clayPit', 'ironMine', 'cropland'];
-        const fields = village.buildings.filter(b => resourceTypes.includes(b.type));
-        
-        if (fields.length === 0) return true;
-
-        // Calculamos el nivel efectivo (nivel actual + mejoras en cola)
-        const effectiveLevels = fields.map(f => {
-            const queuedUpgrades = village.constructionQueue.filter(j => j.buildingId === f.id).length;
-            return f.level + queuedUpgrades;
-        });
-
-        const minLevel = Math.min(...effectiveLevels);
-        const maxLevel = Math.max(...effectiveLevels);
-
-        // Si el mínimo es igual al máximo, están perfectamente balanceados (todos al mismo nivel)
-        // Si min < max, significa que hay campos rezagados que debemos subir antes de cambiar de tarea.
-        return minLevel === maxLevel;
-    }
-
     #processGoalCategory(village, villageIndex, gameState, category) {
         const villageState = this.#villageGoalStates.get(village.id);
         const goalStack = category === 'economic' ? villageState.economicGoalStack : villageState.militaryGoalStack;
@@ -178,24 +128,14 @@ class AIGoalManager {
         if (result.success) {
             // LÓGICA DE ROTACIÓN CONDICIONAL
             if (currentStep.type === 'resource_fields_level') {
-                // Si es un paso de recursos, verificamos si hemos completado la "capa"
-                if (this.#areResourceFieldsBalanced(village)) {
-                    // ¡Capa completada! (Todos los campos subieron al nuevo nivel). Rotamos.
+                if (areResourceFieldsBalanced(village)) {
                     this.#rotateToNextStep(activeGoal);
-                } else {
-                    // Aún hay campos desnivelados. NO ROTAMOS.
-                    // Nos quedamos en este paso para que el siguiente ciclo suba otro campo rezagado.
                 }
             } else {
-                // Para otros pasos (edificios, tropas), rotamos siempre para mantener el paralelismo
                 this.#rotateToNextStep(activeGoal);
             }
         } else {
-            // Si falló (recursos, cola llena), manejamos el bloqueo.
             const isHardBlock = this.#handleBlockedGoal(village, currentStep, activeGoal, gameState, category, result);
-            
-            // Si no es un bloqueo crítico, rotamos para intentar otra cosa.
-            // Nota: Si es recursos y está bloqueado por cola llena (Romanos), rotamos para aprovechar la otra cola.
             if (!isHardBlock) {
                 this.#rotateToNextStep(activeGoal);
             }
@@ -212,7 +152,7 @@ class AIGoalManager {
         }
 
         if (completedGoal.isRecurring) {
-            const expiresAt = Date.now() + RECURRING_GOAL_COOLDOWN_MS;
+            const expiresAt = Date.now() + AI_GOAL_MANAGER_CONSTANTS.recurringGoalCooldownMs;
             villageState.goalCooldowns.set(completedGoal.id, expiresAt);
         } else if (!completedGoal.id.startsWith('SUB_GOAL:')) {
             villageState.completedGoals.add(completedGoal.id);
@@ -277,126 +217,24 @@ class AIGoalManager {
     }
 
     #evaluateCondition(condition, village, gameState) {
-        if (!condition) return true;
-        switch (typeof condition) {
-            case 'function': return condition(village, gameState);
-            case 'string':
-                try {
-                    const func = new Function('village', 'gameState', `return ${condition}`);
-                    return func(village, gameState);
-                } catch (e) { this.#controller.log('error', village, 'Condición Inválida', `Error evaluando condición string: ${e}`); return false; }
-            case 'object': return this.#parseConditionNode(condition, village, gameState);
-            default: return true;
-        }
-    }
-
-    #parseConditionNode(node, village, gameState) {
-        if (node.type === 'AND') return node.conditions.every(subNode => this.#parseConditionNode(subNode, village, gameState));
-        if (node.type === 'OR') return node.conditions.some(subNode => this.#parseConditionNode(subNode, village, gameState));
-        return this.#evaluateRule(node, village, gameState);
-    }
-    
-    #evaluateRule(rule, village, gameState) {
-        const getBuildingLevel = (v, type) => (v.buildings.find(b => b.type === type) || { level: 0 }).level;
-        const getResourceFieldsLevel = (v, resType) => {
-            const resourceMap = { 'Wood': 'woodcutter', 'Clay': 'clayPit', 'Iron': 'ironMine', 'Wheat': 'cropland' };
-            const typeToFind = resourceMap[resType] || null;
-            const fields = v.buildings.filter(b => /^[wcif]/.test(b.id) && (typeToFind ? b.type === typeToFind : true));
-            if (fields.length === 0) return 0;
-            return Math.min(...fields.map(f => f.level));
-        };
-        const getPlayerProperty = (gs, ownerId, prop) => {
-            if (prop === 'population') return gs.villages.filter(v => v.ownerId === ownerId).reduce((sum, v) => sum + v.population.current, 0);
-            return 0;
-        };
-        const isResearchCompleted = (v, unitId) => {
-            const resolvedUnitId = this.#actionExecutor.resolveUnitId(unitId);
-            if (!resolvedUnitId) return false;
-            return v.research.completed.includes(resolvedUnitId);
-        };
-        const getVillageCount = (gs, ownerId) => gs.villages.filter(v => v.ownerId === ownerId).length;
-        let value;
-        switch (rule.type) {
-            case 'building_level': value = getBuildingLevel(village, rule.building); break;
-            case 'resource_fields_level': value = getResourceFieldsLevel(village, rule.resourceType); break;
-            case 'player_property': value = getPlayerProperty(gameState, village.ownerId, rule.property); break;
-            case 'research_completed': return isResearchCompleted(village, rule.unit);
-            case 'village_count': value = getVillageCount(gameState, village.ownerId); break;
-            default: return true;
-        }
-        const targetValue = rule.value;
-        switch (rule.operator) {
-            case '>=': return value >= targetValue;
-            case '<=': return value <= targetValue;
-            case '==': return value == targetValue;
-            case '!=': return value != targetValue;
-            case '>': return value > targetValue;
-            case '<': return value < targetValue;
-            default: return true;
-        }
+        return evaluateCondition(condition, {
+            village,
+            gameState,
+            resolveUnitId: this.#actionExecutor.resolveUnitId.bind(this.#actionExecutor),
+            onUnsupportedString: () => {
+                this.#controller.log('warn', village, 'Condición No Soportada', 'Las condiciones de texto plano fueron deshabilitadas por seguridad. Usa condición tipo función u objeto.');
+            },
+        });
     }
 
     #getPrerequisites(step, village, failureContext = {}) {
-        const requirements = { buildings: {}, research: {} };
-        const raceTroops = gameData.units[this.#controller.getRace()].troops;
-
-        if (failureContext.reason === 'RESEARCH_REQUIRED' && failureContext.unitId) {
-            requirements.research[failureContext.unitId] = true;
-        }
-        
-        const mergeRequirements = (reqs) => {
-            if (!reqs) return;
-            for (const reqType in reqs) {
-                requirements.buildings[reqType] = Math.max(requirements.buildings[reqType] || 0, reqs[reqType]);
-            }
-        };
-
-        switch (step.type) {
-            case 'building': {
-                const buildingData = gameData.buildings[step.buildingType];
-                const level = (village.buildings.find(b => b.type === step.buildingType)?.level || 0) + 1;
-                const levelData = buildingData?.levels[level - 1];
-                mergeRequirements(levelData?.requires);
-                mergeRequirements(buildingData?.requires);
-                break;
-            }
-            case 'research': {
-                const unitId = this.#actionExecutor.resolveUnitId(step.unitType);
-                const unitData = raceTroops.find(u => u.id === unitId);
-                mergeRequirements(unitData?.research?.requires);
-                break;
-            }
-            case 'upgrade': {
-                const unitId = this.#actionExecutor.resolveUnitId(step.unitType);
-                const unitData = raceTroops.find(u => u.id === unitId);
-                const nextUpgradeLevel = (village.smithy.upgrades[unitId] || 0) + 1;
-                
-                requirements.buildings['smithy'] = Math.max(requirements.buildings['smithy'] || 0, nextUpgradeLevel);
-                
-                if (unitData?.research?.time > 0) {
-                    requirements.research[unitId] = true;
-                }
-                break;
-            }
-            case 'proportional_units':
-            case 'units': {
-                const unitIdentifier = failureContext.unitId || step.baseUnit || step.unitType;
-                const unitId = this.#actionExecutor.resolveUnitId(unitIdentifier);
-                const unitData = raceTroops.find(u => u.id === unitId);
-                if (unitData) {
-                    if (unitData.research?.time > 0) {
-                        requirements.research[unitId] = true;
-                    }
-                    mergeRequirements(unitData.research?.requires);
-                    const trainingBuilding = this.#actionExecutor.getTrainingBuildingForUnit(unitId);
-                    if (trainingBuilding) {
-                        requirements.buildings[trainingBuilding] = Math.max(requirements.buildings[trainingBuilding] || 0, 1);
-                    }
-                }
-                break;
-            }
-        }
-        return requirements;
+        return getPrerequisites({
+            step,
+            village,
+            failureContext,
+            race: this.#controller.getRace(),
+            actionExecutor: this.#actionExecutor,
+        });
     }
 
     #handleBlockedGoal(village, failedStep, activeGoal, gameState, category, failureContext = {}) {
@@ -413,7 +251,7 @@ class AIGoalManager {
         };
 
         const prerequisites = this.#getPrerequisites(failedStep, village, failureContext);
-        const resourceFieldTypes = ['woodcutter', 'clayPit', 'ironMine', 'cropland'];
+        const resourceFieldTypes = RESOURCE_FIELD_BUILDING_TYPES;
 
         for (const reqBuildingType in prerequisites.buildings) {
             const reqLevel = prerequisites.buildings[reqBuildingType];
@@ -502,7 +340,7 @@ class AIGoalManager {
         for (const res in cost) {
             const effectiveCapacity = village.resources[res].capacity * budgetRatioForStep;
             if (cost[res] > effectiveCapacity) {
-                const storageType = res === 'food' ? 'granary' : 'warehouse';
+                const storageType = STORAGE_BUILDING_BY_RESOURCE[res] || 'warehouse';
                 const MAX_STORAGE_LEVEL = 20;
 
                 const storages = village.buildings.filter(b => b.type === storageType);
@@ -600,131 +438,23 @@ class AIGoalManager {
     }
 
     #getStepCost(step, village, gameState) {
-        switch (step.type) {
-            case 'building':
-            case 'resource_fields_level': {
-                const buildingType = step.buildingType || this.#actionExecutor.getResourceTypeFromStep(step);
-                if (!buildingType) return {};
-                const building = village.buildings.find(b => b.type === buildingType);
-                const level = (building ? building.level : 0) + village.constructionQueue.filter(j => j.buildingType === buildingType).length;
-                const buildingData = gameData.buildings[buildingType];
-                return buildingData?.levels[level]?.cost || {};
-            }
-            case 'units': {
-                const unitId = this.#actionExecutor.resolveUnitId(step.unitType);
-                const unitData = gameData.units[this.#controller.getRace()].troops.find(u => u.id === unitId);
-                return unitData?.cost || {};
-            }
-            case 'research': {
-                const unitId = this.#actionExecutor.resolveUnitId(step.unitType);
-                const unitData = gameData.units[this.#controller.getRace()].troops.find(u => u.id === unitId);
-                return unitData?.research?.cost || {};
-            }
-            case 'upgrade': {
-                const unitId = this.#actionExecutor.resolveUnitId(step.unitType);
-                const unitData = gameData.units[this.#controller.getRace()].troops.find(u => u.id === unitId);
-                if (!unitData) return {};
-                const currentLevel = village.smithy.upgrades[unitId] || 0;
-                const cost = {};
-                for (const res in unitData.cost) cost[res] = Math.floor(unitData.cost[res] * Math.pow(1.6, currentLevel + 1));
-                return cost;
-            }
-            case 'proportional_units': {
-                const allUnitTypes = [step.baseUnit, ...step.proportions.map(p => p.unit)];
-                let maxCost = {};
-                let mostExpensiveUnitCost = 0;
-                allUnitTypes.forEach(unitType => {
-                    const unitCost = this.#getStepCost({ type: 'units', unitType: unitType }, village, gameState);
-                    const totalResourceCost = Object.values(unitCost).reduce((a, b) => a + b, 0);
-                    if (totalResourceCost > mostExpensiveUnitCost) {
-                        mostExpensiveUnitCost = totalResourceCost;
-                        maxCost = unitCost;
-                    }
-                });
-                return maxCost;
-            }
-            default: return {};
-        }
+        return getStepCost({
+            step,
+            village,
+            gameState,
+            race: this.#controller.getRace(),
+            actionExecutor: this.#actionExecutor,
+        });
     }
 
     #isStepCompleted(step, village, gameState) {
-        if (!step) return false;
-        const allVillages = gameState.villages.filter(v => v.ownerId === this.#controller.getOwnerId());
-    
-        switch (step.type) {
-            case 'building': {
-                const building = village.buildings.find(b => b.type === step.buildingType);
-                const isLevelMet = building && building.level >= step.level;
-                return isLevelMet;
-            }
-    
-            case 'resource_fields_level': {
-                let fields = village.buildings.filter(b => /^[wcif]/.test(b.id));
-                const resourceType = this.#actionExecutor.getResourceTypeFromStep(step);
-                if (resourceType) fields = fields.filter(f => f.type === resourceType);
-                if (fields.length === 0 && step.level > 0) return false;
-    
-                return fields.every(field => field.level >= step.level);
-            }
-    
-            case 'units': {
-                const unitId = this.#actionExecutor.resolveUnitId(step.unitType);
-                if (!unitId) return true;
-    
-                const settlerId = this.#actionExecutor.resolveUnitId('settler');
-                const chiefId = this.#actionExecutor.resolveUnitId('chief');
-    
-                if (unitId === settlerId || unitId === chiefId) {
-                    const totalInThisVillage = (village.unitsInVillage[unitId] || 0) +
-                                               village.recruitmentQueue.filter(j => j.unitId === unitId).reduce((qSum, j) => qSum + j.count, 0);
-                    return totalInThisVillage >= step.count;
-                }
-                
-                const totalInAllVillages = allVillages.reduce((sum, v) => sum + (v.unitsInVillage[unitId] || 0), 0);
-                const totalInAllQueues = allVillages.reduce((sum, v) => {
-                    return sum + v.recruitmentQueue.filter(j => j.unitId === unitId).reduce((qSum, j) => qSum + j.count, 0);
-                }, 0);
-                
-                return (totalInAllVillages + totalInAllQueues) >= step.count;
-            }
-    
-            case 'research': {
-                const researchUnitId = this.#actionExecutor.resolveUnitId(step.unitType);
-                return village.research.completed.includes(researchUnitId);
-            }
-    
-            case 'upgrade': {
-                const upgradeUnitId = this.#actionExecutor.resolveUnitId(step.unitType);
-                return (village.smithy.upgrades[upgradeUnitId] || 0) >= step.level;
-            }
-    
-            case 'proportional_units': {
-                const { baseUnit, proportions, baseTarget } = step;
-                const baseUnitId = this.#actionExecutor.resolveUnitId(baseUnit);
-                if (!baseUnitId) return true;
-    
-                const getTotalUnitCount = (unitId) => {
-                    const totalInVillages = allVillages.reduce((sum, v) => sum + (v.unitsInVillage[unitId] || 0), 0);
-                    const totalInQueue = allVillages.reduce((sum, v) => {
-                        return sum + v.recruitmentQueue.filter(j => j.unitId === unitId).reduce((qSum, j) => qSum + j.count, 0);
-                    }, 0);
-                    return totalInVillages + totalInQueue;
-                };
-    
-                if (getTotalUnitCount(baseUnitId) < baseTarget) return false;
-                
-                for (const proportion of proportions) {
-                    const proportionalUnitId = this.#actionExecutor.resolveUnitId(proportion.unit);
-                    if (!proportionalUnitId) continue;
-                    const targetCount = Math.floor(baseTarget * (proportion.ratio / 100));
-                    if (getTotalUnitCount(proportionalUnitId) < targetCount) return false;
-                }
-                return true;
-            }
-    
-            default: 
-                return false;
-        }
+        return isStepCompleted({
+            step,
+            village,
+            gameState,
+            ownerId: this.#controller.getOwnerId(),
+            actionExecutor: this.#actionExecutor,
+        });
     }
 }
 

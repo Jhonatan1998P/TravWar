@@ -1,10 +1,9 @@
 // RUTA: js/engine/GameWorker.js
 import { gameData } from '../core/GameData.js';
-import AIController from '../ai/AIController.js';
+import { AIController, AIPersonality } from '../ai/index.js';
 import { CombatEngine } from '../engine/CombatEngine.js';
 import { VillageProcessor } from '../engine/VillageProcessor.js';
 import { GameStateFactory } from '../engine/GameStateFactory.js';
-import { AIPersonality } from '../ai/AIPersonality.js';
 
 self.onerror = function(message, source, lineno, colno, error) {
     self.postMessage({

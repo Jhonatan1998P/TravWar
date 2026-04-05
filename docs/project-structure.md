@@ -6,7 +6,6 @@ This project uses a hybrid feature/layered architecture to keep modules cohesive
 
 - `src/app/`: app entrypoint and router.
 - `src/features/game/`: main game feature (`ai`, `core`, `engine`, `state`, `ui`, `views`).
-- `src/features/ai-editor/`: AI editor feature modules and view.
 - `src/shared/lib/`: reusable cross-feature utilities.
 - `src/shared/state/`: global app state (Zustand store).
 - `src/styles/`: global Tailwind/PostCSS styles.
@@ -17,7 +16,7 @@ This project uses a hybrid feature/layered architecture to keep modules cohesive
 - CSS pipeline: Tailwind CSS + PostCSS + Autoprefixer
 - Global app context: Zustand vanilla store (`src/shared/state/GlobalStore.js`)
 - Static assets source: `assets/` (copied as Vite public dir)
-- Path aliases: `@`, `@app`, `@game`, `@aiEditor`, `@shared`, `@styles`
+- Path aliases: `@`, `@app`, `@game`, `@shared`, `@styles`
 
 ## Naming Conventions
 

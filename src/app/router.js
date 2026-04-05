@@ -16,7 +16,6 @@ import VillageView from '@game/views/VillageView.js';
 import VillageCenterView from '@game/views/VillageCenterView.js';
 import ReportsView from '@game/views/ReportsView.js';
 import MapView from '@game/views/MapView.js';
-import AIEditorView from '@aiEditor/AIEditorView.js';
 
 
 class Router {
@@ -38,7 +37,6 @@ class Router {
             '/village-center': VillageCenterView,
             '/reports': ReportsView,
             '/map': MapView,
-            '/ai-editor': AIEditorView,
         };
     }
 
@@ -147,7 +145,7 @@ class Router {
             this.#villageContainer.classList.remove('max-w-3xl');
             this.#villageContainer.classList.add('max-w-md');
 
-            if (path === '/ai-editor' || path === '/map' ) {
+            if (path === '/map' ) {
                 this.#appHeader.classList.add('hidden');
                 this.#resourceBar.classList.add('hidden');
             } else {

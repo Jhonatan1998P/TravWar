@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "sortablejs": "^1.15.6",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
