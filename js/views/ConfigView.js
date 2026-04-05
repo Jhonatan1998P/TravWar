@@ -1,0 +1,319 @@
+import GameConfig from '../state/GameConfig.js';
+import { gameData } from '../core/GameData.js';
+import gameManager from '../GameManager.js';
+import { router } from '../main-spa.js';
+
+const STATE_STORAGE_KEY = 'game_state_v2';
+const CONFIG_STORAGE_KEY = 'game_config';
+const ACCESS_PASS_KEY = 'village_access_granted';
+const FORCE_NEW_GAME_SESSION_KEY = 'force_new_game_session';
+
+class ConfigView {
+    #config;
+    #form;
+    #inputs = {};
+    #valueDisplays = {};
+    #hasExistingGame = false;
+    #confirmDialog;
+    #confirmCancelBtn;
+    #confirmOverwriteBtn;
+    #continueButtonContainer;
+    #mainTitle;
+
+    constructor() {
+        this.#config = new GameConfig();
+    }
+
+    get html() {
+        return `
+            <div class="w-full max-w-3xl mx-auto p-4 md:p-6 lg:p-8">
+                <div id="continue-game-container" class="hidden text-center border-b border-primary-border pb-8 mb-8">
+                    <a href="#" id="continue-game-link" class="w-full md:w-auto inline-block bg-btn-primary-bg hover:bg-btn-primary-hover text-white font-bold py-4 px-8 rounded-lg text-2xl transition-transform duration-200 hover:scale-105 focus:outline-none focus:ring-4 focus:ring-green-500/50 border border-primary-border">
+                        Continuar Partida
+                    </a>
+                    <p class="text-gray-400 mt-3 text-sm">Se encontró una partida en curso.</p>
+                </div>
+
+                <header class="text-center mb-8">
+                    <h1 id="main-title" class="text-4xl md:text-5xl font-bold text-white tracking-tight">Crea un Mundo Nuevo</h1>
+                    <p class="text-gray-400 mt-2">Define las reglas de tu nueva conquista.</p>
+                </header>
+                
+                <div class="bg-glass-bg backdrop-blur-sm rounded-xl p-6 md:p-8 border-2 border-primary-border">
+                    <form id="config-form" class="space-y-6">
+                        
+                        <fieldset class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                            <div>
+                                <label for="player-race" class="text-white font-medium">Tu Raza</label>
+                                <select id="player-race" class="mt-1 w-full bg-btn-secondary-bg border border-primary-border text-white rounded-md p-2 focus:ring-2 focus:ring-green-500 focus:border-green-500">
+                                </select>
+                            </div>
+                        </fieldset>
+
+                        <fieldset class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-6 border-t border-primary-border pt-6">
+                            <div>
+                                <label for="game-speed" class="flex justify-between text-white font-medium">Velocidad de Juego <span id="game-speed-value" class="font-mono text-cyan-400">1x</span></label>
+                                <input id="game-speed" type="range" min="10" max="5000" value="1" step="10" class="w-full h-2 bg-btn-secondary-bg rounded-lg appearance-none cursor-pointer accent-cyan-400 input-range">
+                            </div>
+                            <div>
+                                <label for="troop-speed" class="flex justify-between text-white font-medium">Velocidad de Tropas <span id="troop-speed-value" class="font-mono text-cyan-400">1x</span></label>
+                                <input id="troop-speed" type="range" min="1" max="500" value="1" step="1" class="w-full h-2 bg-btn-secondary-bg rounded-lg appearance-none cursor-pointer accent-cyan-400 input-range">
+                            </div>
+                            <div>
+                                <label for="trade-capacity-multiplier" class="flex justify-between text-white font-medium">Capacidad de Mercaderes <span id="trade-capacity-value" class="font-mono text-cyan-400">1x</span></label>
+                                <input id="trade-capacity-multiplier" type="range" min="1" max="25" value="1" step="0.5" class="w-full h-2 bg-btn-secondary-bg rounded-lg appearance-none cursor-pointer accent-cyan-400 input-range">
+                            </div>
+                        </fieldset>
+
+                        <fieldset class="border-t border-primary-border pt-6">
+                            <legend class="text-white font-medium text-lg mb-2">Ajustes de Oponentes (IA)</legend>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                                <div>
+                                    <label for="ai-count" class="flex justify-between text-white font-medium">Número de Oponentes <span id="ai-count-value" class="font-mono text-purple-400">3</span></label>
+                                    <input id="ai-count" type="range" min="0" max="30" value="3" step="1" class="w-full h-2 bg-btn-secondary-bg rounded-lg appearance-none cursor-pointer accent-purple-400 input-range">
+                                </div>
+                            </div>
+                            <div id="ai-races-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-6 mt-6">
+                            </div>
+                        </fieldset>
+                        
+                        <fieldset class="border-t border-primary-border pt-6">
+                            <div class="md:col-span-2">
+                                <label for="world-seed" class="text-white font-medium">Semilla del Mundo (Opcional)</label>
+                                <div class="flex mt-1">
+                                    <input id="world-seed" type="text" placeholder="Mapa aleatorio" class="flex-grow bg-btn-secondary-bg border border-primary-border text-white rounded-l-md p-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 font-mono">
+                                    <button id="random-seed-btn" type="button" class="bg-btn-secondary-bg hover:bg-btn-secondary-hover text-white font-bold py-2 px-4 rounded-r-md border border-primary-border">⚄</button>
+                                </div>
+                            </div>
+                        </fieldset>
+
+                        <div class="pt-6 border-t border-primary-border">
+                            <button type="submit" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover text-white font-bold py-3 px-4 rounded-lg text-xl transition-transform duration-200 hover:scale-105 focus:outline-none focus:ring-4 focus:ring-blue-500/50 border border-primary-border">
+                                Iniciar Nueva Conquista
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        `;
+    }
+
+    mount() {
+        this.#form = document.getElementById('config-form');
+        this.#confirmDialog = document.getElementById('confirm-dialog');
+        this.#confirmCancelBtn = document.getElementById('confirm-cancel');
+        this.#confirmOverwriteBtn = document.getElementById('confirm-overwrite');
+        this.#continueButtonContainer = document.getElementById('continue-game-container');
+        this.#mainTitle = document.getElementById('main-title');
+        
+        this.#cacheDOMElements();
+        this._populateRaceDropdowns();
+        this._loadConfigIntoUI();
+        this._checkForExistingGame();
+        this._initializeEventListeners();
+        this._updateAISelectors();
+    }
+
+    unmount() {
+        if (this.#form) {
+            this.#form.removeEventListener('submit', this._handleFormSubmit);
+        }
+        
+        const continueLink = this.#continueButtonContainer ? this.#continueButtonContainer.querySelector('a') : null;
+        if (continueLink) {
+            continueLink.removeEventListener('click', this._handleContinueClick);
+        }
+        
+        Object.values(this.#inputs).forEach(input => {
+            if (input && input.type === 'range') {
+                input.removeEventListener('input', this._updateAllValueDisplays);
+            }
+        });
+
+        if(this.#inputs['ai-count']) {
+            this.#inputs['ai-count'].removeEventListener('input', this._updateAISelectors);
+        }
+
+        if (this.#confirmCancelBtn) {
+            this.#confirmCancelBtn.removeEventListener('click', this._handleConfirmCancelClick);
+        }
+        if (this.#confirmOverwriteBtn) {
+            this.#confirmOverwriteBtn.removeEventListener('click', this._handleConfirmOverwriteClick);
+        }
+        
+        const randomSeedBtn = document.getElementById('random-seed-btn');
+        if (randomSeedBtn) {
+            randomSeedBtn.removeEventListener('click', this._handleRandomSeedClick);
+        }
+    }
+
+    #cacheDOMElements() {
+        this.ids = [
+            'game-speed', 'troop-speed', 'trade-capacity-multiplier', 'ai-count', 
+            'player-race', 'world-seed'
+        ];
+        this.ids.forEach(id => {
+            this.#inputs[id] = document.getElementById(id);
+            this.#valueDisplays[id] = document.getElementById(`${id}-value`);
+        });
+    }
+    
+    _checkForExistingGame() {
+        if (localStorage.getItem(STATE_STORAGE_KEY)) {
+            this.#hasExistingGame = true;
+            this.#continueButtonContainer.classList.remove('hidden');
+            this.#mainTitle.textContent = 'O crea un Mundo Nuevo';
+        }
+    }
+
+    _populateRaceDropdowns() {
+        const playableRaces = Object.keys(gameData.units).filter(r => !['nature', 'natars'].includes(r));
+        const playerRaceSelect = this.#inputs['player-race'];
+        
+        if (!playerRaceSelect) return;
+
+        playerRaceSelect.innerHTML = '';
+        playableRaces.forEach(raceKey => {
+            const option = document.createElement('option');
+            option.value = raceKey;
+            option.textContent = gameData.units[raceKey].name;
+            playerRaceSelect.appendChild(option);
+        });
+    }
+
+    _loadConfigIntoUI() {
+        const settings = this.#config.getSettings();
+        for (const key in settings) {
+            const inputId = key.replace(/([A-Z])/g, '-$1').toLowerCase();
+            if (this.#inputs[inputId]) {
+                this.#inputs[inputId].value = settings[key];
+            }
+        }
+        this._updateAllValueDisplays();
+    }
+
+    _initializeEventListeners() {
+        this._handleFormSubmit = this._handleFormSubmit.bind(this);
+        this._handleContinueClick = this._handleContinueClick.bind(this);
+        this._updateAllValueDisplays = this._updateAllValueDisplays.bind(this);
+        this._updateAISelectors = this._updateAISelectors.bind(this);
+        this._handleConfirmCancelClick = () => this.#confirmDialog.classList.add('hidden');
+        this._handleConfirmOverwriteClick = this._startNewGame.bind(this);
+        this._handleRandomSeedClick = this._handleRandomSeedClick.bind(this);
+
+        this.#form.addEventListener('submit', this._handleFormSubmit);
+        
+        const continueLink = this.#continueButtonContainer.querySelector('a');
+        if (continueLink) {
+            continueLink.addEventListener('click', this._handleContinueClick);
+        }
+        
+        Object.values(this.#inputs).forEach(input => {
+            if (input && input.type === 'range') {
+                input.addEventListener('input', this._updateAllValueDisplays);
+            }
+        });
+
+        if(this.#inputs['ai-count']) {
+            this.#inputs['ai-count'].addEventListener('input', this._updateAISelectors);
+        }
+
+        this.#confirmCancelBtn.addEventListener('click', this._handleConfirmCancelClick);
+        this.#confirmOverwriteBtn.addEventListener('click', this._handleConfirmOverwriteClick);
+
+        const randomSeedBtn = document.getElementById('random-seed-btn');
+        if (randomSeedBtn) {
+            randomSeedBtn.addEventListener('click', this._handleRandomSeedClick);
+        }
+    }
+
+    _handleRandomSeedClick() {
+        if (this.#inputs['world-seed']) {
+            this.#inputs['world-seed'].value = Date.now().toString(36) + Math.random().toString(36).substring(2, 6);
+        }
+    }
+    
+    _updateAISelectors() {
+        const count = parseInt(this.#inputs['ai-count'].value, 10);
+        const container = document.getElementById('ai-races-container');
+        container.innerHTML = '';
+
+        const playableRaces = Object.keys(gameData.units).filter(r => !['nature', 'natars'].includes(r));
+
+        for (let i = 0; i < count; i++) {
+            const div = document.createElement('div');
+            const label = document.createElement('label');
+            label.htmlFor = `ai-race-${i}`;
+            label.className = "text-white font-medium mb-1 block";
+            label.textContent = `Raza Oponente ${i + 1}`;
+            
+            const select = document.createElement('select');
+            select.id = `ai-race-${i}`;
+            select.className = "mt-1 w-full bg-btn-secondary-bg border border-primary-border text-white rounded-md p-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500";
+            
+            playableRaces.forEach(raceKey => {
+                const option = document.createElement('option');
+                option.value = raceKey;
+                option.textContent = gameData.units[raceKey].name;
+                if (raceKey === playableRaces[(i + 1) % playableRaces.length]) {
+                    option.selected = true;
+                }
+                select.appendChild(option);
+            });
+            
+            div.appendChild(label);
+            div.appendChild(select);
+            container.appendChild(div);
+        }
+    }
+
+    _updateAllValueDisplays() {
+        if(this.#valueDisplays['game-speed']) this.#valueDisplays['game-speed'].textContent = `${this.#inputs['game-speed'].value}x`;
+        if(this.#valueDisplays['troop-speed']) this.#valueDisplays['troop-speed'].textContent = `${this.#inputs['troop-speed'].value}x`;
+        if(this.#valueDisplays['trade-capacity-multiplier']) this.#valueDisplays['trade-capacity-value'].textContent = `${this.#inputs['trade-capacity-multiplier'].value}x`;
+        if(this.#valueDisplays['ai-count']) this.#valueDisplays['ai-count'].textContent = this.#inputs['ai-count'].value;
+    }
+
+    _handleFormSubmit(event) {
+        event.preventDefault();
+        if (this.#hasExistingGame) {
+            this.#confirmDialog.classList.remove('hidden');
+        } else {
+            this._startNewGame();
+        }
+    }
+
+    _handleContinueClick(e) {
+        e.preventDefault();
+        gameManager.start();
+    }
+
+    _startNewGame() {
+        this.#confirmDialog.classList.add('hidden');
+        
+        localStorage.removeItem(STATE_STORAGE_KEY);
+        
+        const newSessionId = Date.now().toString(36) + Math.random().toString(36).substring(2);
+        sessionStorage.setItem(FORCE_NEW_GAME_SESSION_KEY, newSessionId);
+
+        const aiRaceSelectors = document.querySelectorAll('#ai-races-container select');
+        const aiRaces = Array.from(aiRaceSelectors).map(select => select.value);
+
+        const newSettings = {
+            gameSpeed: parseFloat(this.#inputs['game-speed'].value),
+            troopSpeed: parseFloat(this.#inputs['troop-speed'].value),
+            tradeCapacityMultiplier: parseFloat(this.#inputs['trade-capacity-multiplier'].value),
+            playerRace: this.#inputs['player-race'].value,
+            aiCount: parseInt(this.#inputs['ai-count'].value, 10),
+            aiRaces: aiRaces,
+            worldSeed: this.#inputs['world-seed'].value || Date.now().toString(36),
+        };
+
+        this.#config.updateAndSave(newSettings);
+        
+        sessionStorage.setItem(ACCESS_PASS_KEY, 'forced_new');
+        gameManager.resetAndStart();
+    }
+}
+
+export default ConfigView;
