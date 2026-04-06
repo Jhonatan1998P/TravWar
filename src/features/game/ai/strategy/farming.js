@@ -267,6 +267,9 @@ export function performOptimizedFarming({
         rewardGrossSum: 0,
         lossValueSum: 0,
         travelCostSum: 0,
+        attackNonPositiveRate: 0,
+        avgRewardNet: 0,
+        lossToGrossRatio: 0,
         noProfitableCycle: false,
         uniqueOasesAttacked: 0,
         attackedOasisIds: [],
@@ -391,6 +394,12 @@ export function performOptimizedFarming({
         const force = forces[opportunity.forceIndex];
         if (visitedTargets.has(opportunity.target.id)) return;
 
+        if (opportunity.target.type === 'oasis' && opportunity.profit <= 0) {
+            telemetry.rejectedNonPositive += 1;
+            logs.push(`[FARMEO ROI] Oasis ${opportunity.target.coords.x}|${opportunity.target.coords.y} bloqueado en emisión: RewardNet ${opportunity.profit.toFixed(0)} <= 0.`);
+            return;
+        }
+
         let hasTroops = true;
         for (const unitId in opportunity.squad) {
             if ((force.combatTroops[unitId] || 0) < opportunity.squad[unitId]) {
@@ -441,6 +450,16 @@ export function performOptimizedFarming({
 
     telemetry.uniqueOasesAttacked = attackedOasisIds.size;
     telemetry.attackedOasisIds = Array.from(attackedOasisIds);
+
+    telemetry.attackNonPositiveRate = telemetry.attacksIssued > 0
+        ? (telemetry.attacksIssuedNonPositive / telemetry.attacksIssued)
+        : 0;
+    telemetry.avgRewardNet = telemetry.attacksIssued > 0
+        ? (telemetry.rewardNetSum / telemetry.attacksIssued)
+        : 0;
+    telemetry.lossToGrossRatio = telemetry.rewardGrossSum > 0
+        ? (telemetry.lossValueSum / telemetry.rewardGrossSum)
+        : 0;
 
     return { commands, logs, telemetry };
 }

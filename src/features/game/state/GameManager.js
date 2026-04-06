@@ -1,5 +1,6 @@
 import GameConfig from './GameConfig.js';
 import appStore from '@shared/state/GlobalStore.js';
+import GameWorker from './GameWorker.js?worker&inline';
 
 const STATE_STORAGE_KEY = 'game_state_v2';
 const CONFIG_STORAGE_KEY = 'game_config';
@@ -55,8 +56,7 @@ class GameManager {
             return;
         }
         
-        const workerUrl = new URL('./GameWorker.js', import.meta.url);
-        this.#worker = new Worker(workerUrl, { type: 'module' });
+        this.#worker = new GameWorker();
         this.#config = new GameConfig();
 
         const forcedSessionId = sessionStorage.getItem(FORCE_NEW_GAME_SESSION_KEY);
@@ -169,11 +169,21 @@ class GameManager {
     }
 
     #handleWorkerError(error) {
+        const diagnosticPayload = {
+            errorType: error?.type || 'worker_error_event',
+            message: error?.message || 'Unknown catastrophic worker error',
+            filename: error?.filename || null,
+            lineno: error?.lineno || null,
+            colno: error?.colno || null,
+            isTrusted: error?.isTrusted ?? null
+        };
+
         console.error("🚨 Error Catastrófico en el Web Worker (posiblemente de carga o sintaxis inicial).");
         console.error("Este error indica que el Worker no pudo iniciarse o se rompió de forma irrecuperable.");
+        console.error("Diagnóstico detallado del evento de error del Worker:", diagnosticPayload);
         console.dir(error);
 
-        appStore.getState().setLastError(error?.message || 'catastrophic_worker_error');
+        appStore.getState().setLastError(diagnosticPayload.message || 'catastrophic_worker_error');
 
         document.dispatchEvent(new CustomEvent('system:error', { 
             detail: "Error crítico en el motor del juego. Revisa la consola para más detalles." 

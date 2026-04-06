@@ -14,6 +14,7 @@ import { planSiegeTrain } from './strategy/siege.js';
 import { dispatchSpies, performGeneralIntelligence, scanAndClassifyTargets } from './strategy/scouting.js';
 
 const { searchRadius, scoutsPerMission, minCatsForTrain, maxWaves } = AI_STRATEGY_CONSTANTS;
+const MAX_PRIORITY_GOAL = 'MAX_PRIORITY_GOAL';
 
 export default class StrategicAI {
     constructor() {}
@@ -101,6 +102,7 @@ export default class StrategicAI {
         );
 
         let isMusteringForWar = false;
+        let hasMaxPriorityGoal = false;
         let oasisFarmingTelemetry = null;
 
         if (nemesisId) {
@@ -130,7 +132,10 @@ export default class StrategicAI {
                             if (bestForce.totalPower > requiredPower) {
                                 if (bestForce.power >= requiredPower) {
                                     const attackCmds = this._planNemesisDestruction(bestForce, nemesisTarget, race, archetype, reasoningLog);
-                                    if (attackCmds.length > 0) commands.push(...attackCmds);
+                                    if (attackCmds.length > 0) {
+                                        hasMaxPriorityGoal = true;
+                                        commands.push(...this._markCommandsAsMaxPriorityGoal(attackCmds, 'nemesis_assault'));
+                                    }
                                 } else {
                                     reasoningLog.push('[ESTRATEGIA] 🛑 PROTOCOLO DE REAGRUPAMIENTO ACTIVADO.');
                                     reasoningLog.push(`[ESTRATEGIA] Fuerza Total (${bestForce.totalPower.toFixed(0)}) suficiente para vencer defensa (${estimatedDefense.toFixed(0)}), pero fuerza actual (${bestForce.power.toFixed(0)}) es baja.`);
@@ -162,11 +167,15 @@ export default class StrategicAI {
             return true;
         });
 
-        if (commands.length === 0 && !isMusteringForWar) {
-            const farmingResults = this._performOptimizedFarming(availableForces, safeKnownTargets, nemesisId, race, personality, troopSpeed);
-            commands.push(...farmingResults.commands);
-            if (farmingResults.logs.length > 0) reasoningLog.push(...farmingResults.logs);
-            oasisFarmingTelemetry = farmingResults.telemetry || null;
+        if (!isMusteringForWar) {
+            if (hasMaxPriorityGoal) {
+                reasoningLog.push('[FARMEO ROI] farm bloqueado por prioridad máxima.');
+            } else {
+                const farmingResults = this._performOptimizedFarming(availableForces, safeKnownTargets, nemesisId, race, personality, troopSpeed);
+                commands.push(...farmingResults.commands);
+                if (farmingResults.logs.length > 0) reasoningLog.push(...farmingResults.logs);
+                oasisFarmingTelemetry = farmingResults.telemetry || null;
+            }
         }
 
         return {
@@ -174,8 +183,25 @@ export default class StrategicAI {
             comandos: commands,
             telemetry: {
                 oasisFarming: oasisFarmingTelemetry,
+                militaryGate: {
+                    hasMaxPriorityGoal,
+                    isMusteringForWar,
+                    farmEvaluationExecuted: !hasMaxPriorityGoal && !isMusteringForWar,
+                    farmBlockedByMaxPriorityGoal: hasMaxPriorityGoal && !isMusteringForWar,
+                },
             },
         };
+    }
+
+    _markCommandsAsMaxPriorityGoal(commands, reason = 'critical_military_target') {
+        return (commands || []).map(command => ({
+            ...command,
+            meta: {
+                ...(command.meta || {}),
+                priority: MAX_PRIORITY_GOAL,
+                reason,
+            },
+        }));
     }
 
     _calculateEstimatedDefense(target) {

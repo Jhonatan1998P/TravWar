@@ -210,12 +210,12 @@ Medir comportamiento y ajustar balance final sin romper reglas duras.
 
 ## Checklist de avance
 
-- [ ] Fase 1: Gate de prioridad máxima activo.
-- [ ] Fase 2: Evaluación económica por oasis implementada.
-- [ ] Fase 3: Selección estricta (`RewardNet > 0`) y orden correcto.
-- [ ] Fase 4: Presión/regeneración anti sobre-farm activa.
-- [ ] Fase 5: UI sin ROI/recomendaciones para jugador.
-- [ ] Fase 6: Telemetría/KPIs y validación final estable.
+- [x] Fase 1: Gate de prioridad máxima activo.
+- [x] Fase 2: Evaluación económica por oasis implementada.
+- [x] Fase 3: Selección estricta (`RewardNet > 0`) y orden correcto.
+- [x] Fase 4: Presión/regeneración anti sobre-farm activa.
+- [x] Fase 5: UI sin ROI/recomendaciones para jugador.
+- [x] Fase 6: Telemetría/KPIs y validación final estable.
 
 Estado global:
 

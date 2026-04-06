@@ -4,20 +4,19 @@ import { AIController, AIPersonality } from '../ai/index.js';
 import { CombatEngine } from '../engine/CombatEngine.js';
 import { VillageProcessor } from '../engine/VillageProcessor.js';
 import { GameStateFactory } from '../engine/GameStateFactory.js';
+import { registerWorkerDiagnostics } from './worker/diagnostics.js';
+import {
+    processOasisRegeneration as processOasisRegenerationStep,
+    registerOasisAttack as registerOasisAttackStep,
+} from './worker/oasis.js';
+import {
+    handleSendMerchantsCommand as handleSendMerchantsCommandStep,
+    handleSendMovementCommand as handleSendMovementCommandStep,
+} from './worker/commands.js';
+import { processMovements as processMovementsStep } from './worker/movements.js';
+import { simulateOfflineProgress as simulateOfflineProgressStep } from './worker/offline.js';
 
-self.onerror = function(message, source, lineno, colno, error) {
-    self.postMessage({
-        type: 'worker:error',
-        payload: {
-            message: error.message,
-            stack: error.stack,
-            source: source,
-            lineno: lineno,
-            colno: colno
-        }
-    });
-    return true; 
-};
+registerWorkerDiagnostics(self);
 
 const LOG_MILITARY_DECISIONS = true;
 const LOG_ECONOMIC_DECISIONS = false;
@@ -72,72 +71,6 @@ function _log(level, action, message, details = null) {
     if (details) {
         console.log(details);
     }
-}
-
-function _getWeightedRandomBeast(spawnTable, randomFunc = Math.random) {
-    if (!spawnTable || spawnTable.length === 0) return null;
-
-    const weights = spawnTable.map((_, index) => spawnTable.length - index);
-    const totalWeight = weights.reduce((sum, w) => sum + w, 0);
-    let random = randomFunc() * totalWeight;
-
-    for (let i = 0; i < spawnTable.length; i++) {
-        random -= weights[i];
-        if (random <= 0) {
-            return spawnTable[i].unitId;
-        }
-    }
-    return spawnTable[spawnTable.length - 1].unitId;
-}
-
-function _clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
-}
-
-function _getOasisPressureConfig() {
-    const oasisConfig = gameData.config.oasis || {};
-    return {
-        windowMinutes: oasisConfig.oasisPressureWindowMinutes || 60,
-        attackRef: oasisConfig.oasisPressureAttackRef || 6,
-        alpha: oasisConfig.oasisPressureAlpha || 0.6,
-    };
-}
-
-function _pruneOasisRecentAttacks(oasisState, currentTime) {
-    if (!oasisState.pressure) {
-        oasisState.pressure = { recentAttacks: [], current: 0 };
-    }
-
-    if (!Array.isArray(oasisState.pressure.recentAttacks)) {
-        oasisState.pressure.recentAttacks = [];
-    }
-
-    const { windowMinutes } = _getOasisPressureConfig();
-    const windowMs = windowMinutes * 60 * 1000;
-    oasisState.pressure.recentAttacks = oasisState.pressure.recentAttacks.filter(ts => (currentTime - ts) <= windowMs);
-}
-
-function _calculateOasisPressure(oasisState, currentTime) {
-    _pruneOasisRecentAttacks(oasisState, currentTime);
-    const { attackRef } = _getOasisPressureConfig();
-    const attacksRecent = oasisState.pressure.recentAttacks.length;
-    const pressure = _clamp(attacksRecent / Math.max(attackRef, 1), 0, 1);
-    oasisState.pressure.current = pressure;
-    return pressure;
-}
-
-function _registerOasisAttack(tile, currentTime) {
-    if (!tile || tile.type !== 'oasis' || !tile.state) return;
-    if (!tile.state.pressure) {
-        tile.state.pressure = { recentAttacks: [], current: 0 };
-    }
-    if (!Array.isArray(tile.state.pressure.recentAttacks)) {
-        tile.state.pressure.recentAttacks = [];
-    }
-
-    _pruneOasisRecentAttacks(tile.state, currentTime);
-    tile.state.pressure.recentAttacks.push(currentTime);
-    _calculateOasisPressure(tile.state, currentTime);
 }
 
 function getActiveVillage() {
@@ -255,121 +188,29 @@ function updateAIProfiles(report) {
 }
 
 function processMovements(currentTime) {
-    while (gameState.movements.length > 0 && currentTime >= gameState.movements[0].arrivalTime) {
-        const movement = gameState.movements.shift();
-        
-        switch(movement.type) {
-            case 'attack':
-            case 'raid':
-            case 'espionage': {
-                const targetTile = gameState.spatialIndex.get(`${movement.targetCoords.x}|${movement.targetCoords.y}`);
-                const combatEngine = new CombatEngine(gameState);
-                const results = combatEngine.processMovement(movement);
-
-                results.reportsToCreate.forEach(report => {
-                    gameState.reports.unshift(report);
-                    if (gameState.reports.filter(r => r.ownerId === report.ownerId).length > MAX_REPORTS) {
-                        const reportIds = gameState.reports.map(r => r.id);
-                        const lastReportIndex = reportIds.lastIndexOf(r => r.ownerId === report.ownerId);
-                        if(lastReportIndex !== -1) gameState.reports.splice(lastReportIndex, 1);
-                    }
-                    
-                    if (report.ownerId && gameState.unreadCounts[report.ownerId] !== undefined) {
-                        gameState.unreadCounts[report.ownerId]++;
-                    }
-                    
-                    if (report.ownerId === 'player') {
-                        self.postMessage({ type: 'notify:battle_report', payload: { report, state: gameState } });
-                    }
-                    
-                    updateAIProfiles(report);
-                });
-
-                results.movementsToCreate.forEach(newMovement => {
-                    gameState.movements.push(newMovement);
-                });
-                
-                results.aiNotifications.forEach(notification => {
-                    const aiController = aiControllers.find(c => c.getOwnerId() === notification.targetAiId);
-                    if (aiController) {
-                        aiController.handleReactiveEvent(notification.type, notification.payload, gameState);
-                    }
-                });
-
-                results.stateChanges.villageUpdates.forEach(update => {
-                    const village = gameState.villages.find(v => v.id === update.villageId);
-                    if (!village) return;
-
-                    if (update.changes.troopLosses) {
-                        update.changes.troopLosses.forEach(result => {
-                            for (const unitId in result.losses) {
-                                if (result.id === village.id) {
-                                    if (village.unitsInVillage[unitId]) village.unitsInVillage[unitId] -= result.losses[unitId];
-                                } else {
-                                    const reinforcement = village.reinforcements.find(r => r.fromVillageId === result.id);
-                                    if (reinforcement && reinforcement.troops[unitId]) reinforcement.troops[unitId] -= result.losses[unitId];
-                                }
-                            }
-                        });
-                        village.reinforcements = village.reinforcements.filter(r => Object.values(r.troops).some(count => count > 0));
-                    }
-                    if (update.changes.plunder) {
-                        for(const res in update.changes.plunder) {
-                            village.resources[res].current -= update.changes.plunder[res];
-                        }
-                    }
-                    if (update.changes.buildingLevel) {
-                        const building = village.buildings.find(b => b.id === update.changes.buildingLevel.buildingId);
-                        if (building) {
-                            building.level = update.changes.buildingLevel.newLevel;
-                            if (update.changes.buildingLevel.newType) {
-                                building.type = update.changes.buildingLevel.newType;
-                            }
-                        }
-                    }
-                });
-
-                results.stateChanges.tileUpdates.forEach(update => {
-                    const tile = gameState.mapData.find(t => t.x === update.coords.x && t.y === update.coords.y);
-                    if (!tile || !tile.state) return;
-
-                    if (update.changes.beastLosses) {
-                        for (const unitId in update.changes.beastLosses) {
-                            tile.state.beasts[unitId] -= update.changes.beastLosses[unitId];
-                            if (tile.state.beasts[unitId] < 0) tile.state.beasts[unitId] = 0;
-                        }
-                    }
-                    if (update.changes.enableRegeneration) {
-                        tile.state.isClearedOnce = true;
-                    }
-                });
-
-                if ((movement.type === 'attack' || movement.type === 'raid') && targetTile?.type === 'oasis') {
-                    _registerOasisAttack(targetTile, movement.arrivalTime);
-                }
-
-                if (results.movementsToCreate.length > 0) {
-                    gameState.movements.sort((a, b) => a.arrivalTime - b.arrivalTime);
-                }
-                break;
-            }
-            case 'reinforcement':
-                handleReinforcementArrival(movement);
-                break;
-            case 'settle':
-                handleSettleArrival(movement);
-                break;
-            case 'return':
-                handleReturnArrival(movement);
-                break;
-            case 'trade':
-                handleTradeArrival(movement);
-                break;
-            case 'trade_return':
-                handleTradeReturnArrival(movement);
-                break;
-        }
-    }
+    processMovementsStep({
+        gameState,
+        currentTime,
+        aiControllers,
+        maxReports: MAX_REPORTS,
+        postMessage: message => self.postMessage(message),
+        createCombatEngine: () => new CombatEngine(gameState),
+        updateAIProfiles,
+        registerOasisAttack: ({ tile, currentTime: attackTime }) => {
+            registerOasisAttackStep({
+                tile,
+                currentTime: attackTime,
+                gameData,
+            });
+        },
+        handlers: {
+            reinforcement: handleReinforcementArrival,
+            settle: handleSettleArrival,
+            return: handleReturnArrival,
+            trade: handleTradeArrival,
+            tradeReturn: handleTradeReturnArrival,
+        },
+    });
 }
 
 function handleSettleArrival(movement) {
@@ -522,239 +363,42 @@ function handleTradeArrival(movement) {
 function handleTradeReturnArrival(movement) {}
 
 function processOasisRegeneration(currentTime) {
-    const regenCycleMs = gameData.config.oasis.beastRegenCycleMinutes * 60 * 1000;
-    if (currentTime - gameState.lastOasisRegenTime < regenCycleMs) {
-        return;
-    }
-
-    const cyclesToProcess = Math.floor((currentTime - gameState.lastOasisRegenTime) / regenCycleMs);
-    if (cyclesToProcess <= 0) return;
-
-    const amountPerCycle = gameData.config.oasis.beastRegenAmount;
-    const { alpha } = _getOasisPressureConfig();
-
-    for (let i = 0; i < cyclesToProcess; i++) {
-        gameState.mapData.forEach(tile => {
-            if (tile.type !== 'oasis' || !tile.state?.beasts || !tile.state.isClearedOnce) return;
-
-            const pressure = _calculateOasisPressure(tile.state, currentTime);
-            const regenEff = amountPerCycle * (1 - (alpha * pressure));
-            if (regenEff <= 0) return;
-
-            let spawnsToProcess = Math.floor(regenEff);
-            const fractionalPart = regenEff - spawnsToProcess;
-            if (Math.random() < fractionalPart) spawnsToProcess += 1;
-            if (spawnsToProcess <= 0) return;
-
-            const oasisTypeData = gameData.oasisTypes[tile.oasisType];
-            if (!oasisTypeData) return;
-
-            for (let spawnIndex = 0; spawnIndex < spawnsToProcess; spawnIndex++) {
-                const beastToSpawn = _getWeightedRandomBeast(oasisTypeData.beastSpawnTable);
-                if (!beastToSpawn) continue;
-
-                const spawnInfo = oasisTypeData.beastSpawnTable.find(s => s.unitId === beastToSpawn);
-                if (!spawnInfo) continue;
-
-                const currentAmount = tile.state.beasts[beastToSpawn] || 0;
-                if (currentAmount < spawnInfo.max) {
-                    tile.state.beasts[beastToSpawn] = Math.min(spawnInfo.max, currentAmount + 1);
-                }
-            }
-        });
-    }
-
-    gameState.lastOasisRegenTime += cyclesToProcess * regenCycleMs;
+    processOasisRegenerationStep({
+        gameState,
+        currentTime,
+        gameData,
+    });
 }
 
 function simulateOfflineProgress(startTime, endTime) {
-    let currentTime = startTime;
-    
-    const allVillageJobs = gameState.villages.flatMap(v => [
-        ...v.constructionQueue.map(j => ({ ...j, eventType: 'construction' })), 
-        ...v.recruitmentQueue.map(j => ({ ...j, eventType: 'recruitment' })),
-        ...v.research.queue.map(j => ({ ...j, eventType: 'research' })),
-        ...v.smithy.queue.map(j => ({ ...j, eventType: 'smithy' }))
-    ]);
-    
-    const allMovementsAsJobs = gameState.movements.map(m => ({ ...m, endTime: m.arrivalTime, eventType: 'movement' }));
-    
-    const oasisRegenJobs = [];
-    const regenCycleMs = gameData.config.oasis.beastRegenCycleMinutes * 60 * 1000;
-    let nextRegenTime = gameState.lastOasisRegenTime + regenCycleMs;
-    while(nextRegenTime < endTime) {
-        if (nextRegenTime > startTime) {
-            oasisRegenJobs.push({ endTime: nextRegenTime, eventType: 'oasis_regen' });
-        }
-        nextRegenTime += regenCycleMs;
-    }
-
-    const allJobs = [...allVillageJobs, ...allMovementsAsJobs, ...oasisRegenJobs].sort((a, b) => (a.endTime || a.arrivalTime) - (b.endTime || b.arrivalTime));
-
-    for (const job of allJobs) {
-        const jobEndTime = job.endTime || job.arrivalTime;
-        if (jobEndTime > endTime) break;
-
-        const elapsedSeconds = (jobEndTime - currentTime) / 1000;
-        if (elapsedSeconds > 0) {
-            villageProcessors.forEach(p => p.update(jobEndTime, currentTime));
-        }
-
-        if (job.eventType === 'oasis_regen') {
-            processOasisRegeneration(jobEndTime);
-        } else {
-            processMovements(jobEndTime);
-        }
-        
-        currentTime = jobEndTime;
-    }
-
-    const remainingElapsedSeconds = (endTime - currentTime) / 1000;
-    if (remainingElapsedSeconds > 0) {
-        villageProcessors.forEach(p => p.update(endTime, currentTime));
-        processOasisRegeneration(endTime);
-    }
+    simulateOfflineProgressStep({
+        gameState,
+        gameData,
+        villageProcessors,
+        processMovements,
+        processOasisRegeneration,
+        startTime,
+        endTime,
+    });
 }
 
 function handleSendMovementCommand(payload) {
-    const { originVillageId, targetCoords, troops, missionType, catapultTargets } = payload;
-    const village = gameState.villages.find(v => v.id === originVillageId);
-    if (!village) return { success: false, reason: 'VILLAGE_NOT_FOUND' };
-
-    if (missionType === 'espionage') {
-        const raceTroops = gameData.units[village.race].troops;
-        for (const unitId in troops) {
-            const unitData = raceTroops.find(t => t.id === unitId);
-            if (!unitData || unitData.type !== 'scout') {
-                return { success: false, reason: 'INVALID_TROOPS_FOR_ESPIONAGE' };
-            }
-        }
-    }
-
-    for (const unitId in troops) {
-        const count = troops[unitId];
-        if (count <= 0 || (village.unitsInVillage[unitId] || 0) < count) {
-            return { success: false, reason: 'INSUFFICIENT_TROOPS', details: { needed: troops, available: village.unitsInVillage } };
-        }
-    }
-
-    if (missionType === 'settle') {
-        const settlerUnitId = Object.keys(troops).find(id => gameData.units[village.race].troops.find(t => t.id === id)?.type === 'settler');
-        if (!settlerUnitId || troops[settlerUnitId] < 3) {
-            return { success: false, reason: 'INSUFFICIENT_SETTLERS', details: { needed: 3, available: troops[settlerUnitId] || 0 } };
-        }
-        const settlementsFoundedByThisVillage = village.settlementsFounded || 0;
-        let requiredPop = 0;
-        if (settlementsFoundedByThisVillage === 0) requiredPop = 150;
-        else if (settlementsFoundedByThisVillage === 1) requiredPop = 300;
-        else if (settlementsFoundedByThisVillage === 2) requiredPop = 600;
-        else return { success: false, reason: 'MAX_SETTLEMENTS_REACHED' };
-        
-        if (village.population.current < requiredPop) {
-            return { success: false, reason: 'INSUFFICIENT_POPULATION', details: { needed: requiredPop, available: village.population.current } };
-        }
-        const settlementCost = gameData.config.settlement.cost;
-        // Verificación de costes para colonizar (usa budget económico si es IA)
-        const isAI = village.ownerId.startsWith('ai_') && village.budget;
-        const availableRes = isAI ? village.budget.econ : village.resources;
-        const currentRes = isAI ? availableRes : { wood: availableRes.wood.current, stone: availableRes.stone.current, iron: availableRes.iron.current, food: availableRes.food.current };
-
-        for (const res in settlementCost) {
-            if (currentRes[res] < settlementCost[res]) {
-                return { success: false, reason: 'INSUFFICIENT_RESOURCES', details: { needed: settlementCost, available: currentRes } };
-            }
-        }
-        for (const res in settlementCost) {
-            if (isAI) {
-                village.budget.econ[res] -= settlementCost[res];
-                village.resources[res].current = village.budget.econ[res] + village.budget.mil[res];
-            } else {
-                village.resources[res].current -= settlementCost[res];
-            }
-        }
-    }
-
-    let slowestSpeed = Infinity;
-    for (const unitId in troops) {
-        const unitData = gameData.units[village.race].troops.find(u => u.id === unitId);
-        if (unitData.stats.speed < slowestSpeed) slowestSpeed = unitData.stats.speed;
-    }
-    if (slowestSpeed === Infinity) return { success: false, reason: 'NO_VALID_UNITS' };
-
-    const distance = Math.hypot(targetCoords.x - village.coords.x, targetCoords.y - village.coords.y);
-    const travelTimeMs = ((distance / (slowestSpeed * gameConfig.troopSpeed)) * 3600) * 1000;
-    const startTime = Date.now();
-
-    for (const unitId in troops) {
-        village.unitsInVillage[unitId] -= troops[unitId];
-    }
-
-    const newMovement = {
-        id: `${startTime}-mov-${village.id}`, type: missionType, ownerId: village.ownerId, originVillageId: village.id,
-        targetCoords, payload: { troops, catapultTargets: catapultTargets || [] }, startTime, arrivalTime: startTime + travelTimeMs,
-    };
-    gameState.movements.push(newMovement);
-    gameState.movements.sort((a, b) => a.arrivalTime - b.arrivalTime);
-
-    const targetTile = gameState.mapData.find(t => t.x === targetCoords.x && t.y === targetCoords.y);
-    if (targetTile && targetTile.type === 'village' && targetTile.ownerId.startsWith('ai_') && targetTile.ownerId !== village.ownerId) {
-        const targetAIController = aiControllers.find(c => c.getOwnerId() === targetTile.ownerId);
-        if (targetAIController) {
-            const hostileTypes = ['attack', 'raid', 'espionage'];
-            if (hostileTypes.includes(missionType)) {
-                targetAIController.handleReactiveEvent('movement_dispatched', newMovement, gameState);
-            }
-        }
-    }
-
-    return { success: true };
+    return handleSendMovementCommandStep({
+        payload,
+        gameState,
+        gameConfig,
+        gameData,
+        aiControllers,
+    });
 }
 
 function handleSendMerchantsCommand(payload) {
-    const { originVillageId, targetCoords, resources } = payload;
-    const village = gameState.villages.find(v => v.id === originVillageId);
-    if (!village) return { success: false, reason: 'VILLAGE_NOT_FOUND' };
-
-    const marketplace = village.buildings.find(b => b.type === 'marketplace');
-    if (!marketplace || marketplace.level === 0) return { success: false, reason: 'MARKETPLACE_REQUIRED' };
-
-    const merchantData = gameData.units[village.race].troops.find(t => t.type === 'merchant');
-    if (!merchantData) return { success: false, reason: 'NO_MERCHANT_UNIT_FOR_RACE' };
-
-    const merchantCount = gameData.buildings.marketplace.levels[marketplace.level - 1].attribute.merchantCapacity;
-    const totalCapacity = merchantCount * merchantData.stats.capacity;
-    const totalSent = Object.values(resources).reduce((sum, val) => sum + val, 0);
-
-    if (totalSent > totalCapacity) return { success: false, reason: 'MERCHANT_CAPACITY_EXCEEDED', details: { sent: totalSent, capacity: totalCapacity } };
-    
-    // Verificación de recursos para comercio (usa budget económico si es IA)
-    const isAI = village.ownerId.startsWith('ai_') && village.budget;
-    const availableRes = isAI ? village.budget.econ : village.resources;
-    const currentRes = isAI ? availableRes : { wood: availableRes.wood.current, stone: availableRes.stone.current, iron: availableRes.iron.current, food: availableRes.food.current };
-
-    for (const res in resources) {
-        if (currentRes[res] < resources[res]) return { success: false, reason: 'INSUFFICIENT_RESOURCES', details: { needed: resources, available: currentRes } };
-    }
-    for (const res in resources) {
-        if (isAI) {
-            village.budget.econ[res] -= resources[res];
-            village.resources[res].current = village.budget.econ[res] + village.budget.mil[res];
-        } else {
-            village.resources[res].current -= resources[res];
-        }
-    }
-    
-    const distance = Math.hypot(targetCoords.x - village.coords.x, targetCoords.y - village.coords.y);
-    const travelTimeMs = ((distance / (merchantData.stats.speed * gameConfig.troopSpeed)) * 3600) * 1000;
-    const startTime = Date.now();
-
-    gameState.movements.push({
-        id: `${startTime}-mov-trade-${village.id}`, type: 'trade', ownerId: village.ownerId, originVillageId: village.id, targetCoords,
-        payload: { resources, merchants: Math.ceil(totalSent / merchantData.stats.capacity) },
-        startTime, arrivalTime: startTime + travelTimeMs
+    return handleSendMerchantsCommandStep({
+        payload,
+        gameState,
+        gameConfig,
+        gameData,
     });
-    gameState.movements.sort((a, b) => a.arrivalTime - b.arrivalTime);
-    return { success: true };
 }
 
 function handleAICommand(commandType, payload) {

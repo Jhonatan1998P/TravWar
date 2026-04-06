@@ -9,6 +9,34 @@ import { executeCommands } from './controller/commands.js';
 import { handleAttackReact, handleEspionageReact, processDodgeTasks, processReinforcementRecalls } from './controller/reactive.js';
 import { runMilitaryDecision } from './controller/military.js';
 
+function createDefaultOasisTelemetry() {
+    return {
+        militaryCycles: 0,
+        cyclesFarmEvaluated: 0,
+        cyclesFarmBlockedByMaxPriority: 0,
+        cyclesMusteringForWar: 0,
+        farmEvaluationRate: 0,
+        farmBlockedRate: 0,
+        decisions: 0,
+        evaluatedOases: 0,
+        profitableOases: 0,
+        rejectedNoSquad: 0,
+        rejectedNonPositive: 0,
+        attacksIssued: 0,
+        attacksIssuedNonPositive: 0,
+        rewardNetSum: 0,
+        rewardGrossSum: 0,
+        lossValueSum: 0,
+        travelCostSum: 0,
+        skippedCyclesNoProfitable: 0,
+        uniqueOasesAttacked: 0,
+        oasisAttackHistogram: {},
+        attackNonPositiveRate: 0,
+        avgRewardNet: 0,
+        avgLossToGross: 0,
+    };
+}
+
 class AIController {
     _ownerId;
     _personality;
@@ -29,25 +57,7 @@ class AIController {
     _strategicAI;
     _reinforcementTasks = [];
     _dodgeTasks = new Map();
-    _oasisTelemetry = {
-        decisions: 0,
-        evaluatedOases: 0,
-        profitableOases: 0,
-        rejectedNoSquad: 0,
-        rejectedNonPositive: 0,
-        attacksIssued: 0,
-        attacksIssuedNonPositive: 0,
-        rewardNetSum: 0,
-        rewardGrossSum: 0,
-        lossValueSum: 0,
-        travelCostSum: 0,
-        skippedCyclesNoProfitable: 0,
-        uniqueOasesAttacked: 0,
-        oasisAttackHistogram: {},
-        attackNonPositiveRate: 0,
-        avgRewardNet: 0,
-        avgLossToGross: 0,
-    };
+    _oasisTelemetry = createDefaultOasisTelemetry();
 
     constructor(ownerId, personality, race, archetype, sendCommandCallback, gameConfig) {
         this._ownerId = ownerId;
@@ -86,8 +96,9 @@ class AIController {
             `Active military goals: ${totalMilGoals}`,
             `Pending dodge tasks: ${dodgeTaskCount}`,
             `Pending reinforcement recalls: ${reinforcementTaskCount}`,
+            `Oasis gate: cycles=${oasisTelemetry.militaryCycles || 0}, farmEval=${oasisTelemetry.cyclesFarmEvaluated || 0}, blockedMax=${oasisTelemetry.cyclesFarmBlockedByMaxPriority || 0}, mustering=${oasisTelemetry.cyclesMusteringForWar || 0}, blockRate=${((oasisTelemetry.farmBlockedRate || 0) * 100).toFixed(1)}%`,
             `Oasis telemetry: decisions=${oasisTelemetry.decisions}, eval=${oasisTelemetry.evaluatedOases}, atk=${oasisTelemetry.attacksIssued}, atk<=0=${oasisTelemetry.attacksIssuedNonPositive}`,
-            `Oasis KPIs: avgNet=${Math.round(oasisTelemetry.avgRewardNet || 0)}, loss/gross=${(oasisTelemetry.avgLossToGross || 0).toFixed(2)}, unique=${oasisTelemetry.uniqueOasesAttacked}, skipNoProfit=${oasisTelemetry.skippedCyclesNoProfitable}`,
+            `Oasis KPIs: npRate=${((oasisTelemetry.attackNonPositiveRate || 0) * 100).toFixed(1)}%, avgNet=${Math.round(oasisTelemetry.avgRewardNet || 0)}, loss/gross=${(oasisTelemetry.avgLossToGross || 0).toFixed(2)}, unique=${oasisTelemetry.uniqueOasesAttacked}, skipNoProfit=${oasisTelemetry.skippedCyclesNoProfitable}`,
             `Last economic decision: ${new Date(this._lastEconomicDecisionTime).toISOString()}`,
             `Last military decision: ${new Date(this._lastMilitaryDecisionTime).toISOString()}`,
             `Military interval: ${this._militaryDecisionInterval}ms`,
@@ -137,7 +148,7 @@ class AIController {
         this._lastMilitaryDecisionTime = aiPlayerState.lastMilitaryDecisionTime || now;
         this._reinforcementTasks = aiPlayerState.reinforcementTasks || [];
         this._dodgeTasks = new Map(aiPlayerState.dodgeTasks || []);
-        this._oasisTelemetry = aiPlayerState.oasisTelemetry || this._oasisTelemetry;
+        this._oasisTelemetry = this._ensureOasisTelemetryDefaults(aiPlayerState.oasisTelemetry);
     }
     
     getState() {
@@ -154,6 +165,8 @@ class AIController {
 
     _updateOasisTelemetry(cycleTelemetry) {
         if (!cycleTelemetry) return;
+
+        this._oasisTelemetry = this._ensureOasisTelemetryDefaults(this._oasisTelemetry);
 
         this._oasisTelemetry.decisions += 1;
         this._oasisTelemetry.evaluatedOases += cycleTelemetry.evaluatedOases || 0;
@@ -186,6 +199,36 @@ class AIController {
         this._oasisTelemetry.avgLossToGross = this._oasisTelemetry.rewardGrossSum > 0
             ? this._oasisTelemetry.lossValueSum / this._oasisTelemetry.rewardGrossSum
             : 0;
+    }
+
+    _updateMilitaryGateTelemetry(gateTelemetry, hasOasisFarmingTelemetry = false) {
+        this._oasisTelemetry = this._ensureOasisTelemetryDefaults(this._oasisTelemetry);
+        this._oasisTelemetry.militaryCycles += 1;
+
+        if (gateTelemetry?.farmEvaluationExecuted || (!gateTelemetry && hasOasisFarmingTelemetry)) {
+            this._oasisTelemetry.cyclesFarmEvaluated += 1;
+        }
+        if (gateTelemetry?.farmBlockedByMaxPriorityGoal) {
+            this._oasisTelemetry.cyclesFarmBlockedByMaxPriority += 1;
+        }
+        if (gateTelemetry?.isMusteringForWar) {
+            this._oasisTelemetry.cyclesMusteringForWar += 1;
+        }
+
+        const totalCycles = Math.max(this._oasisTelemetry.militaryCycles, 1);
+        this._oasisTelemetry.farmEvaluationRate = this._oasisTelemetry.cyclesFarmEvaluated / totalCycles;
+        this._oasisTelemetry.farmBlockedRate = this._oasisTelemetry.cyclesFarmBlockedByMaxPriority / totalCycles;
+    }
+
+    _ensureOasisTelemetryDefaults(currentTelemetry = null) {
+        return {
+            ...createDefaultOasisTelemetry(),
+            ...(currentTelemetry || {}),
+            oasisAttackHistogram: {
+                ...createDefaultOasisTelemetry().oasisAttackHistogram,
+                ...(currentTelemetry?.oasisAttackHistogram || {}),
+            },
+        };
     }
 
     handleReactiveEvent(eventType, data, gameState) {
@@ -302,6 +345,10 @@ class AIController {
                 log: this.log.bind(this),
                 reputationManager: this._reputationManager,
             });
+
+            if (telemetry) {
+                this._updateMilitaryGateTelemetry(telemetry.militaryGate, Boolean(telemetry.oasisFarming));
+            }
 
             if (telemetry?.oasisFarming) {
                 this._updateOasisTelemetry(telemetry.oasisFarming);

@@ -1,6 +1,29 @@
 import { countCombatTroopsInVillages } from '../utils/AITroopUtils.js';
 import { MemoryManager } from '../index.js';
 
+const MAX_PRIORITY_GOAL = 'MAX_PRIORITY_GOAL';
+
+function getTargetTile(gameState, targetCoords) {
+    if (!targetCoords) return null;
+
+    const tileKey = `${targetCoords.x}|${targetCoords.y}`;
+    return gameState.spatialIndex.get(tileKey)
+        || gameState.mapData.find(tile => tile.x === targetCoords.x && tile.y === targetCoords.y)
+        || null;
+}
+
+function isMaxPriorityGoalCommand(command) {
+    return command?.meta?.priority === MAX_PRIORITY_GOAL;
+}
+
+function isOasisRaidCommand(command, gameState) {
+    if (command?.comando !== 'ATTACK') return false;
+    if (command?.parametros?.mision !== 'raid') return false;
+
+    const tile = getTargetTile(gameState, command.parametros.targetCoords);
+    return tile?.type === 'oasis';
+}
+
 export function runMilitaryDecision({
     gameState,
     ownerId,
@@ -71,28 +94,79 @@ export function runMilitaryDecision({
         log('goal', null, 'Razonamiento Estratégico', 'The General has issued the following analysis:', response.razonamiento, 'military');
     }
 
-    if (response.comandos && response.comandos.length > 0) {
-        log('success', null, 'Órdenes Recibidas', `Executing ${response.comandos.length} military commands.`, response.comandos, 'military');
-        executeCommands(response.comandos, gameState);
+    const rawCommands = response.comandos || [];
+    const hasMaxPriorityGoal = rawCommands.some(isMaxPriorityGoalCommand);
+    const farmBlockedByMaxPriority = response.telemetry?.militaryGate?.farmBlockedByMaxPriorityGoal || hasMaxPriorityGoal;
+
+    let commandsToExecute = rawCommands;
+    if (hasMaxPriorityGoal) {
+        const filteredOutFarmCommands = rawCommands.filter(command => isOasisRaidCommand(command, gameState));
+        if (filteredOutFarmCommands.length > 0) {
+            commandsToExecute = rawCommands.filter(command => !isOasisRaidCommand(command, gameState));
+        }
+
+        if (farmBlockedByMaxPriority) {
+            log(
+                'info',
+                null,
+                'Gate Prioridad Máxima',
+                'farm bloqueado por prioridad máxima.',
+                {
+                    maxPriorityCommands: rawCommands.filter(isMaxPriorityGoalCommand).length,
+                    oasisFarmCommandsFiltered: filteredOutFarmCommands.length,
+                },
+                'military',
+            );
+        }
+    }
+
+    if (commandsToExecute.length > 0) {
+        log('success', null, 'Órdenes Recibidas', `Executing ${commandsToExecute.length} military commands.`, commandsToExecute, 'military');
+        executeCommands(commandsToExecute, gameState);
     } else {
         log('info', null, 'Sin Comandos', 'The AI General issued no commands this cycle.', null, 'military');
     }
 
+    const gateTelemetry = response.telemetry?.militaryGate;
+    if (gateTelemetry) {
+        log(
+            'info',
+            null,
+            'Gate Militar',
+            `maxPriority=${gateTelemetry.hasMaxPriorityGoal ? 'yes' : 'no'} ` +
+            `blocked=${gateTelemetry.farmBlockedByMaxPriorityGoal ? 'yes' : 'no'} ` +
+            `mustering=${gateTelemetry.isMusteringForWar ? 'yes' : 'no'} ` +
+            `farmEval=${gateTelemetry.farmEvaluationExecuted ? 'yes' : 'no'}`,
+            null,
+            'military',
+        );
+    }
+
     const oasisTelemetry = response.telemetry?.oasisFarming;
     if (oasisTelemetry) {
-        const avgRewardNet = oasisTelemetry.attacksIssued > 0
-            ? (oasisTelemetry.rewardNetSum / oasisTelemetry.attacksIssued)
-            : 0;
-        const lossToGross = oasisTelemetry.rewardGrossSum > 0
-            ? (oasisTelemetry.lossValueSum / oasisTelemetry.rewardGrossSum)
-            : 0;
+        const avgRewardNet = Number.isFinite(oasisTelemetry.avgRewardNet)
+            ? oasisTelemetry.avgRewardNet
+            : (oasisTelemetry.attacksIssued > 0
+                ? (oasisTelemetry.rewardNetSum / oasisTelemetry.attacksIssued)
+                : 0);
+        const lossToGross = Number.isFinite(oasisTelemetry.lossToGrossRatio)
+            ? oasisTelemetry.lossToGrossRatio
+            : (oasisTelemetry.rewardGrossSum > 0
+                ? (oasisTelemetry.lossValueSum / oasisTelemetry.rewardGrossSum)
+                : 0);
+        const nonPositiveRate = Number.isFinite(oasisTelemetry.attackNonPositiveRate)
+            ? oasisTelemetry.attackNonPositiveRate
+            : (oasisTelemetry.attacksIssued > 0
+                ? (oasisTelemetry.attacksIssuedNonPositive / oasisTelemetry.attacksIssued)
+                : 0);
 
         log(
             'info',
             null,
             'Telemetría Oasis',
             `eval=${oasisTelemetry.evaluatedOases} pos=${oasisTelemetry.profitableOases} atk=${oasisTelemetry.attacksIssued} ` +
-            `atk<=0=${oasisTelemetry.attacksIssuedNonPositive} avgNet=${avgRewardNet.toFixed(0)} loss/gross=${lossToGross.toFixed(2)}`,
+            `atk<=0=${oasisTelemetry.attacksIssuedNonPositive} npRate=${(nonPositiveRate * 100).toFixed(1)}% ` +
+            `avgNet=${avgRewardNet.toFixed(0)} loss/gross=${lossToGross.toFixed(2)} unique=${oasisTelemetry.uniqueOasesAttacked}`,
             null,
             'military',
         );

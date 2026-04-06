@@ -94,6 +94,7 @@ export function executeFarmOases({ action, villages, gameState, race, sendComman
 
     let bestTarget = null;
     let bestRewardNet = -Infinity;
+    let bestDistance = Infinity;
     for (const oasis of farmableOases) {
         const defenderTroops = oasis.state.beasts || {};
         const defenderPower = CombatFormulas.calculateDefensePoints([{ troops: defenderTroops, race: 'nature' }], { infantry: 0.5, cavalry: 0.5 }, 'nature', 0, 0);
@@ -141,8 +142,9 @@ export function executeFarmOases({ action, villages, gameState, race, sendComman
         const travelCost = (distance * distanceCost) + (travelMinutes * minuteCost);
         const rewardNet = rewardGross - lossValue - travelCost;
 
-        if (rewardNet > bestRewardNet) {
+        if (rewardNet > bestRewardNet || (rewardNet === bestRewardNet && distance < bestDistance)) {
             bestRewardNet = rewardNet;
+            bestDistance = distance;
             bestTarget = oasis;
         }
     }

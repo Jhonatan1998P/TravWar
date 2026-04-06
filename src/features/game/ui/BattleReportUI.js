@@ -17,6 +17,30 @@ const ICONS = {
     siege: `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" /></svg>`
 };
 
+const FORBIDDEN_ANALYTICS_KEYS = [
+    'rewardNet',
+    'roi',
+    'netProfit',
+    'expectedRewardNet',
+    'recommendedTarget',
+    'recommendation',
+    'targetRanking',
+    'opportunityScore',
+];
+
+const FORBIDDEN_ANALYTICS_PATTERNS = [
+    /roi/i,
+    /reward[_-]?net/i,
+    /net[_-]?profit/i,
+    /recommend/i,
+    /target[_-]?ranking/i,
+    /opportunity[_-]?score/i,
+];
+
+function normalizeKey(key) {
+    return String(key || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
 class BattleReportUI {
     #panelElement;
     #mainContainer;
@@ -62,16 +86,8 @@ class BattleReportUI {
     }
 
     _sanitizePlayerFacingReport(report) {
-        const forbiddenKeys = new Set([
-            'rewardNet',
-            'roi',
-            'netProfit',
-            'expectedRewardNet',
-            'recommendedTarget',
-            'recommendation',
-            'targetRanking',
-            'opportunityScore',
-        ]);
+        const forbiddenKeys = new Set(FORBIDDEN_ANALYTICS_KEYS);
+        const forbiddenNormalizedKeys = new Set(FORBIDDEN_ANALYTICS_KEYS.map(normalizeKey));
 
         const sanitize = (value) => {
             if (Array.isArray(value)) return value.map(sanitize);
@@ -79,7 +95,12 @@ class BattleReportUI {
 
             const cleaned = {};
             for (const [key, nestedValue] of Object.entries(value)) {
-                if (forbiddenKeys.has(key)) continue;
+                const normalizedKey = normalizeKey(key);
+                const isForbidden = forbiddenKeys.has(key)
+                    || forbiddenNormalizedKeys.has(normalizedKey)
+                    || FORBIDDEN_ANALYTICS_PATTERNS.some(pattern => pattern.test(key));
+
+                if (isForbidden) continue;
                 cleaned[key] = sanitize(nestedValue);
             }
             return cleaned;
