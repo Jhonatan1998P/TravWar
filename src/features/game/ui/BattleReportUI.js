@@ -55,9 +55,37 @@ class BattleReportUI {
     show(report, gameState) {
         if (!report) return;
         this.#gameState = gameState;
-        this._render(report);
+        const sanitizedReport = this._sanitizePlayerFacingReport(report);
+        this._render(sanitizedReport);
         this.#panelElement.classList.remove('panel-hidden');
         this.#panelElement.classList.add('panel-visible');
+    }
+
+    _sanitizePlayerFacingReport(report) {
+        const forbiddenKeys = new Set([
+            'rewardNet',
+            'roi',
+            'netProfit',
+            'expectedRewardNet',
+            'recommendedTarget',
+            'recommendation',
+            'targetRanking',
+            'opportunityScore',
+        ]);
+
+        const sanitize = (value) => {
+            if (Array.isArray(value)) return value.map(sanitize);
+            if (!value || typeof value !== 'object') return value;
+
+            const cleaned = {};
+            for (const [key, nestedValue] of Object.entries(value)) {
+                if (forbiddenKeys.has(key)) continue;
+                cleaned[key] = sanitize(nestedValue);
+            }
+            return cleaned;
+        };
+
+        return sanitize(report);
     }
 
     hide() {

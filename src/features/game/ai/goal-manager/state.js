@@ -9,7 +9,6 @@ export function createEmptyVillageGoalState() {
 }
 
 export function initializeGoalScheduler(goal) {
-    delete goal.stepPointer;
     goal.proportionalUnitPointer = goal.proportionalUnitPointer ?? 0;
     goal.currentStepIndex = goal.currentStepIndex ?? 0;
     goal.stepStartTime = goal.stepStartTime ?? Date.now();

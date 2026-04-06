@@ -2,6 +2,7 @@
 import { gameData, NON_TARGETABLE_BUILDINGS } from '../core/GameData.js';
 import { CombatFormulas } from '../core/CombatFormulas.js';
 import { MemoryManager } from '../ai/index.js';
+import { calculateBeastBountyValue } from '../core/OasisEconomy.js';
 
 export class CombatEngine {
     _gameState;
@@ -465,14 +466,8 @@ export class CombatEngine {
         }
         
         if (defendingContingents.some(c => c.id === 'nature')) {
-            let totalUpkeepKilled = 0;
-            const natureTroops = gameData.units.nature.troops;
-            for (const unitId in totalDefenderLosses.losses) {
-                const unitData = natureTroops.find(u => u.id === unitId);
-                if (unitData) totalUpkeepKilled += unitData.upkeep * totalDefenderLosses.losses[unitId];
-            }
-            if (totalUpkeepKilled > 0) {
-                const totalBountyFromBeasts = totalUpkeepKilled * gameData.config.oasis.beastBountyMultiplier;
+            const totalBountyFromBeasts = calculateBeastBountyValue(totalDefenderLosses.losses);
+            if (totalBountyFromBeasts > 0) {
                 const distributedBounty = Math.floor(totalBountyFromBeasts / 4);
                 bounty.wood = distributedBounty; bounty.stone = distributedBounty; bounty.iron = distributedBounty; bounty.food = distributedBounty;
             }

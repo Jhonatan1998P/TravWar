@@ -171,6 +171,7 @@ class AIActionExecutor {
                     villages,
                     gameState,
                     race: this._controller.getRace(),
+                    troopSpeed: this._controller.getGameConfig().troopSpeed || 1,
                     sendCommand: this._controller.getSendCommand(),
                     log: this._controller.log.bind(this._controller),
                 });

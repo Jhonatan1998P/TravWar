@@ -8,7 +8,7 @@ function getTotalUnitCountAcrossVillages(villages, unitId) {
     const totalInQueue = villages.reduce((sum, village) => {
         return sum + village.recruitmentQueue
             .filter(job => job.unitId === unitId)
-            .reduce((queueSum, job) => queueSum + job.count, 0);
+            .reduce((queueSum, job) => queueSum + (job.remainingCount ?? job.count ?? 0), 0);
     }, 0);
 
     return totalInVillages + totalInQueue;
@@ -104,16 +104,17 @@ export function manageRecruitmentForGoal({
 
     const militaryBudget = getVillageBudget(village, 'mil');
     const maxAffordableTotal = getMaxAffordableCount(unitData.cost, militaryBudget);
-    if (maxAffordableTotal <= 0 || maxAffordableTotal === Infinity) {
+    const effectiveAffordableTotal = Number.isFinite(maxAffordableTotal) ? maxAffordableTotal : unitsNeeded;
+    if (effectiveAffordableTotal <= 0) {
         return { success: false, reason: 'INSUFFICIENT_RESOURCES' };
     }
 
     const batchPercentage = 0.25;
     const minBatchFloor = 5;
 
-    let batchSize = Math.floor(maxAffordableTotal * batchPercentage);
+    let batchSize = Math.floor(effectiveAffordableTotal * batchPercentage);
     batchSize = Math.max(batchSize, minBatchFloor);
-    batchSize = Math.min(batchSize, maxAffordableTotal);
+    batchSize = Math.min(batchSize, effectiveAffordableTotal);
 
     const countToTrain = Math.min(unitsNeeded, batchSize);
     if (countToTrain <= 0) return { success: false, reason: 'INSUFFICIENT_RESOURCES' };
@@ -126,7 +127,7 @@ export function manageRecruitmentForGoal({
     });
 
     if (result.success) {
-        log('success', village, 'Reclutamiento', `Orden para ${countToTrain}x ${unitId} enviada (Max posible: ${maxAffordableTotal}, Batch: 25%).`);
+        log('success', village, 'Reclutamiento', `Orden para ${countToTrain}x ${unitId} enviada (Max posible: ${effectiveAffordableTotal}, Batch: 25%).`);
         return { success: true, count: countToTrain, unitId };
     }
 

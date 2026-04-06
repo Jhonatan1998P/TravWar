@@ -30,6 +30,7 @@ export function executeCommands({ commands, gameState, sendCommand, log }) {
                     targetCoords: parametros.targetCoords,
                     troops: parametros.tropas,
                     missionType,
+                    catapultTargets: parametros.catapultTargets || [],
                 });
 
                 if (result.success) {

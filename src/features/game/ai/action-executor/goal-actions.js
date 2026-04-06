@@ -1,6 +1,8 @@
 import { gameData } from '../../core/GameData.js';
 import { CombatFormulas } from '../../core/CombatFormulas.js';
 import { AI_SETTLEMENT_CONSTANTS } from '../config/AIConstants.js';
+import { getUnitTotalCost } from '../utils/AIUnitUtils.js';
+import { calculateBeastBountyValue } from '../../core/OasisEconomy.js';
 
 export function findStrongestVillage(villages, race) {
     if (!villages || villages.length === 0) return null;
@@ -65,7 +67,7 @@ export function findBestSettlementLocation(myVillages, gameState) {
     return potentialSpots[0];
 }
 
-export function executeFarmOases({ action, villages, gameState, race, sendCommand, log }) {
+export function executeFarmOases({ action, villages, gameState, race, sendCommand, log, troopSpeed = 1 }) {
     const { radius = 5, maxArmyPercentageToSend = 0.25 } = action;
     const village = findStrongestVillage(villages, race);
     if (!village) return;
@@ -85,23 +87,72 @@ export function executeFarmOases({ action, villages, gameState, race, sendComman
     if (farmableOases.length === 0) return;
 
     const attackerPower = CombatFormulas.calculateAttackPoints(armyToFarm, race, village.smithy.upgrades).total;
+    const oasisConfig = gameData.config.oasis || {};
+    const distanceCost = oasisConfig.raidTravelCostPerDistance || 8;
+    const minuteCost = oasisConfig.raidTravelCostPerMinute || 15;
+    const raceUnits = gameData.units[race]?.troops || [];
 
     let bestTarget = null;
-    let bestScore = -Infinity;
+    let bestRewardNet = -Infinity;
     for (const oasis of farmableOases) {
-        const defenderPower = CombatFormulas.calculateDefensePoints([{ troops: oasis.state.beasts, race: 'nature' }], { infantry: 1, cavalry: 0 });
+        const defenderTroops = oasis.state.beasts || {};
+        const defenderPower = CombatFormulas.calculateDefensePoints([{ troops: defenderTroops, race: 'nature' }], { infantry: 0.5, cavalry: 0.5 }, 'nature', 0, 0);
+        if (attackerPower <= 0 || defenderPower <= 0) continue;
+
+        let attackerLossPercent = 0;
+        let defenderLossPercent = 0;
         if (attackerPower > defenderPower) {
-            const score = attackerPower - defenderPower;
-            if (score > bestScore) {
-                bestScore = score;
-                bestTarget = oasis;
-            }
+            attackerLossPercent = CombatFormulas.calculateRaidWinnerLosses(attackerPower, defenderPower);
+            defenderLossPercent = 1.0 - attackerLossPercent;
+        } else {
+            attackerLossPercent = 1.0 - CombatFormulas.calculateRaidWinnerLosses(defenderPower, attackerPower);
+            defenderLossPercent = 1.0 - attackerLossPercent;
+        }
+
+        const estimatedDefenderLosses = {};
+        for (const [beastId, count] of Object.entries(defenderTroops)) {
+            if (!count || count <= 0) continue;
+            const lost = Math.min(count, Math.round(count * defenderLossPercent));
+            if (lost > 0) estimatedDefenderLosses[beastId] = lost;
+        }
+
+        const rewardGross = calculateBeastBountyValue(estimatedDefenderLosses);
+
+        let lossValue = 0;
+        for (const [unitId, count] of Object.entries(armyToFarm)) {
+            if (!count || count <= 0) continue;
+            const unitData = raceUnits.find(unit => unit.id === unitId);
+            if (!unitData) continue;
+            const lost = Math.min(count, Math.round(count * attackerLossPercent));
+            lossValue += getUnitTotalCost(unitData) * lost;
+        }
+
+        let slowestSpeed = Infinity;
+        for (const [unitId, count] of Object.entries(armyToFarm)) {
+            if (!count || count <= 0) continue;
+            const unitData = raceUnits.find(unit => unit.id === unitId);
+            if (!unitData) continue;
+            if (unitData.stats.speed < slowestSpeed) slowestSpeed = unitData.stats.speed;
+        }
+
+        const distance = Math.hypot(oasis.x - village.coords.x, oasis.y - village.coords.y);
+        const effectiveSpeed = Number.isFinite(slowestSpeed) ? Math.max(slowestSpeed * (troopSpeed || 1), 0.1) : 0.1;
+        const travelMinutes = (distance / effectiveSpeed) * 60;
+        const travelCost = (distance * distanceCost) + (travelMinutes * minuteCost);
+        const rewardNet = rewardGross - lossValue - travelCost;
+
+        if (rewardNet > bestRewardNet) {
+            bestRewardNet = rewardNet;
+            bestTarget = oasis;
         }
     }
 
-    if (!bestTarget) return;
+    if (!bestTarget || bestRewardNet <= 0) {
+        log('info', village, 'Farmeo de Oasis', 'Sin objetivos rentables: RewardNet <= 0 en todos los oasis del radio.');
+        return;
+    }
 
-    log('success', village, 'Farmeo de Oasis', `Enviando ${maxArmyPercentageToSend * 100}% del ejército a saquear el oasis en ${bestTarget.x}|${bestTarget.y}.`);
+    log('success', village, 'Farmeo de Oasis', `Enviando ${maxArmyPercentageToSend * 100}% del ejército a saquear ${bestTarget.x}|${bestTarget.y} (RewardNet ${bestRewardNet.toFixed(0)}).`);
     sendCommand('send_movement', {
         originVillageId: village.id,
         targetCoords: { x: bestTarget.x, y: bestTarget.y },

@@ -87,6 +87,19 @@ export const AIPersonality = {
                         plan: [
                             { type: "resource_fields_level", level: 5 }
                         ]
+                    },
+                    {
+                        id: "MilBasic1",
+                        priority: 180,
+                        category: "military",
+                        scope: "per_village",
+                        isRecurring: true,
+                        plan: [
+                            { type: "building", buildingType: "barracks", level: 5 },
+                            { type: "units", unitType: "defensive_infantry", count: 400 },
+                            { type: "units", unitType: "scout", count: 60 }
+                        ],
+                        condition: { type: "resource_fields_level", operator: ">=", value: 3 }
                     }
                 ],
                 tactics: []
@@ -102,6 +115,20 @@ export const AIPersonality = {
                         plan: [
                             { type: "resource_fields_level", level: 5 }
                         ]
+                    },
+                    {
+                        id: "MilBasic1",
+                        priority: 185,
+                        category: "military",
+                        scope: "per_village",
+                        isRecurring: true,
+                        plan: [
+                            { type: "building", buildingType: "barracks", level: 7 },
+                            { type: "units", unitType: "defensive_infantry", count: 600 },
+                            { type: "building", buildingType: "cityWall", level: 10 },
+                            { type: "units", unitType: "scout", count: 80 }
+                        ],
+                        condition: { type: "resource_fields_level", operator: ">=", value: 3 }
                     }
                 ],
                 tactics: []

@@ -28,10 +28,45 @@ export class VillageProcessor {
         if (budgetConfig && !this.#village.budgetRatio) {
             this.#village.budgetRatio = { ...budgetConfig };
         }
+        if (this.#village.budgetRatio) {
+            this.#ensureBudgetState();
+        }
         
         this.#calculateStorage();
         this.#calculateProduction();
         this.#calculatePopulation();
+    }
+
+    #ensureBudgetState() {
+        if (!this.#village.budget) {
+            this.#village.budget = {
+                econ: { wood: 0, stone: 0, iron: 0, food: 0 },
+                mil: { wood: 0, stone: 0, iron: 0, food: 0 },
+            };
+        }
+
+        const ratio = this.#village.budgetRatio || { econ: 0.5, mil: 0.5 };
+        const ratioSum = (ratio.econ || 0) + (ratio.mil || 0) || 1;
+
+        ['wood', 'stone', 'iron', 'food'].forEach(resource => {
+            const econValue = Number(this.#village.budget.econ[resource]);
+            const milValue = Number(this.#village.budget.mil[resource]);
+            const hasValidBudget = Number.isFinite(econValue) && Number.isFinite(milValue);
+
+            if (!hasValidBudget) {
+                const current = this.#village.resources?.[resource]?.current || 0;
+                this.#village.budget.econ[resource] = current * (ratio.econ || 0) / ratioSum;
+                this.#village.budget.mil[resource] = current * (ratio.mil || 0) / ratioSum;
+                return;
+            }
+
+            const current = this.#village.resources?.[resource]?.current || 0;
+            const totalBudget = econValue + milValue;
+            if (totalBudget <= 0 && current > 0) {
+                this.#village.budget.econ[resource] = current * (ratio.econ || 0) / ratioSum;
+                this.#village.budget.mil[resource] = current * (ratio.mil || 0) / ratioSum;
+            }
+        });
     }
 
     #calculateProduction() {
@@ -108,6 +143,7 @@ export class VillageProcessor {
     
     queueBuildingUpgrade(payload) {
         const { buildingId, buildingType } = payload;
+        if (this.#village.budgetRatio) this.#ensureBudgetState();
     
         if (this.#village.constructionQueue.length >= this.#village.maxConstructionSlots) {
             return { success: false, reason: 'QUEUE_FULL', details: `La cola general está llena.` };
@@ -196,6 +232,7 @@ export class VillageProcessor {
     
     cancelBuilding(payload) {
         const { jobId } = payload;
+        if (this.#village.budgetRatio) this.#ensureBudgetState();
         const jobIndex = this.#village.constructionQueue.findIndex(j => j.jobId === jobId);
         if (jobIndex === -1) return;
 
@@ -230,6 +267,7 @@ export class VillageProcessor {
 
     queueRecruitment(payload) {
         const { buildingId, unitId, count } = payload;
+        if (this.#village.budgetRatio) this.#ensureBudgetState();
         if (!buildingId || !unitId || !count || count <= 0) return { success: false, reason: 'INVALID_PAYLOAD' };
 
         const unitData = gameData.units[this.#village.race].troops.find(t => t.id === unitId);
@@ -309,6 +347,7 @@ export class VillageProcessor {
 
     queueResearch(payload) {
         const { unitId } = payload;
+        if (this.#village.budgetRatio) this.#ensureBudgetState();
         if (!unitId) return { success: false, reason: 'INVALID_PAYLOAD' };
         if (this.#village.research.queue.length > 0) return { success: false, reason: 'QUEUE_FULL' };
 
@@ -349,6 +388,7 @@ export class VillageProcessor {
 
     queueSmithyUpgrade(payload) {
         const { unitId } = payload;
+        if (this.#village.budgetRatio) this.#ensureBudgetState();
         if (!unitId) return { success: false, reason: 'INVALID_PAYLOAD' };
         if (this.#village.smithy.queue.length > 0) return { success: false, reason: 'QUEUE_FULL' };
 
@@ -522,6 +562,7 @@ export class VillageProcessor {
 
     #updateResources(elapsedSeconds) {
         if (elapsedSeconds <= 0) return;
+        if (this.#village.budgetRatio) this.#ensureBudgetState();
         for (const resName in this.#village.resources) {
             const res = this.#village.resources[resName];
             if (res.production) {

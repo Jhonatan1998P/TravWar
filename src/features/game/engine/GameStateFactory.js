@@ -49,7 +49,11 @@ export class GameStateFactory {
         mapData.forEach(tile => {
             if (tile.type === 'oasis') {
                 const oasisTypeData = gameData.oasisTypes[tile.oasisType];
-                tile.state = { beasts: {}, isClearedOnce: false };
+                tile.state = {
+                    beasts: {},
+                    isClearedOnce: false,
+                    pressure: { recentAttacks: [], current: 0 },
+                };
                 oasisTypeData.beastSpawnTable.forEach(spawn => tile.state.beasts[spawn.unitId] = spawn.min);
             }
         });
@@ -140,8 +144,15 @@ export class GameStateFactory {
         savedState.mapData.forEach(tile => {
             if (tile.type === 'oasis' && (!tile.state || !tile.state.beasts)) {
                 const oasisTypeData = gameData.oasisTypes[tile.oasisType];
-                tile.state = { beasts: {} };
+                tile.state = { beasts: {}, isClearedOnce: false };
                 oasisTypeData.beastSpawnTable.forEach(spawn => tile.state.beasts[spawn.unitId] = spawn.min);
+            }
+
+            if (tile.type === 'oasis' && tile.state) {
+                tile.state.isClearedOnce ??= false;
+                tile.state.pressure ??= { recentAttacks: [], current: 0 };
+                tile.state.pressure.recentAttacks ??= [];
+                tile.state.pressure.current ??= 0;
             }
         });
         savedState.sessionId = sessionId;

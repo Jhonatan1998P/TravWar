@@ -90,6 +90,56 @@ function _getWeightedRandomBeast(spawnTable, randomFunc = Math.random) {
     return spawnTable[spawnTable.length - 1].unitId;
 }
 
+function _clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
+function _getOasisPressureConfig() {
+    const oasisConfig = gameData.config.oasis || {};
+    return {
+        windowMinutes: oasisConfig.oasisPressureWindowMinutes || 60,
+        attackRef: oasisConfig.oasisPressureAttackRef || 6,
+        alpha: oasisConfig.oasisPressureAlpha || 0.6,
+    };
+}
+
+function _pruneOasisRecentAttacks(oasisState, currentTime) {
+    if (!oasisState.pressure) {
+        oasisState.pressure = { recentAttacks: [], current: 0 };
+    }
+
+    if (!Array.isArray(oasisState.pressure.recentAttacks)) {
+        oasisState.pressure.recentAttacks = [];
+    }
+
+    const { windowMinutes } = _getOasisPressureConfig();
+    const windowMs = windowMinutes * 60 * 1000;
+    oasisState.pressure.recentAttacks = oasisState.pressure.recentAttacks.filter(ts => (currentTime - ts) <= windowMs);
+}
+
+function _calculateOasisPressure(oasisState, currentTime) {
+    _pruneOasisRecentAttacks(oasisState, currentTime);
+    const { attackRef } = _getOasisPressureConfig();
+    const attacksRecent = oasisState.pressure.recentAttacks.length;
+    const pressure = _clamp(attacksRecent / Math.max(attackRef, 1), 0, 1);
+    oasisState.pressure.current = pressure;
+    return pressure;
+}
+
+function _registerOasisAttack(tile, currentTime) {
+    if (!tile || tile.type !== 'oasis' || !tile.state) return;
+    if (!tile.state.pressure) {
+        tile.state.pressure = { recentAttacks: [], current: 0 };
+    }
+    if (!Array.isArray(tile.state.pressure.recentAttacks)) {
+        tile.state.pressure.recentAttacks = [];
+    }
+
+    _pruneOasisRecentAttacks(tile.state, currentTime);
+    tile.state.pressure.recentAttacks.push(currentTime);
+    _calculateOasisPressure(tile.state, currentTime);
+}
+
 function getActiveVillage() {
     if (!gameState || !gameState.activeVillageId) return null;
     return gameState.villages.find(v => v.id === gameState.activeVillageId);
@@ -212,6 +262,7 @@ function processMovements(currentTime) {
             case 'attack':
             case 'raid':
             case 'espionage': {
+                const targetTile = gameState.spatialIndex.get(`${movement.targetCoords.x}|${movement.targetCoords.y}`);
                 const combatEngine = new CombatEngine(gameState);
                 const results = combatEngine.processMovement(movement);
 
@@ -292,6 +343,10 @@ function processMovements(currentTime) {
                         tile.state.isClearedOnce = true;
                     }
                 });
+
+                if ((movement.type === 'attack' || movement.type === 'raid') && targetTile?.type === 'oasis') {
+                    _registerOasisAttack(targetTile, movement.arrivalTime);
+                }
 
                 if (results.movementsToCreate.length > 0) {
                     gameState.movements.sort((a, b) => a.arrivalTime - b.arrivalTime);
@@ -467,7 +522,7 @@ function handleTradeArrival(movement) {
 function handleTradeReturnArrival(movement) {}
 
 function processOasisRegeneration(currentTime) {
-    const regenCycleMs = (Math.random() * (gameData.config.oasis.beastRegenCycleMinutes * 60 * 1000)) + (60 * 1000);
+    const regenCycleMs = gameData.config.oasis.beastRegenCycleMinutes * 60 * 1000;
     if (currentTime - gameState.lastOasisRegenTime < regenCycleMs) {
         return;
     }
@@ -476,23 +531,35 @@ function processOasisRegeneration(currentTime) {
     if (cyclesToProcess <= 0) return;
 
     const amountPerCycle = gameData.config.oasis.beastRegenAmount;
+    const { alpha } = _getOasisPressureConfig();
 
     for (let i = 0; i < cyclesToProcess; i++) {
         gameState.mapData.forEach(tile => {
             if (tile.type !== 'oasis' || !tile.state?.beasts || !tile.state.isClearedOnce) return;
 
+            const pressure = _calculateOasisPressure(tile.state, currentTime);
+            const regenEff = amountPerCycle * (1 - (alpha * pressure));
+            if (regenEff <= 0) return;
+
+            let spawnsToProcess = Math.floor(regenEff);
+            const fractionalPart = regenEff - spawnsToProcess;
+            if (Math.random() < fractionalPart) spawnsToProcess += 1;
+            if (spawnsToProcess <= 0) return;
+
             const oasisTypeData = gameData.oasisTypes[tile.oasisType];
             if (!oasisTypeData) return;
 
-            const beastToSpawn = _getWeightedRandomBeast(oasisTypeData.beastSpawnTable);
-            if (!beastToSpawn) return;
-            
-            const spawnInfo = oasisTypeData.beastSpawnTable.find(s => s.unitId === beastToSpawn);
-            if (!spawnInfo) return;
+            for (let spawnIndex = 0; spawnIndex < spawnsToProcess; spawnIndex++) {
+                const beastToSpawn = _getWeightedRandomBeast(oasisTypeData.beastSpawnTable);
+                if (!beastToSpawn) continue;
 
-            const currentAmount = tile.state.beasts[beastToSpawn] || 0;
-            if (currentAmount < spawnInfo.max) {
-                tile.state.beasts[beastToSpawn] = Math.min(spawnInfo.max, currentAmount + amountPerCycle);
+                const spawnInfo = oasisTypeData.beastSpawnTable.find(s => s.unitId === beastToSpawn);
+                if (!spawnInfo) continue;
+
+                const currentAmount = tile.state.beasts[beastToSpawn] || 0;
+                if (currentAmount < spawnInfo.max) {
+                    tile.state.beasts[beastToSpawn] = Math.min(spawnInfo.max, currentAmount + 1);
+                }
             }
         });
     }

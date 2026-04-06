@@ -15,13 +15,30 @@ export function areResourceFieldsBalanced(village) {
 
 export function getStepCost({ step, village, gameState, race, actionExecutor }) {
     switch (step.type) {
-        case 'building':
-        case 'resource_fields_level': {
+        case 'building': {
             const buildingType = step.buildingType || actionExecutor.getResourceTypeFromStep(step);
             if (!buildingType) return {};
             const building = village.buildings.find(item => item.type === buildingType);
             const level = (building ? building.level : 0) + village.constructionQueue.filter(job => job.buildingType === buildingType).length;
             const levelData = getBuildingLevelData(buildingType, level + 1);
+            return levelData?.cost || {};
+        }
+        case 'resource_fields_level': {
+            let fields = village.buildings.filter(building => RESOURCE_FIELD_BUILDING_TYPES.includes(building.type));
+            const resourceType = actionExecutor.getResourceTypeFromStep(step);
+            if (resourceType) {
+                fields = fields.filter(field => field.type === resourceType);
+            }
+            if (fields.length === 0) return {};
+
+            const targetField = fields
+                .map(field => {
+                    const queuedUpgrades = village.constructionQueue.filter(job => job.buildingId === field.id).length;
+                    return { field, effectiveLevel: field.level + queuedUpgrades };
+                })
+                .sort((a, b) => a.effectiveLevel - b.effectiveLevel)[0];
+
+            const levelData = getBuildingLevelData(targetField.field.type, targetField.effectiveLevel + 1);
             return levelData?.cost || {};
         }
         case 'units': {
@@ -87,7 +104,7 @@ export function isStepCompleted({ step, village, gameState, ownerId, actionExecu
 
         case 'units': {
             const unitId = actionExecutor.resolveUnitId(step.unitType);
-            if (!unitId) return true;
+            if (!unitId) return false;
 
             const settlerId = actionExecutor.resolveUnitId('settler');
             const chiefId = actionExecutor.resolveUnitId('chief');
@@ -96,7 +113,7 @@ export function isStepCompleted({ step, village, gameState, ownerId, actionExecu
                 const totalInThisVillage = (village.unitsInVillage[unitId] || 0) +
                     village.recruitmentQueue
                         .filter(job => job.unitId === unitId)
-                        .reduce((queueSum, job) => queueSum + job.count, 0);
+                        .reduce((queueSum, job) => queueSum + (job.remainingCount ?? job.count ?? 0), 0);
                 return totalInThisVillage >= step.count;
             }
 
@@ -104,18 +121,20 @@ export function isStepCompleted({ step, village, gameState, ownerId, actionExecu
             const totalInAllQueues = allVillages.reduce((sum, candidate) => {
                 return sum + candidate.recruitmentQueue
                     .filter(job => job.unitId === unitId)
-                    .reduce((queueSum, job) => queueSum + job.count, 0);
+                    .reduce((queueSum, job) => queueSum + (job.remainingCount ?? job.count ?? 0), 0);
             }, 0);
             return (totalInAllVillages + totalInAllQueues) >= step.count;
         }
 
         case 'research': {
             const researchUnitId = actionExecutor.resolveUnitId(step.unitType);
+            if (!researchUnitId) return false;
             return village.research.completed.includes(researchUnitId);
         }
 
         case 'upgrade': {
             const upgradeUnitId = actionExecutor.resolveUnitId(step.unitType);
+            if (!upgradeUnitId) return false;
             return (village.smithy.upgrades[upgradeUnitId] || 0) >= step.level;
         }
 
@@ -129,7 +148,7 @@ export function isStepCompleted({ step, village, gameState, ownerId, actionExecu
                 const totalInQueue = allVillages.reduce((sum, candidate) => {
                     return sum + candidate.recruitmentQueue
                         .filter(job => job.unitId === unitId)
-                        .reduce((queueSum, job) => queueSum + job.count, 0);
+                        .reduce((queueSum, job) => queueSum + (job.remainingCount ?? job.count ?? 0), 0);
                 }, 0);
                 return totalInVillages + totalInQueue;
             };
@@ -195,7 +214,9 @@ export function getPrerequisites({ step, village, failureContext = {}, race, act
         case 'proportional_units':
         case 'units': {
             const unitIdentifier = failureContext.unitId || step.baseUnit || step.unitType;
-            const unitId = actionExecutor.resolveUnitId(unitIdentifier);
+            const unitId = raceTroops.some(unit => unit.id === unitIdentifier)
+                ? unitIdentifier
+                : actionExecutor.resolveUnitId(unitIdentifier);
             const unitData = raceTroops.find(unit => unit.id === unitId);
             if (unitData) {
                 if (unitData.research?.time > 0) {

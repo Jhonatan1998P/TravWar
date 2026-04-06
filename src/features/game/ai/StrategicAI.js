@@ -18,10 +18,17 @@ const { searchRadius, scoutsPerMission, minCatsForTrain, maxWaves } = AI_STRATEG
 export default class StrategicAI {
     constructor() {}
 
-    computeMilitaryTurn(gameState, ownerId, race, archetype, personality, gameSpeed = 1) {
+    computeMilitaryTurn(gameState, ownerId, race, archetype, personality, gameSpeed = 1, troopSpeed = 1, intelligenceContext = {}) {
         const myVillages = gameState.villages.filter(v => v.ownerId === ownerId);
         const commands = [];
         const reasoningLog = [];
+
+        const baitingPlayers = intelligenceContext.baitingPlayers || [];
+        const reputationData = intelligenceContext.reputationData || {};
+
+        if (baitingPlayers.length > 0) {
+            reasoningLog.push(`[INTEL] Jugadores sospechosos de emboscada: ${baitingPlayers.join(', ')}. Evitando ataques directos.`);
+        }
 
         const NEMESIS_SPY_INTERVAL = Math.max(5 * 60 * 1000, (24 * 60 * 60 * 1000) / gameSpeed);
         const GENERAL_SPY_INTERVAL = Math.max(10 * 60 * 1000, (48 * 60 * 60 * 1000) / gameSpeed);
@@ -94,6 +101,7 @@ export default class StrategicAI {
         );
 
         let isMusteringForWar = false;
+        let oasisFarmingTelemetry = null;
 
         if (nemesisId) {
             const nemesisTarget = targets.known.find(t => t.ownerId === nemesisId) || targets.unknown.find(t => t.ownerId === nemesisId);
@@ -144,15 +152,29 @@ export default class StrategicAI {
         commands.push(...spyResults.commands);
         if (spyResults.logs.length > 0) reasoningLog.push(...spyResults.logs);
 
+        const safeKnownTargets = targets.known.filter(target => {
+            if (target.ownerId === 'nature') return true;
+            if (baitingPlayers.includes(target.ownerId)) return false;
+            const rep = reputationData[target.ownerId];
+            if (rep !== undefined && rep < -0.5) {
+                reasoningLog.push(`[INTEL] Objetivo ${target.data.name} (${target.ownerId}) tiene reputación muy negativa (${rep.toFixed(2)}). Priorizando espionaje sobre ataque.`);
+            }
+            return true;
+        });
+
         if (commands.length === 0 && !isMusteringForWar) {
-            const farmingResults = this._performOptimizedFarming(availableForces, targets.known, nemesisId, race, personality);
+            const farmingResults = this._performOptimizedFarming(availableForces, safeKnownTargets, nemesisId, race, personality, troopSpeed);
             commands.push(...farmingResults.commands);
             if (farmingResults.logs.length > 0) reasoningLog.push(...farmingResults.logs);
+            oasisFarmingTelemetry = farmingResults.telemetry || null;
         }
 
         return {
             razonamiento: reasoningLog.join('\n'),
             comandos: commands,
+            telemetry: {
+                oasisFarming: oasisFarmingTelemetry,
+            },
         };
     }
 
@@ -273,13 +295,14 @@ export default class StrategicAI {
         });
     }
 
-    _performOptimizedFarming(forces, knownTargets, nemesisId, race, personality) {
+    _performOptimizedFarming(forces, knownTargets, nemesisId, race, personality, troopSpeed) {
         return performOptimizedFarming({
             forces,
             knownTargets,
             nemesisId,
             race,
             personality,
+            troopSpeed,
             simulateCombat: this._simulateCombat.bind(this),
             consumeTroops: this._consumeTroops.bind(this),
         });
@@ -345,21 +368,42 @@ export default class StrategicAI {
             0,
         );
 
-        if (attPoints.total > defPoints) {
-            const attackerLossRatio = type === 'raid'
-                ? CombatFormulas.calculateRaidWinnerLosses(attPoints.total, defPoints)
-                : CombatFormulas.calculateLosses(attPoints.total, defPoints);
-
+        const calculateLossesByRatio = (troops, ratio) => {
             const losses = {};
-            for (const unitId in attackTroops) {
-                losses[unitId] = Math.round(attackTroops[unitId] * attackerLossRatio);
+            for (const unitId in troops) {
+                const originalCount = troops[unitId] || 0;
+                if (originalCount <= 0) continue;
+                const lost = Math.round(originalCount * ratio);
+                if (lost > 0) losses[unitId] = Math.min(lost, originalCount);
             }
-            return { winner: 'attacker', losses };
+            return losses;
+        };
+
+        let attackerLossPercent = 0;
+        let defenderLossPercent = 0;
+
+        if (type === 'raid') {
+            if (attPoints.total > defPoints) {
+                attackerLossPercent = CombatFormulas.calculateRaidWinnerLosses(attPoints.total, defPoints);
+                defenderLossPercent = 1.0 - attackerLossPercent;
+            } else {
+                attackerLossPercent = 1.0 - CombatFormulas.calculateRaidWinnerLosses(defPoints, attPoints.total);
+                defenderLossPercent = 1.0 - attackerLossPercent;
+            }
+        } else {
+            if (attPoints.total > defPoints) {
+                attackerLossPercent = CombatFormulas.calculateLosses(attPoints.total, defPoints);
+                defenderLossPercent = 1.0;
+            } else {
+                attackerLossPercent = 1.0;
+                defenderLossPercent = CombatFormulas.calculateLosses(defPoints, attPoints.total);
+            }
         }
 
         return {
-            winner: 'defender',
-            losses: attackTroops,
+            winner: attPoints.total > defPoints ? 'attacker' : 'defender',
+            losses: calculateLossesByRatio(attackTroops, attackerLossPercent),
+            defenderLosses: calculateLossesByRatio(defenseTroops, defenderLossPercent),
         };
     }
 }

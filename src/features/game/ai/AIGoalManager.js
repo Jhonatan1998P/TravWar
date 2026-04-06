@@ -4,7 +4,6 @@ import { AI_GOAL_MANAGER_CONSTANTS } from './config/AIConstants.js';
 import { RESOURCE_FIELD_BUILDING_TYPES, STORAGE_BUILDING_BY_RESOURCE } from '../core/data/constants.js';
 import { evaluateCondition } from './goal-manager/conditions.js';
 import {
-    areResourceFieldsBalanced,
     getPrerequisites,
     getStepCost,
     isStepCompleted,
@@ -14,6 +13,8 @@ import {
     createEmptyVillageGoalState,
     serializeVillageGoalStates,
 } from './goal-manager/state.js';
+
+const RESOURCE_STEP_NAME = 'resource_fields';
 
 class AIGoalManager {
     #controller;
@@ -95,6 +96,30 @@ class AIGoalManager {
         }
     }
 
+    #getStepName(step) {
+        if (!step) return 'unknown_step';
+        if (step.type === 'resource_fields_level') {
+            return step.resourceType ? `resource_fields_${step.resourceType}` : RESOURCE_STEP_NAME;
+        }
+        if (step.type === 'building') return step.buildingType || 'building';
+        if (step.type === 'research' || step.type === 'upgrade' || step.type === 'units') {
+            return step.unitType || 'unit';
+        }
+        if (step.type === 'proportional_units') return step.baseUnit || 'proportional_units';
+        return step.type || 'step';
+    }
+
+    #getBudgetSplit(village, stepCategory) {
+        if (village.budgetRatio) {
+            if (stepCategory === 'economic') return village.budgetRatio.econ ?? 0.5;
+            return village.budgetRatio.mil ?? 0.5;
+        }
+
+        const personality = this.#controller.getPersonality();
+        if (stepCategory === 'economic') return personality.buildRatio?.econ || 0.5;
+        return personality.buildRatio?.mil || 0.5;
+    }
+
     #processGoalCategory(village, villageIndex, gameState, category) {
         const villageState = this.#villageGoalStates.get(village.id);
         const goalStack = category === 'economic' ? villageState.economicGoalStack : villageState.militaryGoalStack;
@@ -107,7 +132,9 @@ class AIGoalManager {
         if (!activeGoal) return;
 
         if (activeGoal.incompleteStepIndices.length === 0) {
-            this.#completeGoal(activeGoal, goalStack, village, gameState, villageState, category);
+            if (this.#isGoalCompleted(activeGoal, village, gameState, category)) {
+                this.#completeGoal(activeGoal, goalStack, village, gameState, villageState, category);
+            }
             return;
         }
 
@@ -116,6 +143,10 @@ class AIGoalManager {
         }
         
         const currentStep = activeGoal.plan[activeGoal.currentStepIndex];
+        if (!currentStep) {
+            this.#rotateToNextStep(activeGoal);
+            return;
+        }
 
         if (this.#isStepCompleted(currentStep, village, gameState)) {
             this.#markStepAsComplete(activeGoal, activeGoal.currentStepIndex);
@@ -126,14 +157,7 @@ class AIGoalManager {
         const result = this.#actionExecutor.executePlanStep(village, currentStep, gameState, activeGoal);
 
         if (result.success) {
-            // LÓGICA DE ROTACIÓN CONDICIONAL
-            if (currentStep.type === 'resource_fields_level') {
-                if (areResourceFieldsBalanced(village)) {
-                    this.#rotateToNextStep(activeGoal);
-                }
-            } else {
-                this.#rotateToNextStep(activeGoal);
-            }
+            this.#rotateToNextStep(activeGoal);
         } else {
             const isHardBlock = this.#handleBlockedGoal(village, currentStep, activeGoal, gameState, category, result);
             if (!isHardBlock) {
@@ -243,9 +267,12 @@ class AIGoalManager {
         if (!villageState) return false;
 
         const goalStack = category === 'economic' ? villageState.economicGoalStack : villageState.militaryGoalStack;
-        const stepName = failedStep.buildingType || failedStep.unitType || failedStep.baseUnit || 'recurso';
+        const stepName = this.#getStepName(failedStep);
 
         const pushSubGoal = (subGoal, reason) => {
+            if (goalStack.some(goal => goal.id === subGoal.id)) {
+                return;
+            }
             this.#controller.log('warn', village, `Objetivo ${category} Bloqueado`, `Razón: ${reason}. Creando sub-objetivo para '${stepName}'.`);
             goalStack.push({ ...subGoal, parentGoalId: activeGoal.id });
         };
@@ -296,7 +323,7 @@ class AIGoalManager {
                     currentStepIndex: 0,
                     stepStartTime: Date.now(),
                     incompleteStepIndices: [0],
-                    category: 'military'
+                    category
                 }, reason);
                 return true;
             }
@@ -328,14 +355,9 @@ class AIGoalManager {
         }
 
         const cost = this.#getStepCost(failedStep, village, gameState);
-        const personality = this.#controller.getPersonality();
-        
         const economicActions = ['building', 'resource_fields_level', 'research', 'upgrade'];
         const stepCategory = economicActions.includes(failedStep.type) ? 'economic' : 'military';
-        
-        const budgetRatioForStep = stepCategory === 'economic' 
-            ? personality.buildRatio?.econ || 0.5
-            : personality.buildRatio?.mil || 0.5;
+        const budgetRatioForStep = this.#getBudgetSplit(village, stepCategory);
 
         for (const res in cost) {
             const effectiveCapacity = village.resources[res].capacity * budgetRatioForStep;
@@ -415,20 +437,34 @@ class AIGoalManager {
             if (goalStack.length < 2) return false;
             const parentGoal = goalStack[goalStack.length - 2];
             if (!parentGoal) return false;
-            
-            const stepToAfford = parentGoal.plan[parentGoal.currentStepIndex];
+
+            const stepIndexToAfford = parentGoal.incompleteStepIndices?.includes(parentGoal.currentStepIndex)
+                ? parentGoal.currentStepIndex
+                : parentGoal.incompleteStepIndices?.[0];
+            const stepToAfford = parentGoal.plan[stepIndexToAfford];
             if (!stepToAfford) return false;
 
             const cost = this.#getStepCost(stepToAfford, village, gameState);
-            
-            const personality = this.#controller.getPersonality();
+
             const goalCategory = parentGoal.category === 'military' ? 'mil' : 'econ';
-            const budgetRatio = personality.buildRatio[goalCategory] || 0.5;
-            
-            const canAfford = Object.keys(cost).every(res => (village.resources[res].current * budgetRatio) >= cost[res]);
+            const budget = goalCategory === 'econ'
+                ? (village.budget?.econ || {
+                    wood: village.resources.wood.current,
+                    stone: village.resources.stone.current,
+                    iron: village.resources.iron.current,
+                    food: village.resources.food.current,
+                })
+                : (village.budget?.mil || {
+                    wood: village.resources.wood.current,
+                    stone: village.resources.stone.current,
+                    iron: village.resources.iron.current,
+                    food: village.resources.food.current,
+                });
+
+            const canAfford = Object.keys(cost).every(res => (budget[res] || 0) >= cost[res]);
             
             if (canAfford) {
-                const stepName = stepToAfford.buildingType || stepToAfford.unitType || 'recurso';
+                const stepName = this.#getStepName(stepToAfford);
                 this.#controller.log('success', village, 'Ahorro de Recursos', `Recursos para "${stepName}" acumulados. Reanudando objetivo.`);
             }
             return canAfford;
