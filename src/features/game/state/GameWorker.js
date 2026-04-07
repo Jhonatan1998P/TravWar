@@ -15,6 +15,7 @@ import {
 } from './worker/commands.js';
 import { processMovements as processMovementsStep } from './worker/movements.js';
 import { simulateOfflineProgress as simulateOfflineProgressStep } from './worker/offline.js';
+import { addResourceIncomeToVillage, initializeAIVillageBudget } from './worker/budget.js';
 
 registerWorkerDiagnostics(self);
 
@@ -244,6 +245,8 @@ function handleSettleArrival(movement) {
             bonusToPass = personality.bonusMultiplier || 1;
             budgetConfig = personality.buildRatio; // Pasamos el ratio de presupuesto
         }
+
+        initializeAIVillageBudget(newVillage, budgetConfig || originVillage.budgetRatio);
     }
     
     const newProcessor = new VillageProcessor(newVillage, gameConfig, gameState.alliance.bonuses, bonusToPass, budgetConfig);
@@ -278,24 +281,13 @@ function handleReturnArrival(movement) {
         ...Object.keys(movement.payload.plunder || {})
     ]);
     
-    // Si es IA, el botín se reparte 50/50 en sus presupuestos
-    const isAI = village.ownerId.startsWith('ai_') && village.budget;
-
     for (const res of allLootKeys) {
         const bountyAmount = movement.payload.bounty?.[res] || 0;
         const plunderAmount = movement.payload.plunder?.[res] || 0;
         const totalAmount = bountyAmount + plunderAmount;
 
         if (totalAmount > 0) {
-            if (isAI) {
-                const half = totalAmount / 2;
-                village.budget.econ[res] = Math.min(village.resources[res].capacity, village.budget.econ[res] + half);
-                village.budget.mil[res] = Math.min(village.resources[res].capacity, village.budget.mil[res] + half);
-                village.resources[res].current = village.budget.econ[res] + village.budget.mil[res];
-            } else {
-                const resourceData = village.resources[res];
-                resourceData.current = Math.min(resourceData.capacity, resourceData.current + totalAmount);
-            }
+            addResourceIncomeToVillage(village, res, totalAmount);
         }
     }
 }
@@ -326,21 +318,10 @@ function handleTradeArrival(movement) {
     const targetVillage = gameState.villages.find(v => v.coords.x === movement.targetCoords.x && v.coords.y === movement.targetCoords.y);
     if (!targetVillage) return;
 
-    // Si es IA, el comercio entrante se reparte 50/50 (o según lógica de rebalanceo, pero 50/50 es seguro)
-    const isAI = targetVillage.ownerId.startsWith('ai_') && targetVillage.budget;
-
     for (const res in movement.payload.resources) {
         const amount = movement.payload.resources[res];
         if (amount > 0) {
-            if (isAI) {
-                const half = amount / 2;
-                targetVillage.budget.econ[res] = Math.min(targetVillage.resources[res].capacity, targetVillage.budget.econ[res] + half);
-                targetVillage.budget.mil[res] = Math.min(targetVillage.resources[res].capacity, targetVillage.budget.mil[res] + half);
-                targetVillage.resources[res].current = targetVillage.budget.econ[res] + targetVillage.budget.mil[res];
-            } else {
-                const resourceData = targetVillage.resources[res];
-                resourceData.current = Math.min(resourceData.capacity, resourceData.current + amount);
-            }
+            addResourceIncomeToVillage(targetVillage, res, amount);
         }
     }
     
@@ -466,6 +447,7 @@ self.onmessage = function(event) {
             if (village.ownerId.startsWith('ai_')) {
                 bonusToPass = aiBonus;
                 budgetConfig = personality.buildRatio;
+                initializeAIVillageBudget(village, budgetConfig);
             }
             
             const processor = new VillageProcessor(village, gameConfig, gameState.alliance.bonuses, bonusToPass, budgetConfig);

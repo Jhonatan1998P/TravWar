@@ -109,15 +109,21 @@ class AIGoalManager {
         return step.type || 'step';
     }
 
-    #getBudgetSplit(village, stepCategory) {
-        if (village.budgetRatio) {
-            if (stepCategory === 'economic') return village.budgetRatio.econ ?? 0.5;
-            return village.budgetRatio.mil ?? 0.5;
-        }
+    #getTotalResourcePool(village) {
+        return {
+            wood: village.resources.wood.current,
+            stone: village.resources.stone.current,
+            iron: village.resources.iron.current,
+            food: village.resources.food.current,
+        };
+    }
 
-        const personality = this.#controller.getPersonality();
-        if (stepCategory === 'economic') return personality.buildRatio?.econ || 0.5;
-        return personality.buildRatio?.mil || 0.5;
+    #getBudgetPool(village, budgetType) {
+        const totalPool = this.#getTotalResourcePool(village);
+        if (budgetType === 'econ') {
+            return village.budget?.econ || totalPool;
+        }
+        return village.budget?.mil || totalPool;
     }
 
     #processGoalCategory(village, villageIndex, gameState, category) {
@@ -148,7 +154,7 @@ class AIGoalManager {
             return;
         }
 
-        if (this.#isStepCompleted(currentStep, village, gameState)) {
+        if (this.#isStepCompleted(currentStep, village, gameState, activeGoal)) {
             this.#markStepAsComplete(activeGoal, activeGoal.currentStepIndex);
             this.#rotateToNextStep(activeGoal);
             return; 
@@ -357,56 +363,68 @@ class AIGoalManager {
         const cost = this.#getStepCost(failedStep, village, gameState);
         const economicActions = ['building', 'resource_fields_level', 'research', 'upgrade'];
         const stepCategory = economicActions.includes(failedStep.type) ? 'economic' : 'military';
-        const budgetRatioForStep = this.#getBudgetSplit(village, stepCategory);
+        const budgetType = stepCategory === 'economic' ? 'econ' : 'mil';
+        const budgetPool = this.#getBudgetPool(village, budgetType);
+        const totalPool = this.#getTotalResourcePool(village);
 
-        for (const res in cost) {
-            const effectiveCapacity = village.resources[res].capacity * budgetRatioForStep;
-            if (cost[res] > effectiveCapacity) {
-                const storageType = STORAGE_BUILDING_BY_RESOURCE[res] || 'warehouse';
-                const MAX_STORAGE_LEVEL = 20;
+        const capacityBlockedResource = Object.keys(cost).find(res => {
+            const capacity = Number(village.resources?.[res]?.capacity);
+            if (!Number.isFinite(capacity)) return false;
+            return cost[res] > capacity;
+        });
 
-                const storages = village.buildings.filter(b => b.type === storageType);
-                const queuedStorageIds = new Set(village.constructionQueue.map(j => j.buildingId));
-                
-                const candidateForUpgrade = storages
-                    .filter(s => s.level < MAX_STORAGE_LEVEL && !queuedStorageIds.has(s.id))
-                    .sort((a, b) => a.level - b.level)[0];
+        if (capacityBlockedResource) {
+            const storageType = STORAGE_BUILDING_BY_RESOURCE[capacityBlockedResource] || 'warehouse';
+            const MAX_STORAGE_LEVEL = 20;
 
-                if (candidateForUpgrade) {
-                    const reason = `Se necesita más capacidad de ${storageType}. Mejorando el existente.`;
-                    pushSubGoal({
-                        id: `SUB_GOAL:UPGRADE_${storageType.toUpperCase()}`,
-                        priority: 997,
-                        plan: [{ type: 'building', buildingType: storageType, level: candidateForUpgrade.level + 1 }],
-                        currentStepIndex: 0,
-                        stepStartTime: Date.now(),
-                        incompleteStepIndices: [0],
-                        category: 'economic'
-                    }, reason);
-                    return true;
-                }
+            const storages = village.buildings.filter(b => b.type === storageType);
+            const queuedStorageIds = new Set(village.constructionQueue.map(j => j.buildingId));
+            
+            const candidateForUpgrade = storages
+                .filter(s => s.level < MAX_STORAGE_LEVEL && !queuedStorageIds.has(s.id))
+                .sort((a, b) => a.level - b.level)[0];
 
-                const emptySlot = village.buildings.find(b => b.type === 'empty' && /^v[0-9]+/.test(b.id));
-                if (emptySlot) {
-                    const reason = `Se necesita más capacidad de ${storageType}. Construyendo nuevo.`;
-                    pushSubGoal({
-                        id: `SUB_GOAL:BUILD_NEW_${storageType.toUpperCase()}`,
-                        priority: 996,
-                        plan: [{ type: 'building', buildingType: storageType, level: 1 }],
-                        currentStepIndex: 0,
-                        stepStartTime: Date.now(),
-                        incompleteStepIndices: [0],
-                        category: 'economic'
-                    }, reason);
-                    return true;
-                }
-                
-                this.#controller.log('warn', village, 'Almacenamiento Bloqueado', `No se puede aumentar la capacidad de ${storageType}.`);
+            if (candidateForUpgrade) {
+                const reason = `Se necesita más capacidad de ${storageType}. Mejorando el existente.`;
+                pushSubGoal({
+                    id: `SUB_GOAL:UPGRADE_${storageType.toUpperCase()}`,
+                    priority: 997,
+                    plan: [{ type: 'building', buildingType: storageType, level: candidateForUpgrade.level + 1 }],
+                    currentStepIndex: 0,
+                    stepStartTime: Date.now(),
+                    incompleteStepIndices: [0],
+                    category: 'economic'
+                }, reason);
                 return true;
             }
+
+            const emptySlot = village.buildings.find(b => b.type === 'empty' && /^v[0-9]+/.test(b.id));
+            if (emptySlot) {
+                const reason = `Se necesita más capacidad de ${storageType}. Construyendo nuevo.`;
+                pushSubGoal({
+                    id: `SUB_GOAL:BUILD_NEW_${storageType.toUpperCase()}`,
+                    priority: 996,
+                    plan: [{ type: 'building', buildingType: storageType, level: 1 }],
+                    currentStepIndex: 0,
+                    stepStartTime: Date.now(),
+                    incompleteStepIndices: [0],
+                    category: 'economic'
+                }, reason);
+                return true;
+            }
+
+            this.#controller.log('warn', village, 'Almacenamiento Bloqueado', `No se puede aumentar la capacidad de ${storageType}.`);
+            return true;
         }
 
-        pushSubGoal({ id: `SUB_GOAL:SAVE_RESOURCES_FOR:${stepName.toUpperCase()}`, plan: [], currentStepIndex: 0, stepStartTime: Date.now(), incompleteStepIndices: [], category }, "Recursos insuficientes.");
+        const hasBudgetShortage = Object.keys(cost).some(res => (budgetPool[res] || 0) < cost[res]);
+        const hasTotalShortage = Object.keys(cost).some(res => (totalPool[res] || 0) < cost[res]);
+
+        const shortageReason = (hasBudgetShortage && !hasTotalShortage)
+            ? `Presupuesto ${budgetType.toUpperCase()} insuficiente para ${stepName}`
+            : 'Recursos insuficientes';
+
+        pushSubGoal({ id: `SUB_GOAL:SAVE_RESOURCES_FOR:${stepName.toUpperCase()}`, plan: [], currentStepIndex: 0, stepStartTime: Date.now(), incompleteStepIndices: [], category }, shortageReason);
         return false; 
     }
     
@@ -447,19 +465,7 @@ class AIGoalManager {
             const cost = this.#getStepCost(stepToAfford, village, gameState);
 
             const goalCategory = parentGoal.category === 'military' ? 'mil' : 'econ';
-            const budget = goalCategory === 'econ'
-                ? (village.budget?.econ || {
-                    wood: village.resources.wood.current,
-                    stone: village.resources.stone.current,
-                    iron: village.resources.iron.current,
-                    food: village.resources.food.current,
-                })
-                : (village.budget?.mil || {
-                    wood: village.resources.wood.current,
-                    stone: village.resources.stone.current,
-                    iron: village.resources.iron.current,
-                    food: village.resources.food.current,
-                });
+            const budget = this.#getBudgetPool(village, goalCategory);
 
             const canAfford = Object.keys(cost).every(res => (budget[res] || 0) >= cost[res]);
             
@@ -470,7 +476,7 @@ class AIGoalManager {
             return canAfford;
         }
 
-        return goal.plan.every(step => this.#isStepCompleted(step, village, gameState));
+        return goal.plan.every(step => this.#isStepCompleted(step, village, gameState, goal));
     }
 
     #getStepCost(step, village, gameState) {
@@ -483,13 +489,14 @@ class AIGoalManager {
         });
     }
 
-    #isStepCompleted(step, village, gameState) {
+    #isStepCompleted(step, village, gameState, goal = null) {
         return isStepCompleted({
             step,
             village,
             gameState,
             ownerId: this.#controller.getOwnerId(),
             actionExecutor: this.#actionExecutor,
+            goalScope: goal?.scope,
         });
     }
 }

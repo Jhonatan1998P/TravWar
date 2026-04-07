@@ -29,7 +29,7 @@ class AIActionExecutor {
             case 'resource_fields_level':
                 return this._manageConstructionForGoal(village, gameState, step);
             case 'units':
-                return this._manageRecruitmentForGoal(village, gameState, step);
+                return this._manageRecruitmentForGoal(village, gameState, step, activeGoal);
             case 'research':
                 return this._manageResearchForGoal(village, gameState, step);
             case 'upgrade':
@@ -54,7 +54,7 @@ class AIActionExecutor {
         });
     }
 
-    _manageRecruitmentForGoal(village, gameState, step) {
+    _manageRecruitmentForGoal(village, gameState, step, activeGoal = null) {
         return manageRecruitmentForGoal({
             village,
             gameState,
@@ -65,6 +65,8 @@ class AIActionExecutor {
             getTrainingBuildingForUnit: this.getTrainingBuildingForUnit.bind(this),
             sendCommand: this._controller.getSendCommand(),
             log: this._controller.log.bind(this._controller),
+            goalScope: activeGoal?.scope,
+            gameSpeed: this._controller.getGameConfig()?.gameSpeed || 1,
         });
     }
 

@@ -1,11 +1,13 @@
 import GameConfig from './GameConfig.js';
 import appStore from '@shared/state/GlobalStore.js';
 import GameWorker from './GameWorker.js?worker&inline';
+import { perfCollector } from '@shared/lib/perf.js';
 
 const STATE_STORAGE_KEY = 'game_state_v2';
 const CONFIG_STORAGE_KEY = 'game_config';
 const SESSION_ID_KEY = 'game_session_id';
 const FORCE_NEW_GAME_SESSION_KEY = 'force_new_game_session';
+const SAVE_STATE_DEBOUNCE_MS = 3000;
 const DEBUG = false;
 
 class GameManager {
@@ -13,15 +15,36 @@ class GameManager {
     #config;
     #sessionId;
     #isInitialized = false;
+    #persistTimerId = null;
+    #pendingPersistState = null;
+    #pendingPersistLastTick = null;
+    #lastPersistedSerializedData = null;
 
     constructor() {
         if (GameManager.instance) {
             return GameManager.instance;
         }
+
+        if (typeof document !== 'undefined') {
+            document.addEventListener('visibilitychange', () => {
+                if (document.visibilityState === 'hidden') {
+                    this.#flushPendingStatePersist();
+                }
+            });
+        }
+
+        if (typeof window !== 'undefined') {
+            window.addEventListener('pagehide', () => {
+                this.#flushPendingStatePersist();
+            });
+        }
+
         GameManager.instance = this;
     }
 
     resetAndStart() {
+        this.#flushPendingStatePersist();
+
         if (this.#worker) {
             this.#worker.terminate();
             this.#worker = null;
@@ -63,10 +86,13 @@ class GameManager {
         const savedRawData = localStorage.getItem(STATE_STORAGE_KEY);
         let savedState = null;
 
+        this.#lastPersistedSerializedData = savedRawData || null;
+
         if (forcedSessionId) {
             console.log("Señal de reinicio forzado detectada. Creando nueva partida.");
             this.#sessionId = forcedSessionId;
             localStorage.removeItem(STATE_STORAGE_KEY);
+            this.#lastPersistedSerializedData = null;
             sessionStorage.removeItem(FORCE_NEW_GAME_SESSION_KEY);
             savedState = null;
         } else if (savedRawData) {
@@ -120,13 +146,13 @@ class GameManager {
         switch (type) {
             case 'gamestate:initialized':
                 appStore.getState().setGameInitialized(true);
-                this.#saveState(payload.state, payload.lastTick);
+                this.#queueStatePersist(payload.state, payload.lastTick, { immediate: true });
                 document.dispatchEvent(new CustomEvent('gamestate:initialized', { detail: payload }));
                 document.dispatchEvent(new CustomEvent('gamestate:refreshed', { detail: payload }));
                 break;
             
             case 'gamestate:updated':
-                this.#saveState(payload.state, payload.lastTick);
+                this.#queueStatePersist(payload.state, payload.lastTick);
                 document.dispatchEvent(new CustomEvent('gamestate:refreshed', { detail: payload }));
                 break;
             
@@ -190,7 +216,7 @@ class GameManager {
         }));
     }
 
-    #saveState(state, lastTick) {
+    #queueStatePersist(state, lastTick, options = {}) {
         if (!state || !lastTick || state.sessionId !== this.#sessionId) {
             console.warn("Intento de guardado de estado con sessionId incorrecto. Abortando.", {
                 stateSession: state?.sessionId,
@@ -198,16 +224,81 @@ class GameManager {
             });
             return;
         }
+
+        const { immediate = false } = options;
+
+        this.#pendingPersistState = state;
+        this.#pendingPersistLastTick = lastTick;
+        perfCollector.incrementCounter('persist.queueUpdates');
+
+        if (immediate) {
+            this.#flushPendingStatePersist();
+            return;
+        }
+
+        if (this.#persistTimerId !== null) {
+            return;
+        }
+
+        this.#persistTimerId = setTimeout(() => {
+            this.#persistTimerId = null;
+            this.#flushPendingStatePersist();
+        }, SAVE_STATE_DEBOUNCE_MS);
+
+        perfCollector.observeGauge('persist.debounceMs', SAVE_STATE_DEBOUNCE_MS);
+    }
+
+    #flushPendingStatePersist() {
+        if (this.#persistTimerId !== null) {
+            clearTimeout(this.#persistTimerId);
+            this.#persistTimerId = null;
+        }
+
+        const state = this.#pendingPersistState;
+        const lastTick = this.#pendingPersistLastTick;
+
+        this.#pendingPersistState = null;
+        this.#pendingPersistLastTick = null;
+
+        if (!state || !lastTick) {
+            return;
+        }
+
+        if (state.sessionId !== this.#sessionId) {
+            console.warn("Se omitio persistencia por sessionId inconsistente.", {
+                stateSession: state.sessionId,
+                managerSession: this.#sessionId
+            });
+            return;
+        }
+
         const dataToStore = { ...state, lastTick };
+
         try {
+            const serializeStart = performance.now();
             const serializedData = btoa(JSON.stringify(dataToStore));
+
+            perfCollector.observeDuration('persist.serializeDuration', performance.now() - serializeStart);
+
+            if (serializedData === this.#lastPersistedSerializedData) {
+                perfCollector.incrementCounter('persist.skippedSamePayload');
+                return;
+            }
+
+            const storageStart = performance.now();
             localStorage.setItem(STATE_STORAGE_KEY, serializedData);
+            perfCollector.observeDuration('persist.storageWriteDuration', performance.now() - storageStart);
+
+            this.#lastPersistedSerializedData = serializedData;
+            perfCollector.incrementCounter('persist.writes');
+
             if (DEBUG) {
                 console.log("Game state saved to localStorage. Session ID:", this.#sessionId);
                 console.log("Saved data size:", serializedData.length, "bytes.");
             }
             } catch (e) {
             console.error("Error saving game state to localStorage:", e);
+            perfCollector.incrementCounter('persist.errors');
         }
     }
 

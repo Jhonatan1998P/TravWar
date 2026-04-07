@@ -2,49 +2,154 @@ import gameManager from '@game/state/GameManager.js';
 import { gameData } from '../core/GameData.js';
 import { formatTime } from '@shared/lib/formatters.js';
 import uiRenderScheduler from './UIRenderScheduler.js';
+import { selectConstructionQueueSignature } from './renderSelectors.js';
+import { reconcileList } from './reconcileList.js';
+import countdownService from './CountdownService.js';
+
+const RESOURCE_ICON = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2 1M4 7l2-1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" /></svg>`;
+const INFRA_ICON = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>`;
+const CANCEL_ICON = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>`;
 
 class ConstructionQueueUI {
     #container;
-    #countdownIntervals = new Map();
+    #activeCountdownKeys = new Set();
+    #jobNodes = new Map();
+    #headerCounter;
+    #list;
+    #emptyState;
+    #countdownScope;
 
     constructor(containerId) {
         this.#container = document.getElementById(containerId);
         if (!this.#container) {
-            console.error(`[ConstructionQueueUI] No se encontró el contenedor con el ID: ${containerId}`);
+            console.error(`[ConstructionQueueUI] No se encontro el contenedor con el ID: ${containerId}`);
             return;
         }
-        uiRenderScheduler.register(`construction-queue-${containerId}`, this.render.bind(this));
+
+        this.#countdownScope = `construction:${containerId}`;
+
+        this.#setupStaticMarkup();
+
+        this.#container.addEventListener('click', (event) => {
+            const button = event.target.closest('.cancel-btn');
+            if (!button) return;
+
+            const jobId = button.dataset.jobId;
+            if (jobId) {
+                gameManager.sendCommand('cancel_construction', { jobId });
+            }
+        });
+
+        uiRenderScheduler.register(`construction-queue-${containerId}`, this.render.bind(this), [
+            selectConstructionQueueSignature
+        ]);
     }
 
-    _handleCancelClick(event) {
-        const jobId = event.currentTarget.dataset.jobId;
-        if (jobId) {
-            gameManager.sendCommand('cancel_construction', { jobId });
-        }
+    #setupStaticMarkup() {
+        this.#container.replaceChildren();
+
+        const header = document.createElement('div');
+        header.className = 'flex justify-between items-center mb-2 px-2';
+
+        const title = document.createElement('h3');
+        title.className = 'text-lg font-semibold text-yellow-400';
+        title.textContent = 'Construccion';
+
+        this.#headerCounter = document.createElement('span');
+        this.#headerCounter.className = 'text-sm font-mono text-gray-400';
+        this.#headerCounter.textContent = '0 / 0';
+
+        header.append(title, this.#headerCounter);
+
+        this.#list = document.createElement('ul');
+        this.#list.className = 'space-y-2';
+
+        this.#emptyState = document.createElement('div');
+        this.#emptyState.className = 'text-center text-gray-500 text-sm py-4';
+        this.#emptyState.textContent = 'No hay construcciones en curso.';
+
+        this.#container.append(header, this.#list, this.#emptyState);
     }
 
-    _startCountdown(job) {
-        if (this.#countdownIntervals.has(job.jobId)) {
-            clearInterval(this.#countdownIntervals.get(job.jobId));
-        }
+    #createJobNode() {
+        const item = document.createElement('li');
+        item.className = 'flex items-center justify-between p-2 bg-gray-700/60 rounded-lg shadow-md';
 
-        const timerElement = this.#container.querySelector(`[data-timer-for="${job.jobId}"]`);
+        const iconWrapper = document.createElement('div');
+        iconWrapper.className = 'flex-shrink-0 w-8 flex items-center justify-center';
+
+        const content = document.createElement('div');
+        content.className = 'flex-grow';
+
+        const buildingName = document.createElement('span');
+        buildingName.className = 'font-semibold text-white';
+
+        const levelText = document.createElement('span');
+        levelText.className = 'text-gray-400 text-sm';
+
+        content.append(buildingName, levelText);
+
+        const timer = document.createElement('div');
+        timer.className = 'font-mono text-yellow-300 w-24 text-center';
+
+        const cancelButton = document.createElement('button');
+        cancelButton.className = 'cancel-btn ml-2 text-red-500 hover:text-red-400 w-6 h-6 flex items-center justify-center rounded-full bg-red-900/50 hover:bg-red-800/50 transition-colors';
+        cancelButton.title = 'Cancelar construccion';
+        cancelButton.innerHTML = CANCEL_ICON;
+
+        item.append(iconWrapper, content, timer, cancelButton);
+
+        item.__refs = {
+            iconWrapper,
+            buildingName,
+            levelText,
+            timer,
+            cancelButton
+        };
+
+        return item;
+    }
+
+    #updateJobNode(node, job) {
+        const refs = node.__refs;
+        const buildingData = gameData.buildings[job.buildingType];
+        const isResourceJob = /^[wcif]/.test(job.buildingId);
+
+        refs.iconWrapper.innerHTML = isResourceJob ? RESOURCE_ICON : INFRA_ICON;
+        refs.buildingName.textContent = buildingData?.name || job.buildingType;
+        refs.levelText.textContent = ` (subiendo a Nivel ${job.targetLevel})`;
+        refs.timer.dataset.timerFor = job.jobId;
+        refs.timer.textContent = formatTime((job.endTime - Date.now()) / 1000);
+        refs.cancelButton.dataset.jobId = job.jobId;
+    }
+
+    #subscribeCountdown(job, nextCountdownKeys) {
+        const countdownKey = `${this.#countdownScope}:${job.jobId}`;
+        nextCountdownKeys.add(countdownKey);
+
+        const timerElement = this.#list.querySelector(`[data-timer-for="${job.jobId}"]`);
         if (!timerElement) return;
 
-        const intervalId = setInterval(() => {
-            const remainingMs = job.endTime - Date.now();
-            const currentRemainingSeconds = remainingMs / 1000;
-
-            if (currentRemainingSeconds <= 0) {
-                timerElement.textContent = formatTime(0);
-                clearInterval(intervalId);
-                this.#countdownIntervals.delete(job.jobId);
-            } else {
-                timerElement.textContent = formatTime(currentRemainingSeconds);
+        countdownService.subscribe({
+            id: countdownKey,
+            endTime: job.endTime,
+            onTick: (remainingSeconds) => {
+                if (!timerElement.isConnected) {
+                    return;
+                }
+                timerElement.textContent = formatTime(remainingSeconds);
             }
-        }, 250);
+        });
+    }
 
-        this.#countdownIntervals.set(job.jobId, intervalId);
+    #syncCountdownSubscriptions(nextCountdownKeys) {
+        for (const key of this.#activeCountdownKeys) {
+            if (!nextCountdownKeys.has(key)) {
+                countdownService.unsubscribe(key);
+            }
+        }
+
+        this.#activeCountdownKeys = nextCountdownKeys;
     }
 
     render({ state, lastTick }) {
@@ -52,73 +157,33 @@ class ConstructionQueueUI {
 
         const activeVillage = state.villages.find(v => v.id === state.activeVillageId);
         if (!activeVillage) {
-            this.#container.innerHTML = '';
-            return;
-        }
-        
-        const queue = activeVillage.constructionQueue;
-        const maxSlots = activeVillage.maxConstructionSlots;
-        const currentJobIds = new Set(queue.map(job => job.jobId));
-
-        this.#countdownIntervals.forEach((intervalId, jobId) => {
-            if (!currentJobIds.has(jobId)) {
-                clearInterval(intervalId);
-                this.#countdownIntervals.delete(jobId);
-            }
-        });
-
-        if (!queue || queue.length === 0) {
-            this.#container.innerHTML = '<div class="text-center text-gray-500 text-sm py-4">No hay construcciones en curso.</div>';
+            this.#headerCounter.textContent = '0 / 0';
+            this.#emptyState.classList.remove('hidden');
+            reconcileList(this.#list, [], job => job.jobId, this.#jobNodes, () => null, () => {});
+            this.#syncCountdownSubscriptions(new Set());
             return;
         }
 
-        const resourceIcon = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14 10l-2 1m0 0l-2-1m2 1v2.5M20 7l-2 1m2-1l-2-1m2 1v2.5M14 4l-2-1-2 1M4 7l2 1M4 7l2-1M4 7v2.5M12 21l-2-1m2 1l2-1m-2 1v-2.5M6 18l-2-1v-2.5M18 18l2-1v-2.5" /></svg>`;
-        const infraIcon = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>`;
+        const queue = activeVillage.constructionQueue || [];
+        const maxSlots = activeVillage.maxConstructionSlots || 0;
 
-        let queueHTML = `
-            <div class="flex justify-between items-center mb-2 px-2">
-                <h3 class="text-lg font-semibold text-yellow-400">Construcción</h3>
-                <span class="text-sm font-mono text-gray-400">${queue.length} / ${maxSlots}</span>
-            </div>
-            <ul class="space-y-2">
-        `;
-        
-        queue.forEach(job => {
-            const buildingData = gameData.buildings[job.buildingType];
-            const initialRemainingSeconds = (job.endTime - Date.now()) / 1000;
-            const isResourceJob = /^[wcif]/.test(job.buildingId);
+        this.#headerCounter.textContent = `${queue.length} / ${maxSlots}`;
+        this.#emptyState.classList.toggle('hidden', queue.length > 0);
 
-            queueHTML += `
-                <li class="flex items-center justify-between p-2 bg-gray-700/60 rounded-lg shadow-md">
-                    <div class="flex-shrink-0 w-8 flex items-center justify-center">
-                        ${isResourceJob ? resourceIcon : infraIcon}
-                    </div>
-                    <div class="flex-grow">
-                        <span class="font-semibold text-white">${buildingData.name}</span>
-                        <span class="text-gray-400 text-sm">(subiendo a Nivel ${job.targetLevel})</span>
-                    </div>
-                    <div class="font-mono text-yellow-300 w-24 text-center" data-timer-for="${job.jobId}">
-                        ${formatTime(initialRemainingSeconds)}
-                    </div>
-                    <button data-job-id="${job.jobId}" class="cancel-btn ml-2 text-red-500 hover:text-red-400 w-6 h-6 flex items-center justify-center rounded-full bg-red-900/50 hover:bg-red-800/50 transition-colors" title="Cancelar construcción">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                    </button>
-                </li>
-            `;
-        });
-        queueHTML += '</ul>';
+        reconcileList(
+            this.#list,
+            queue,
+            job => job.jobId,
+            this.#jobNodes,
+            () => this.#createJobNode(),
+            (node, job) => this.#updateJobNode(node, job)
+        );
 
-        this.#container.innerHTML = queueHTML;
-
-        this.#container.querySelectorAll('.cancel-btn').forEach(button => {
-            button.addEventListener('click', this._handleCancelClick.bind(this));
-        });
-        
-        queue.forEach(job => {
-            this._startCountdown(job);
-        });
+        const nextCountdownKeys = new Set();
+        for (const job of queue) {
+            this.#subscribeCountdown(job, nextCountdownKeys);
+        }
+        this.#syncCountdownSubscriptions(nextCountdownKeys);
     }
 }
 

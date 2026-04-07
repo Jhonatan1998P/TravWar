@@ -194,18 +194,13 @@ export class GameStateFactory {
             research: { completed: [], queue: [] }, smithy: { upgrades: {}, queue: [] }
         };
 
-        // Inicializar presupuesto para IA
+        // Inicializar estructura de presupuesto para IA.
+        // El reparto por ratio se aplica en el worker durante init.
         if (ownerId.startsWith('ai_')) {
             village.budget = {
                 econ: { wood: 0, stone: 0, iron: 0, food: 0 },
                 mil: { wood: 0, stone: 0, iron: 0, food: 0 }
             };
-            // Repartir recursos iniciales 50/50 para empezar
-            for(const res in village.resources) {
-                const half = village.resources[res].current / 2;
-                village.budget.econ[res] = half;
-                village.budget.mil[res] = half;
-            }
         }
 
         return village;

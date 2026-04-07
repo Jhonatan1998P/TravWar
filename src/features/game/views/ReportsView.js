@@ -2,10 +2,13 @@ import gameManager from '@game/state/GameManager.js';
 import ReportListUI from '../ui/ReportListUI.js';
 import toastUI from '../ui/ToastUI.js';
 import uiRenderScheduler from '../ui/UIRenderScheduler.js';
+import { perfCollector } from '@shared/lib/perf.js';
+import { selectReportsSignature, selectUnreadPlayerReports } from '../ui/renderSelectors.js';
 
 class ReportsView {
     #reportListUI;
     #gameState;
+    #didReportFirstMeaningfulPaint = false;
 
     constructor() {
         this._handleGameStateUpdate = this._handleGameStateUpdate.bind(this);
@@ -24,10 +27,15 @@ class ReportsView {
     }
 
     mount() {
+        perfCollector.markStart('view.reports.mount');
+        perfCollector.markStart('view.reports.firstMeaningfulPaint');
+
         this.#reportListUI = new ReportListUI('reports-container');
         this.initializeEventListeners();
         gameManager.sendCommand('mark_reports_as_read');
         gameManager.sendCommand('get_latest_state');
+
+        perfCollector.markEnd('view.reports.mount');
     }
 
     unmount() {
@@ -36,7 +44,10 @@ class ReportsView {
     }
 
     initializeEventListeners() {
-        uiRenderScheduler.register('reports-view', this._handleGameStateUpdate);
+        uiRenderScheduler.register('reports-view', this._handleGameStateUpdate, [
+            selectReportsSignature,
+            selectUnreadPlayerReports
+        ]);
         document.addEventListener('notify:battle_report', this._handleNewReport);
     }
 
@@ -46,6 +57,11 @@ class ReportsView {
         this.#gameState = state;
         
         this.#reportListUI.render(state);
+
+        if (!this.#didReportFirstMeaningfulPaint) {
+            this.#didReportFirstMeaningfulPaint = true;
+            perfCollector.markEnd('view.reports.firstMeaningfulPaint');
+        }
     }
     
     _handleNewReport(event) {

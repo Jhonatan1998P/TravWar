@@ -3,19 +3,17 @@ import { checkAccess } from './router-guard.js';
 import appStore from '@shared/state/GlobalStore.js';
 import uiMainManager from '@game/ui/UIMainManager.js';
 import uiRenderScheduler from '@game/ui/UIRenderScheduler.js';
+import { perfCollector } from '@shared/lib/perf.js';
 
-import buildingInfoUI from '@game/ui/BuildingInfoUI.js';
-import attackPanelUI from '@game/ui/AttackPanelUI.js';
-import tradePanelUI from '@game/ui/TradePanelUI.js';
-import battleReportUI from '@game/ui/BattleReportUI.js';
-import toastUI from '@game/ui/ToastUI.js';
-import tooltipUI from '@game/ui/TooltipUI.js';
+let tooltipUILoadPromise = null;
 
-import ConfigView from '@game/views/ConfigView.js';
-import VillageView from '@game/views/VillageView.js';
-import VillageCenterView from '@game/views/VillageCenterView.js';
-import ReportsView from '@game/views/ReportsView.js';
-import MapView from '@game/views/MapView.js';
+async function ensureTooltipUILoaded() {
+    if (!tooltipUILoadPromise) {
+        tooltipUILoadPromise = import('@game/ui/TooltipUI.js');
+    }
+
+    return tooltipUILoadPromise;
+}
 
 
 class Router {
@@ -27,16 +25,17 @@ class Router {
     #appFooter; 
     #resourceBar; 
     #villageContainer; 
+    #navigationRequestId = 0;
 
     constructor() {
         this.#appRoot = document.getElementById('app-root');
         this.#routes = {
-            '/': ConfigView, 
-            '/config': ConfigView,
-            '/village': VillageView,
-            '/village-center': VillageCenterView,
-            '/reports': ReportsView,
-            '/map': MapView,
+            '/': () => import('@game/views/ConfigView.js').then(module => module.default),
+            '/config': () => import('@game/views/ConfigView.js').then(module => module.default),
+            '/village': () => import('@game/views/VillageView.js').then(module => module.default),
+            '/village-center': () => import('@game/views/VillageCenterView.js').then(module => module.default),
+            '/reports': () => import('@game/views/ReportsView.js').then(module => module.default),
+            '/map': () => import('@game/views/MapView.js').then(module => module.default)
         };
     }
 
@@ -55,13 +54,6 @@ class Router {
 
         uiMainManager.initialize();
         uiRenderScheduler.init();
-        
-        buildingInfoUI; 
-        attackPanelUI;
-        tradePanelUI;
-        battleReportUI;
-        toastUI;
-        tooltipUI; 
 
         document.addEventListener('game:access_denied', (event) => {
             console.warn('Game access denied:', event.detail.reason);
@@ -82,7 +74,9 @@ class Router {
             this.navigate('/village', true);
         });
 
-        window.addEventListener('popstate', () => this.#loadView(window.location.pathname));
+        window.addEventListener('popstate', () => {
+            void this.#loadView(window.location.pathname);
+        });
 
         const path = window.location.pathname;
         if (path === '/' || path === '/config') {
@@ -110,22 +104,54 @@ class Router {
         } else {
             window.history.pushState(null, '', path);
         }
-        this.#loadView(path);
+        void this.#loadView(path);
     }
 
-    #loadView(path) {
+    async #loadView(path) {
+        const navigationRequestId = ++this.#navigationRequestId;
+        const routeMetricKey = `route.${(path || 'unknown').replace(/\//g, '_') || 'root'}.load`;
+        perfCollector.markStart(routeMetricKey);
+
         appStore.getState().setCurrentRoute(path);
 
-        const ViewClass = this.#routes[path];
+        const loadViewClass = this.#routes[path];
 
-        if (!ViewClass) {
+        if (!loadViewClass) {
             console.error(`No route found for path: ${path}. Navigating to config.`);
+            perfCollector.markEnd(routeMetricKey);
             this.navigate('/config', true);
             return;
         }
 
         if (this.#currentView && typeof this.#currentView.unmount === 'function') {
             this.#currentView.unmount();
+        }
+
+        this.#currentView = null;
+        this.#appRoot.innerHTML = '<div class="h-full flex items-center justify-center text-sm text-gray-400">Cargando vista...</div>';
+
+        let ViewClass;
+        try {
+            ViewClass = await loadViewClass();
+        } catch (error) {
+            console.error(`Error loading route ${path}:`, error);
+            appStore.getState().setLastError('route_load_error');
+            perfCollector.incrementCounter('router.routeLoadErrors');
+            perfCollector.markEnd(routeMetricKey);
+
+            if (path !== '/config') {
+                this.navigate('/config', true);
+            }
+            return;
+        }
+
+        if (navigationRequestId !== this.#navigationRequestId) {
+            perfCollector.markEnd(routeMetricKey);
+            return;
+        }
+
+        if (path === '/village' || path === '/village-center') {
+            await ensureTooltipUILoaded();
         }
 
         this.#currentView = new ViewClass();
@@ -163,6 +189,8 @@ class Router {
                 btn.classList.add('active');
             }
         });
+
+        perfCollector.markEnd(routeMetricKey);
     }
 }
 

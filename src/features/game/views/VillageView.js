@@ -1,7 +1,6 @@
 import gameManager from '@game/state/GameManager.js';
 import { renderBuildingSlots, initializeBuildingSlotClicks } from '../ui/BuildingSlotsUI.js';
 import { renderResourceBar } from '../ui/ResourceBarUI.js';
-import buildingInfoUI from '../ui/BuildingInfoUI.js';
 import ActivityModalUI from '../ui/ActivityModalUI.js';
 import ConstructionQueueUI from '../ui/ConstructionQueueUI.js';
 import RecruitmentQueueUI from '../ui/RecruitmentQueueUI.js';
@@ -13,6 +12,7 @@ import toastUI from '../ui/ToastUI.js';
 import { gameData } from '../core/GameData.js';
 import { formatNumber } from '@shared/lib/formatters.js';
 import uiRenderScheduler from '../ui/UIRenderScheduler.js';
+import { perfCollector } from '@shared/lib/perf.js';
 
 class VillageView {
     #populationDisplay;
@@ -24,6 +24,7 @@ class VillageView {
     #smithyQueueUI;
     #troopsUI;
     #movementsUI;
+    #didReportFirstMeaningfulPaint = false;
 
     constructor() {
         this._handleGameStateUpdate = this._handleGameStateUpdate.bind(this);
@@ -43,6 +44,9 @@ class VillageView {
     }
 
     mount() {
+        perfCollector.markStart('view.village.mount');
+        perfCollector.markStart('view.village.firstMeaningfulPaint');
+
         this.#populationDisplay = document.getElementById('population-display');
         
         this.#activityModalUI = new ActivityModalUI();
@@ -57,6 +61,8 @@ class VillageView {
 
         this.initializeEventListeners();
         gameManager.sendCommand('get_latest_state');
+
+        perfCollector.markEnd('view.village.mount');
     }
 
     unmount() {
@@ -88,6 +94,11 @@ class VillageView {
 
         if (this.#populationDisplay && activeVillage.population) {
             this.#populationDisplay.textContent = formatNumber(activeVillage.population.current);
+        }
+
+        if (!this.#didReportFirstMeaningfulPaint) {
+            this.#didReportFirstMeaningfulPaint = true;
+            perfCollector.markEnd('view.village.firstMeaningfulPaint');
         }
     }
 

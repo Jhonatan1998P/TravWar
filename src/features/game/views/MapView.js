@@ -2,6 +2,8 @@ import { gameData } from '../core/GameData.js'
 import gameManager from '@game/state/GameManager.js';
 import TileInfoUI from '../ui/TileInfoUI.js';
 import uiRenderScheduler from '../ui/UIRenderScheduler.js';
+import { perfCollector } from '@shared/lib/perf.js';
+import { selectMapViewSignature } from '../ui/renderSelectors.js';
 
 const TILE_SIZE = 40;
 const MAP_SIZE = 25;
@@ -54,6 +56,7 @@ class MapView {
     #chunkCache = new Map();
     #dirtyChunkKeys = new Set();
     #resizeObserver;
+    #didReportFirstMeaningfulPaint = false;
 
     constructor() {
         this._handleGameStateUpdate = this._handleGameStateUpdate.bind(this);
@@ -90,6 +93,9 @@ class MapView {
     }
 
     mount() {
+        perfCollector.markStart('view.map.mount');
+        perfCollector.markStart('view.map.firstMeaningfulPaint');
+
         this._initializeDOMElements();
         this.#tileInfoUI = new TileInfoUI();
 
@@ -102,12 +108,14 @@ class MapView {
             .then(() => {
                 this._initializeEventListeners();
                 this._initializeResizeObserver();
+                perfCollector.markEnd('view.map.mount');
             })
             .catch(error => {
                 console.error("CRITICAL ERROR: No se pudieron cargar los activos del mapa. El juego no puede continuar.", error);
                 if (this.#viewport) {
                     this.#viewport.innerHTML = `<div class="text-red-500 p-4">Error al cargar recursos del mapa. Revisa la consola y la ruta de los archivos.</div>`;
                 }
+                perfCollector.markEnd('view.map.mount');
             });
     }
 
@@ -235,7 +243,7 @@ class MapView {
     }
 
     _initializeEventListeners() {
-        uiRenderScheduler.register('map-view', this._handleGameStateUpdate);
+        uiRenderScheduler.register('map-view', this._handleGameStateUpdate, [selectMapViewSignature]);
         this.#viewport.addEventListener('mousedown', this._onPanStart);
         this.#viewport.addEventListener('mousemove', this._onPanMove);
         this.#viewport.addEventListener('mouseup', this._onPanEnd);
@@ -538,6 +546,11 @@ class MapView {
         this.#detailsCtx.restore();
 
         this.#lastTransform = { x: this.#translateX, y: this.#translateY, scale: this.#scale };
+
+        if (!this.#didReportFirstMeaningfulPaint) {
+            this.#didReportFirstMeaningfulPaint = true;
+            perfCollector.markEnd('view.map.firstMeaningfulPaint');
+        }
     }
 
     _drawTileTerrain(ctx, px, py, tileData, useLowDetail) {

@@ -1,6 +1,11 @@
 import gameManager from '@game/state/GameManager.js';
 import { router } from '@app/router.js';
 import uiRenderScheduler from './UIRenderScheduler.js';
+import {
+    selectActiveVillageId,
+    selectUnreadPlayerReports,
+    selectVillageListSignature
+} from './renderSelectors.js';
 
 const DEV_MODE_AI_VIEW = true;
 
@@ -41,7 +46,11 @@ class UIMainManager {
             return;
         }
 
-        uiRenderScheduler.register('ui-main-manager', this.#handleGameStateUpdate.bind(this));
+        uiRenderScheduler.register('ui-main-manager', this.#handleGameStateUpdate.bind(this), [
+            selectActiveVillageId,
+            selectVillageListSignature,
+            selectUnreadPlayerReports
+        ]);
         document.addEventListener('ai_log_ready_for_download', this.#handleLogReadyForDownload.bind(this));
         
         this.#villageSelector.addEventListener('click', this.#toggleDropdown.bind(this));

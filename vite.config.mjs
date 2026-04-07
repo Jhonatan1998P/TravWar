@@ -34,6 +34,45 @@ export default defineConfig({
       : undefined
   },
   build: {
-    target: 'esnext'
+    target: 'esnext',
+    chunkSizeWarningLimit: 420,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('/src/features/game/core/GameData.js')) {
+            return 'game-data';
+          }
+
+          if (id.includes('/src/features/game/views/')) {
+            if (id.includes('ConfigView.js')) return 'view-config';
+            if (id.includes('VillageView.js') || id.includes('VillageCenterView.js')) return 'view-village';
+            if (id.includes('ReportsView.js')) return 'view-reports';
+            if (id.includes('MapView.js')) return 'view-map';
+          }
+
+          if (id.includes('/src/features/game/ui/')) {
+            if (
+              id.includes('BuildingInfoUI.js')
+              || id.includes('BattleReportUI.js')
+              || id.includes('AttackPanelUI.js')
+              || id.includes('TradePanelUI.js')
+            ) {
+              return 'ui-panels';
+            }
+
+            if (
+              id.includes('ConstructionQueueUI.js')
+              || id.includes('RecruitmentQueueUI.js')
+              || id.includes('ResearchQueueUI.js')
+              || id.includes('SmithyQueueUI.js')
+              || id.includes('MovementsUI.js')
+              || id.includes('TroopsUI.js')
+            ) {
+              return 'ui-activity';
+            }
+          }
+        }
+      }
+    }
   }
 });

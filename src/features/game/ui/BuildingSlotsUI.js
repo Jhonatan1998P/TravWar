@@ -1,6 +1,16 @@
 import { generateLayout, generateVillageCenterLayout } from '../core/LayoutManager.js';
-import buildingInfoUI from './BuildingInfoUI.js';
 import { gameData } from '../core/GameData.js';
+
+let buildingInfoUILoadPromise = null;
+
+async function getBuildingInfoUI() {
+    if (!buildingInfoUILoadPromise) {
+        buildingInfoUILoadPromise = import('./BuildingInfoUI.js')
+            .then(module => module.default);
+    }
+
+    return buildingInfoUILoadPromise;
+}
 
 const typeToClassMap = {
     'woodcutter': 'bg-resource-wood',
@@ -52,12 +62,13 @@ function getBuildingState(buildings, constructionQueue, id) {
 export function initializeBuildingSlotClicks(container) {
     if (!container) return;
 
-    container.addEventListener('click', (event) => {
+    container.addEventListener('click', async (event) => {
         const slotElement = event.target.closest('.building-slot');
         if (!slotElement) return;
 
         const slotId = slotElement.dataset.slotId;
         if (slotId) {
+            const buildingInfoUI = await getBuildingInfoUI();
             buildingInfoUI.show(slotId);
         }
     });

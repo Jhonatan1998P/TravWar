@@ -2,6 +2,7 @@ import { gameData } from '../core/GameData.js';
 import { formatNumber } from '@shared/lib/formatters.js';
 import { unitSpriteManager } from './UnitSpriteManager.js';
 import uiRenderScheduler from './UIRenderScheduler.js';
+import { selectTroopsSignature } from './renderSelectors.js';
 
 const ICONS = {
     unit: `<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-gray-400" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" /></svg>`,
@@ -17,7 +18,9 @@ class TroopsUI {
             console.error(`[TroopsUI] No se encontró el contenedor con el ID: ${containerId}`);
             return;
         }
-        uiRenderScheduler.register(`troops-ui-${containerId}`, (gameState) => this.render(gameState.state));
+        uiRenderScheduler.register(`troops-ui-${containerId}`, (gameState) => this.render(gameState.state), [
+            selectTroopsSignature
+        ]);
     }
 
     render(state) {

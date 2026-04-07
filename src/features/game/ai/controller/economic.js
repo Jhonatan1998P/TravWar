@@ -1,4 +1,5 @@
 import { RESOURCE_FIELD_BUILDING_TYPES } from '../../core/data/constants.js';
+import { rebalanceVillageBudgetToRatio } from '../../state/worker/budget.js';
 
 export function applyDevelopmentBudgetMode({ myVillages, personality, log }) {
     if (myVillages.length === 0) return;
@@ -12,6 +13,7 @@ export function applyDevelopmentBudgetMode({ myVillages, personality, log }) {
             if (!village.budgetRatio || village.budgetRatio.econ !== 1.0) {
                 log('info', village, 'Ajuste Estratégico', 'Modo Desarrollo Activado: Priorizando economía (100%) hasta alcanzar nivel 3 en recursos.');
                 village.budgetRatio = { econ: 1.0, mil: 0.0 };
+                rebalanceVillageBudgetToRatio(village);
             }
             continue;
         }
@@ -19,6 +21,7 @@ export function applyDevelopmentBudgetMode({ myVillages, personality, log }) {
         if (village.budgetRatio && village.budgetRatio.econ === 1.0 && defaultRatio.econ !== 1.0) {
             log('info', village, 'Ajuste Estratégico', 'Modo Desarrollo Completado: Restaurando balance económico/militar estándar.');
             village.budgetRatio = { ...defaultRatio };
+            rebalanceVillageBudgetToRatio(village);
         }
     }
 }

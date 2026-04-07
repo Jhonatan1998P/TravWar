@@ -84,9 +84,32 @@ export function getStepCost({ step, village, gameState, race, actionExecutor }) 
     }
 }
 
-export function isStepCompleted({ step, village, gameState, ownerId, actionExecutor }) {
-    if (!step) return false;
+function isVillageScopedGoal(goalScope) {
+    return goalScope === 'per_village' || (typeof goalScope === 'string' && goalScope.startsWith('village_index:'));
+}
+
+function getVillagesByGoalScope({ gameState, ownerId, village, goalScope }) {
     const allVillages = gameState.villages.filter(candidate => candidate.ownerId === ownerId);
+    if (isVillageScopedGoal(goalScope)) {
+        return [village];
+    }
+    return allVillages;
+}
+
+function getTotalUnitCountInVillages(villages, unitId) {
+    if (!unitId) return 0;
+    const totalInVillages = villages.reduce((sum, candidate) => sum + (candidate.unitsInVillage[unitId] || 0), 0);
+    const totalInQueue = villages.reduce((sum, candidate) => {
+        return sum + candidate.recruitmentQueue
+            .filter(job => job.unitId === unitId)
+            .reduce((queueSum, job) => queueSum + (job.remainingCount ?? job.count ?? 0), 0);
+    }, 0);
+    return totalInVillages + totalInQueue;
+}
+
+export function isStepCompleted({ step, village, gameState, ownerId, actionExecutor, goalScope }) {
+    if (!step) return false;
+    const scopedVillages = getVillagesByGoalScope({ gameState, ownerId, village, goalScope });
 
     switch (step.type) {
         case 'building': {
@@ -105,25 +128,7 @@ export function isStepCompleted({ step, village, gameState, ownerId, actionExecu
         case 'units': {
             const unitId = actionExecutor.resolveUnitId(step.unitType);
             if (!unitId) return false;
-
-            const settlerId = actionExecutor.resolveUnitId('settler');
-            const chiefId = actionExecutor.resolveUnitId('chief');
-
-            if (unitId === settlerId || unitId === chiefId) {
-                const totalInThisVillage = (village.unitsInVillage[unitId] || 0) +
-                    village.recruitmentQueue
-                        .filter(job => job.unitId === unitId)
-                        .reduce((queueSum, job) => queueSum + (job.remainingCount ?? job.count ?? 0), 0);
-                return totalInThisVillage >= step.count;
-            }
-
-            const totalInAllVillages = allVillages.reduce((sum, candidate) => sum + (candidate.unitsInVillage[unitId] || 0), 0);
-            const totalInAllQueues = allVillages.reduce((sum, candidate) => {
-                return sum + candidate.recruitmentQueue
-                    .filter(job => job.unitId === unitId)
-                    .reduce((queueSum, job) => queueSum + (job.remainingCount ?? job.count ?? 0), 0);
-            }, 0);
-            return (totalInAllVillages + totalInAllQueues) >= step.count;
+            return getTotalUnitCountInVillages(scopedVillages, unitId) >= step.count;
         }
 
         case 'research': {
@@ -143,24 +148,14 @@ export function isStepCompleted({ step, village, gameState, ownerId, actionExecu
             const baseUnitId = actionExecutor.resolveUnitId(baseUnit);
             if (!baseUnitId) return true;
 
-            const getTotalUnitCount = unitId => {
-                const totalInVillages = allVillages.reduce((sum, candidate) => sum + (candidate.unitsInVillage[unitId] || 0), 0);
-                const totalInQueue = allVillages.reduce((sum, candidate) => {
-                    return sum + candidate.recruitmentQueue
-                        .filter(job => job.unitId === unitId)
-                        .reduce((queueSum, job) => queueSum + (job.remainingCount ?? job.count ?? 0), 0);
-                }, 0);
-                return totalInVillages + totalInQueue;
-            };
-
-            if (getTotalUnitCount(baseUnitId) < baseTarget) return false;
+            if (getTotalUnitCountInVillages(scopedVillages, baseUnitId) < baseTarget) return false;
 
             for (const proportion of proportions) {
                 const proportionalUnitId = actionExecutor.resolveUnitId(proportion.unit);
                 if (!proportionalUnitId) continue;
 
                 const targetCount = Math.floor(baseTarget * (proportion.ratio / 100));
-                if (getTotalUnitCount(proportionalUnitId) < targetCount) return false;
+                if (getTotalUnitCountInVillages(scopedVillages, proportionalUnitId) < targetCount) return false;
             }
             return true;
         }

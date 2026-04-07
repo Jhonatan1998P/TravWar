@@ -1,7 +1,18 @@
 import gameManager from '@game/state/GameManager.js';
-import { gameData } from '../core/GameData.js';
-import battleReportUI from './BattleReportUI.js';
 import uiRenderScheduler from './UIRenderScheduler.js';
+import { selectReportsSignature, selectUnreadPlayerReports } from './renderSelectors.js';
+import { reconcileList } from './reconcileList.js';
+
+let battleReportUILoadPromise = null;
+
+async function getBattleReportUI() {
+    if (!battleReportUILoadPromise) {
+        battleReportUILoadPromise = import('./BattleReportUI.js')
+            .then(module => module.default);
+    }
+
+    return battleReportUILoadPromise;
+}
 
 const ICONS = {
     attack: `<img src="/icons/sword.png" alt="Ataque" class="h-8 w-8">`,
@@ -17,6 +28,9 @@ class ReportListUI {
     #gameState = null;
     #currentPage = 1;
     #reportsPerPage = 10;
+    #reportNodes = new Map();
+    #list;
+    #emptyState;
 
     constructor(containerId) {
         this.#container = document.getElementById(containerId);
@@ -24,17 +38,36 @@ class ReportListUI {
         if (!this.#container || !this.#paginationContainer) {
             return;
         }
-        document.querySelector('main').addEventListener('click', e => this.#handleContainerClick(e));
-        uiRenderScheduler.register(`report-list-ui`, (gameState) => this.render(gameState.state));
+
+        this.#setupStaticMarkup();
+
+        document.querySelector('main').addEventListener('click', event => this.#handleContainerClick(event));
+        uiRenderScheduler.register('report-list-ui', (gameState) => this.render(gameState.state), [
+            selectReportsSignature,
+            selectUnreadPlayerReports
+        ]);
+    }
+
+    #setupStaticMarkup() {
+        this.#container.replaceChildren();
+
+        this.#list = document.createElement('div');
+        this.#list.className = 'space-y-2';
+
+        this.#emptyState = document.createElement('div');
+        this.#emptyState.className = 'text-center text-gray-500 text-sm py-8';
+        this.#emptyState.textContent = 'No tienes informes.';
+
+        this.#container.append(this.#list, this.#emptyState);
     }
 
     #getReportTitle(report) {
-        if (!report) return 'Informe inválido';
+        if (!report) return 'Informe invalido';
 
         if (report.type === 'settlement_success') {
             return `Nueva aldea fundada: ${report.newVillageName}`;
         }
-        
+
         if (!report.attacker || !report.defender) return 'Informe de batalla';
 
         const attackerName = report.attacker.villageName || 'Aldea desconocida';
@@ -47,11 +80,11 @@ class ReportListUI {
 
         if (report.ownerId === report.attacker.ownerId) {
             return `${missionType} a ${defenderName}`;
-        } else {
-            return `${missionType} de ${attackerName}`;
         }
+
+        return `${missionType} de ${attackerName}`;
     }
-    
+
     #analyzeReportForPlayer(report) {
         const result = { icon: '', titleColorClass: 'text-white' };
         if (!report) return result;
@@ -61,16 +94,16 @@ class ReportListUI {
             result.titleColorClass = 'text-blue-400';
             return result;
         }
-        
+
         if (!report.attacker || !report.defender) return result;
 
         const isPlayerAttacker = report.attacker.ownerId === 'player';
-        
+
         if (report.type.includes('espionage')) {
             result.icon = ICONS.espionage;
             if (isPlayerAttacker) {
-                const totalLosses = Object.values(report.attacker.losses || {}).reduce((s, v) => s + v, 0);
-                const totalTroops = Object.values(report.attacker.troops || {}).reduce((s, v) => s + v, 0);
+                const totalLosses = Object.values(report.attacker.losses || {}).reduce((sum, value) => sum + value, 0);
+                const totalTroops = Object.values(report.attacker.troops || {}).reduce((sum, value) => sum + value, 0);
                 if (totalLosses === 0) result.titleColorClass = 'text-green-400';
                 else if (totalLosses < totalTroops) result.titleColorClass = 'text-yellow-300';
                 else result.titleColorClass = 'text-red-400';
@@ -79,17 +112,15 @@ class ReportListUI {
             }
             return result;
         }
-        
+
         if (!report.summary) return result;
 
         const didAttackerWin = report.winner === report.attacker.playerName;
 
         if (isPlayerAttacker) {
             result.icon = ICONS.attack;
-            const initialTroops = report.attacker.troops || {};
             const losses = report.attacker.losses || {};
             const hadLosses = Object.keys(losses).length > 0;
-            const allTroopsLost = Object.keys(initialTroops).every(unitId => (initialTroops[unitId] || 0) <= (losses[unitId] || 0));
 
             if (didAttackerWin) {
                 result.titleColorClass = hadLosses ? 'text-yellow-300' : 'text-green-400';
@@ -98,20 +129,20 @@ class ReportListUI {
             }
         } else {
             result.icon = ICONS.defense;
-            const playerContingent = report.defender.contingents.find(c => c.ownerId === 'player');
+            const playerContingent = report.defender.contingents.find(contingent => contingent.ownerId === 'player');
             const hadLosses = playerContingent && playerContingent.losses && Object.keys(playerContingent.losses).length > 0;
-            
+
             if (didAttackerWin) {
                 result.titleColorClass = 'text-red-400';
             } else {
                 result.titleColorClass = hadLosses ? 'text-yellow-300' : 'text-green-400';
             }
         }
-        
+
         return result;
     }
 
-    #handleContainerClick(event) {
+    async #handleContainerClick(event) {
         const reportItem = event.target.closest('.report-item');
         const deleteButton = event.target.closest('[data-action="delete-report"]');
         const pageButton = event.target.closest('[data-page]');
@@ -120,51 +151,127 @@ class ReportListUI {
             event.stopPropagation();
             const reportId = deleteButton.dataset.reportId;
             gameManager.sendCommand('delete_report', { reportId });
-        } else if (reportItem) {
+            return;
+        }
+
+        if (reportItem) {
             const reportId = reportItem.dataset.reportId;
-            const report = this.#gameState.reports.find(r => r.id === reportId);
+            const report = this.#gameState.reports.find(currentReport => currentReport.id === reportId);
             if (report) {
+                const battleReportUI = await getBattleReportUI();
                 battleReportUI.show(report, this.#gameState);
             }
-        } else if (pageButton) {
-            const totalReports = this.#getPlayerReports(this.#gameState).length;
-            const totalPages = Math.ceil(totalReports / this.#reportsPerPage);
-
-            if (pageButton.dataset.page === 'prev') {
-                this.#currentPage = Math.max(1, this.#currentPage - 1);
-            } else if (pageButton.dataset.page === 'next') {
-                this.#currentPage = Math.min(totalPages, this.#currentPage + 1);
-            } else {
-                this.#currentPage = parseInt(pageButton.dataset.page, 10);
-            }
-            this.render(this.#gameState);
+            return;
         }
+
+        if (!pageButton) {
+            return;
+        }
+
+        const totalReports = this.#getPlayerReports(this.#gameState).length;
+        const totalPages = Math.ceil(totalReports / this.#reportsPerPage);
+
+        if (pageButton.dataset.page === 'prev') {
+            this.#currentPage = Math.max(1, this.#currentPage - 1);
+        } else if (pageButton.dataset.page === 'next') {
+            this.#currentPage = Math.min(totalPages, this.#currentPage + 1);
+        } else {
+            this.#currentPage = parseInt(pageButton.dataset.page, 10);
+        }
+
+        this.render(this.#gameState);
     }
 
     #renderPagination(totalReports) {
         const totalPages = Math.ceil(totalReports / this.#reportsPerPage);
         if (totalPages <= 1) {
-            this.#paginationContainer.innerHTML = '';
+            this.#paginationContainer.replaceChildren();
             return;
         }
 
-        let paginationHTML = `
-            <button class="pagination-button" data-page="prev" ${this.#currentPage === 1 ? 'disabled' : ''}>«</button>`;
+        const fragment = document.createDocumentFragment();
 
-        for (let i = 1; i <= totalPages; i++) {
-            paginationHTML += `
-                <button class="pagination-button ${i === this.#currentPage ? 'active' : ''}" data-page="${i}">${i}</button>`;
+        const createButton = (label, page, isActive = false, isDisabled = false) => {
+            const button = document.createElement('button');
+            button.className = `pagination-button${isActive ? ' active' : ''}`;
+            button.dataset.page = page;
+            button.textContent = label;
+            button.disabled = isDisabled;
+            return button;
+        };
+
+        fragment.appendChild(createButton('«', 'prev', false, this.#currentPage === 1));
+
+        for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
+            fragment.appendChild(createButton(String(pageNumber), String(pageNumber), pageNumber === this.#currentPage));
         }
 
-        paginationHTML += `
-            <button class="pagination-button" data-page="next" ${this.#currentPage === totalPages ? 'disabled' : ''}>»</button>`;
+        fragment.appendChild(createButton('»', 'next', false, this.#currentPage === totalPages));
 
-        this.#paginationContainer.innerHTML = paginationHTML;
+        this.#paginationContainer.replaceChildren(fragment);
     }
-    
+
     #getPlayerReports(state) {
         if (!state || !state.reports) return [];
         return state.reports.filter(report => report.ownerId === 'player');
+    }
+
+    #createReportNode() {
+        const item = document.createElement('div');
+        item.className = 'report-item bg-gray-700/50 hover:bg-gray-700 rounded-lg shadow-md flex items-center gap-4 transition-colors cursor-pointer';
+
+        const icon = document.createElement('div');
+        icon.className = 'pl-3';
+
+        const content = document.createElement('div');
+        content.className = 'flex-grow py-3';
+
+        const title = document.createElement('p');
+        title.className = 'font-semibold';
+
+        const date = document.createElement('p');
+        date.className = 'text-xs text-gray-400';
+
+        content.append(title, date);
+
+        const deleteButton = document.createElement('button');
+        deleteButton.className = 'flex-shrink-0 p-3 text-gray-500 hover:text-red-400 transition-colors';
+        deleteButton.title = 'Borrar informe';
+        deleteButton.dataset.action = 'delete-report';
+        deleteButton.innerHTML = ICONS.delete;
+
+        item.append(icon, content, deleteButton);
+
+        item.__refs = {
+            icon,
+            title,
+            date,
+            deleteButton
+        };
+
+        return item;
+    }
+
+    #updateReportNode(node, report, isUnread) {
+        const refs = node.__refs;
+        const { icon, titleColorClass } = this.#analyzeReportForPlayer(report);
+        const title = this.#getReportTitle(report);
+        const date = new Date(report.time).toLocaleString('es-ES', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+
+        node.dataset.reportId = report.id;
+        node.classList.toggle('unread', isUnread);
+
+        refs.icon.innerHTML = icon;
+        refs.title.className = `font-semibold ${titleColorClass}`;
+        refs.title.textContent = title;
+        refs.date.textContent = date;
+        refs.deleteButton.dataset.reportId = report.id;
     }
 
     render(state) {
@@ -173,12 +280,13 @@ class ReportListUI {
 
         const playerReports = this.#getPlayerReports(state);
 
-        if (!playerReports || playerReports.length === 0) {
-            this.#container.innerHTML = `<div class="text-center text-gray-500 text-sm py-8">No tienes informes.</div>`;
-            this.#paginationContainer.innerHTML = '';
+        if (playerReports.length === 0) {
+            this.#emptyState.classList.remove('hidden');
+            reconcileList(this.#list, [], report => report.id, this.#reportNodes, () => null, () => {});
+            this.#paginationContainer.replaceChildren();
             return;
         }
-        
+
         const totalPages = Math.ceil(playerReports.length / this.#reportsPerPage);
         if (this.#currentPage > totalPages) {
             this.#currentPage = totalPages > 0 ? totalPages : 1;
@@ -188,35 +296,23 @@ class ReportListUI {
         const endIndex = startIndex + this.#reportsPerPage;
         const pagedReports = playerReports.slice(startIndex, endIndex);
 
-        let reportsHTML = '<div class="space-y-2">';
-        pagedReports.forEach(report => {
-            const reportIndex = state.reports.findIndex(r => r.id === report.id);
-            const unreadCount = state.unreadCounts?.['player'] || 0;
-            const isUnread = reportIndex < unreadCount;
-            
-            const { icon, titleColorClass } = this.#analyzeReportForPlayer(report);
-            
-            const title = this.#getReportTitle(report);
-            const date = new Date(report.time).toLocaleString('es-ES', {
-                day: '2-digit', month: '2-digit', year: 'numeric',
-                hour: '2-digit', minute: '2-digit'
-            });
+        const unreadCount = state.unreadCounts?.player || 0;
 
-            reportsHTML += `
-                <div class="report-item bg-gray-700/50 hover:bg-gray-700 rounded-lg shadow-md flex items-center gap-4 transition-colors cursor-pointer ${isUnread ? 'unread' : ''}" data-report-id="${report.id}">
-                    <div class="pl-3">${icon}</div>
-                    <div class="flex-grow py-3">
-                        <p class="font-semibold ${titleColorClass}">${title}</p>
-                        <p class="text-xs text-gray-400">${date}</p>
-                    </div>
-                    <button data-action="delete-report" data-report-id="${report.id}" class="flex-shrink-0 p-3 text-gray-500 hover:text-red-400 transition-colors" title="Borrar informe">
-                        ${ICONS.delete}
-                    </button>
-                </div>
-            `;
-        });
-        reportsHTML += '</div>';
-        this.#container.innerHTML = reportsHTML;
+        this.#emptyState.classList.add('hidden');
+
+        reconcileList(
+            this.#list,
+            pagedReports,
+            report => report.id,
+            this.#reportNodes,
+            () => this.#createReportNode(),
+            (node, report) => {
+                const reportIndex = state.reports.findIndex(currentReport => currentReport.id === report.id);
+                const isUnread = reportIndex > -1 && reportIndex < unreadCount;
+                this.#updateReportNode(node, report, isUnread);
+            }
+        );
+
         this.#renderPagination(playerReports.length);
     }
 }

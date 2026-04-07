@@ -1,7 +1,6 @@
 import gameManager from '@game/state/GameManager.js';
 import { renderVillageCenterSlots, initializeBuildingSlotClicks } from '../ui/BuildingSlotsUI.js';
 import { renderResourceBar } from '../ui/ResourceBarUI.js';
-import buildingInfoUI from '../ui/BuildingInfoUI.js';
 import ActivityModalUI from '../ui/ActivityModalUI.js';
 import ConstructionQueueUI from '../ui/ConstructionQueueUI.js';
 import RecruitmentQueueUI from '../ui/RecruitmentQueueUI.js';
@@ -13,12 +12,24 @@ import toastUI from '../ui/ToastUI.js';
 import { gameData } from '../core/GameData.js';
 import { formatNumber } from '@shared/lib/formatters.js';
 import uiRenderScheduler from '../ui/UIRenderScheduler.js';
+import { perfCollector } from '@shared/lib/perf.js';
+
+let buildingInfoUILoadPromise = null;
+
+async function getBuildingInfoUI() {
+    if (!buildingInfoUILoadPromise) {
+        buildingInfoUILoadPromise = import('../ui/BuildingInfoUI.js')
+            .then(module => module.default);
+    }
+
+    return buildingInfoUILoadPromise;
+}
 
 class VillageCenterView {
     #populationDisplay;
     #wallSlot;
     #gameState;
-    #lastGameState = null;
+    #lastVillageRenderSignature = '';
     #activityModalUI;
     #constructionQueueUI;
     #recruitmentQueueUI;
@@ -26,6 +37,7 @@ class VillageCenterView {
     #smithyQueueUI;
     #troopsUI;
     #movementsUI;
+    #didReportFirstMeaningfulPaint = false;
 
     constructor() {
         this._handleGameStateUpdate = this._handleGameStateUpdate.bind(this);
@@ -46,6 +58,9 @@ class VillageCenterView {
     }
 
     mount() {
+        perfCollector.markStart('view.villageCenter.mount');
+        perfCollector.markStart('view.villageCenter.firstMeaningfulPaint');
+
         this.#populationDisplay = document.getElementById('population-display');
         this.#wallSlot = document.querySelector('[data-slot-id="v_wall"]');
 
@@ -61,6 +76,8 @@ class VillageCenterView {
 
         this.initializeEventListeners();
         gameManager.sendCommand('get_latest_state');
+
+        perfCollector.markEnd('view.villageCenter.mount');
     }
 
     unmount() {
@@ -87,7 +104,8 @@ class VillageCenterView {
         }
     }
 
-    _handleWallSlotClick() {
+    async _handleWallSlotClick() {
+        const buildingInfoUI = await getBuildingInfoUI();
         buildingInfoUI.show('v_wall');
     }
 
@@ -101,19 +119,34 @@ class VillageCenterView {
 
         renderResourceBar(document.getElementById('resource-bar'), activeVillage.resources);
 
-        const lastActiveVillage = this.#lastGameState ? this.#lastGameState.villages.find(v => v.id === this.#lastGameState.activeVillageId) : null;
-        const constructionChanged = !lastActiveVillage || JSON.stringify(activeVillage.constructionQueue) !== JSON.stringify(lastActiveVillage.constructionQueue);
-        const buildingsChanged = !lastActiveVillage || activeVillage.buildings.length !== lastActiveVillage.buildings.length;
-
-        if (constructionChanged || buildingsChanged) {
+        const villageRenderSignature = this.#getVillageRenderSignature(activeVillage, state.activeVillageId);
+        if (villageRenderSignature !== this.#lastVillageRenderSignature) {
             renderVillageCenterSlots(document.getElementById('mainView'), state);
+            this.#lastVillageRenderSignature = villageRenderSignature;
         }
         
         if (this.#populationDisplay && activeVillage.population) {
             this.#populationDisplay.textContent = formatNumber(activeVillage.population.current);
         }
-        
-        this.#lastGameState = JSON.parse(JSON.stringify(state));
+
+        if (!this.#didReportFirstMeaningfulPaint) {
+            this.#didReportFirstMeaningfulPaint = true;
+            perfCollector.markEnd('view.villageCenter.firstMeaningfulPaint');
+        }
+    }
+
+    #getVillageRenderSignature(activeVillage, activeVillageId) {
+        const buildingsSignature = [...(activeVillage.buildings || [])]
+            .sort((left, right) => String(left.id).localeCompare(String(right.id)))
+            .map(building => `${building.id}:${building.type}:${building.level}`)
+            .join(';');
+
+        const constructionQueueSignature = [...(activeVillage.constructionQueue || [])]
+            .sort((left, right) => String(left.jobId).localeCompare(String(right.jobId)))
+            .map(job => `${job.jobId}:${job.buildingId}:${job.buildingType}:${job.targetLevel}`)
+            .join(';');
+
+        return `${activeVillageId}:${activeVillage.villageType}:${buildingsSignature}|${constructionQueueSignature}`;
     }
 
     _handleConstructionFinished(event) {

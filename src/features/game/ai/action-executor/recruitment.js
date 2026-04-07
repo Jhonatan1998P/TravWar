@@ -1,6 +1,12 @@
 import { gameData } from '../../core/GameData.js';
 import { getMaxAffordableCount, getVillageBudget } from '../utils/AIBudgetUtils.js';
 
+const PHASE_BATCH_CONFIG = {
+    early: { basePct: 0.18, min: 5, max: 24 },
+    mid: { basePct: 0.3, min: 10, max: 72 },
+    late: { basePct: 0.45, min: 20, max: 140 },
+};
+
 function getTotalUnitCountAcrossVillages(villages, unitId) {
     if (!unitId) return 0;
 
@@ -12,6 +18,108 @@ function getTotalUnitCountAcrossVillages(villages, unitId) {
     }, 0);
 
     return totalInVillages + totalInQueue;
+}
+
+function getVillagesForGoalScope(allVillages, currentVillage, goalScope) {
+    if (goalScope === 'per_village' || (typeof goalScope === 'string' && goalScope.startsWith('village_index:'))) {
+        return [currentVillage];
+    }
+    return allVillages;
+}
+
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
+function getAverageResourceFieldLevel(village) {
+    const resourceFields = village.buildings.filter(building => /^[wcif]/.test(building.id));
+    if (resourceFields.length === 0) return 0;
+    const totalLevels = resourceFields.reduce((sum, building) => sum + (building.level || 0), 0);
+    return totalLevels / resourceFields.length;
+}
+
+function getVillagePhase(village) {
+    const avgFields = getAverageResourceFieldLevel(village);
+    const population = village.population?.current || 0;
+
+    if (avgFields < 5 || population < 120) return 'early';
+    if (avgFields < 10 || population < 500) return 'mid';
+    return 'late';
+}
+
+function getQueuedUnitsForBuilding(village, buildingId) {
+    return village.recruitmentQueue
+        .filter(job => job.buildingId === buildingId)
+        .reduce((sum, job) => sum + (job.remainingCount ?? job.count ?? 0), 0);
+}
+
+function getPhaseBatchConfig(village, gameSpeed) {
+    const phase = getVillagePhase(village);
+    const baseConfig = PHASE_BATCH_CONFIG[phase];
+    const speedMultiplier = clamp((gameSpeed || 1) / 10, 1, 2.5);
+
+    return {
+        phase,
+        basePct: baseConfig.basePct,
+        min: Math.max(1, Math.round(baseConfig.min * Math.sqrt(speedMultiplier))),
+        max: Math.max(1, Math.round(baseConfig.max * speedMultiplier)),
+    };
+}
+
+function calculateAdaptiveBatchSize({
+    village,
+    unitData,
+    trainingBuildingId,
+    targetAmount,
+    unitsNeeded,
+    effectiveAffordableTotal,
+    gameSpeed,
+}) {
+    if (unitsNeeded <= 0 || effectiveAffordableTotal <= 0) {
+        return { batchSize: 0, phase: 'early', ratio: 0, queueUnits: 0 };
+    }
+
+    if (unitData.type === 'settler' || unitData.type === 'chief') {
+        const oneByOne = Math.min(1, unitsNeeded, effectiveAffordableTotal);
+        return { batchSize: oneByOne, phase: 'special', ratio: 1, queueUnits: 0 };
+    }
+
+    const phaseConfig = getPhaseBatchConfig(village, gameSpeed);
+    const queueUnits = getQueuedUnitsForBuilding(village, trainingBuildingId);
+
+    const urgency = targetAmount === Infinity
+        ? 1
+        : clamp(unitsNeeded / Math.max(targetAmount, 1), 0, 1);
+
+    const affordability = clamp(effectiveAffordableTotal / Math.max(unitsNeeded, 1), 0, 1);
+    const queuePressure = clamp(queueUnits / Math.max(phaseConfig.max * 3, 1), 0, 1);
+
+    let dynamicRatio = phaseConfig.basePct
+        + (urgency * 0.22)
+        + (affordability * 0.12)
+        - (queuePressure * 0.2);
+
+    dynamicRatio = clamp(dynamicRatio, 0.12, 0.8);
+
+    let dynamicMax = phaseConfig.max;
+    if (queuePressure > 0.75) {
+        dynamicMax = Math.max(1, Math.floor(dynamicMax * 0.7));
+    }
+    if (urgency > 0.7 && effectiveAffordableTotal > phaseConfig.max * 2) {
+        dynamicMax = Math.max(dynamicMax, Math.floor(phaseConfig.max * 1.25));
+    }
+
+    let batchSize = Math.floor(effectiveAffordableTotal * dynamicRatio);
+    batchSize = Math.max(batchSize, phaseConfig.min);
+    batchSize = Math.min(batchSize, dynamicMax);
+    batchSize = Math.min(batchSize, effectiveAffordableTotal, unitsNeeded);
+
+    return {
+        batchSize,
+        phase: phaseConfig.phase,
+        ratio: dynamicRatio,
+        queueUnits,
+    };
 }
 
 export function manageProportionalRecruitment({
@@ -26,6 +134,7 @@ export function manageProportionalRecruitment({
 }) {
     const { baseUnit, proportions, baseTarget } = step;
     const allMyVillages = gameState.villages.filter(candidate => candidate.ownerId === ownerId);
+    const scopedVillages = getVillagesForGoalScope(allMyVillages, village, activeGoal?.scope);
 
     const unitCycle = [baseUnit, ...proportions.map(proportion => proportion.unit)];
     activeGoal.proportionalUnitPointer = activeGoal.proportionalUnitPointer ?? 0;
@@ -45,7 +154,7 @@ export function manageProportionalRecruitment({
             targetCount = proportion ? Math.floor(baseTarget * (proportion.ratio / 100)) : 0;
         }
 
-        const currentCount = getTotalUnitCountAcrossVillages(allMyVillages, currentUnitId);
+        const currentCount = getTotalUnitCountAcrossVillages(scopedVillages, currentUnitId);
         if (currentCount >= targetCount) {
             activeGoal.proportionalUnitPointer = (activeGoal.proportionalUnitPointer + 1) % unitCycle.length;
             if (activeGoal.proportionalUnitPointer === initialPointer) {
@@ -61,10 +170,12 @@ export function manageProportionalRecruitment({
         type: 'units',
         unitType: unitToRecruitIdentifier,
         count: Infinity,
-    });
+    }, activeGoal);
 
     if (result.success) {
-        log('success', village, 'Proportional Recruitment', `Encolando tanda de ${result.count}x ${result.unitId} (25% Budget).`);
+        const mode = result.batchMeta?.phase || 'adaptive';
+        const ratioPct = Math.round((result.batchMeta?.ratio || 0) * 100);
+        log('success', village, 'Proportional Recruitment', `Encolando tanda de ${result.count}x ${result.unitId} (${mode}, ${ratioPct}%).`);
         activeGoal.proportionalUnitPointer = (activeGoal.proportionalUnitPointer + 1) % unitCycle.length;
         return { success: true };
     }
@@ -82,6 +193,8 @@ export function manageRecruitmentForGoal({
     getTrainingBuildingForUnit,
     sendCommand,
     log,
+    goalScope,
+    gameSpeed = 1,
 }) {
     const unitId = resolveUnitId(step.unitType);
     if (!unitId) return { success: false, reason: 'INVALID_UNIT_ID' };
@@ -96,7 +209,8 @@ export function manageRecruitmentForGoal({
     }
 
     const allVillages = gameState.villages.filter(candidate => candidate.ownerId === ownerId);
-    const unitsOwned = getTotalUnitCountAcrossVillages(allVillages, unitId);
+    const scopedVillages = getVillagesForGoalScope(allVillages, village, goalScope);
+    const unitsOwned = getTotalUnitCountAcrossVillages(scopedVillages, unitId);
 
     const targetAmount = step.count === Infinity ? 9999999 : step.count;
     const unitsNeeded = targetAmount - unitsOwned;
@@ -109,12 +223,17 @@ export function manageRecruitmentForGoal({
         return { success: false, reason: 'INSUFFICIENT_RESOURCES' };
     }
 
-    const batchPercentage = 0.25;
-    const minBatchFloor = 5;
+    const batchPlan = calculateAdaptiveBatchSize({
+        village,
+        unitData,
+        trainingBuildingId: trainingBuilding.id,
+        targetAmount,
+        unitsNeeded,
+        effectiveAffordableTotal,
+        gameSpeed,
+    });
 
-    let batchSize = Math.floor(effectiveAffordableTotal * batchPercentage);
-    batchSize = Math.max(batchSize, minBatchFloor);
-    batchSize = Math.min(batchSize, effectiveAffordableTotal);
+    let batchSize = batchPlan.batchSize;
 
     const countToTrain = Math.min(unitsNeeded, batchSize);
     if (countToTrain <= 0) return { success: false, reason: 'INSUFFICIENT_RESOURCES' };
@@ -127,8 +246,10 @@ export function manageRecruitmentForGoal({
     });
 
     if (result.success) {
-        log('success', village, 'Reclutamiento', `Orden para ${countToTrain}x ${unitId} enviada (Max posible: ${effectiveAffordableTotal}, Batch: 25%).`);
-        return { success: true, count: countToTrain, unitId };
+        const ratioPct = Math.round((batchPlan.ratio || 0) * 100);
+        const queueInfo = Number.isFinite(batchPlan.queueUnits) ? `, Queue:${batchPlan.queueUnits}` : '';
+        log('success', village, 'Reclutamiento', `Orden para ${countToTrain}x ${unitId} enviada (Max:${effectiveAffordableTotal}, Mode:${batchPlan.phase}, Batch:${ratioPct}%${queueInfo}).`);
+        return { success: true, count: countToTrain, unitId, batchMeta: batchPlan };
     }
 
     log('fail', village, 'Reclutamiento', `Orden para ${countToTrain}x ${unitId} rechazada. Razón: ${result.reason}`, result.details);
