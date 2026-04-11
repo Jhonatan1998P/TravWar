@@ -11,8 +11,8 @@ import { runMilitaryDecision } from './controller/military.js';
 import {
     createDefaultGermanPhaseState,
     GERMAN_PHASE_IDS,
+    getGermanPhaseCycleStatus,
     hydrateGermanPhaseState,
-    recordGermanPhaseRecruitmentProgress,
     runGermanEconomicPhaseCycle,
     serializeGermanPhaseStates,
 } from './controller/german-phase-engine.js';
@@ -228,16 +228,29 @@ class AIController {
         const phaseKey = phaseState.activePhaseId;
         if (!phaseKey || phaseKey === GERMAN_PHASE_IDS.phaseDone || phaseKey === GERMAN_PHASE_IDS.phase1) return;
 
-        for (const completed of payload.completed || []) {
-            recordGermanPhaseRecruitmentProgress({
-                phaseState,
-                phaseKey,
-                village,
-                unitId: completed.unitId,
-                count: completed.count,
-                timePerUnit: completed.timePerUnit,
-            });
-        }
+        const cycleStatus = getGermanPhaseCycleStatus(phaseState, this._difficulty, phaseKey);
+        const detailMap = [
+            ['offensiveInfantry', 'ofInf'],
+            ['offensiveCavalry', 'ofCav'],
+            ['defensiveInfantry', 'defInf'],
+            ['scout', 'scout'],
+            ['ram', 'ram'],
+            ['catapult', 'cata'],
+            ['expansion', 'exp'],
+        ];
+        const detail = detailMap
+            .filter(([key]) => (cycleStatus.targets?.[key] || 0) > 0)
+            .map(([key, label]) => `${label}:${cycleStatus.cycles?.[key] || 0}/${cycleStatus.targets?.[key] || 0}`)
+            .join(' | ');
+
+        this.log(
+            'info',
+            village,
+            'Macro Reclutamiento',
+            `Ciclos fase actual: ${cycleStatus.completed}/${cycleStatus.max} (${cycleStatus.max > 0 ? ((cycleStatus.completed / cycleStatus.max) * 100).toFixed(1) : '0.0'}%)${detail ? ` | ${detail}` : ''}.`,
+            null,
+            'economic',
+        );
     }
 
     _resolvePrimaryVillage() {

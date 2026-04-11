@@ -6,6 +6,7 @@ const PHASE_BATCH_CONFIG = {
     mid: { basePct: 0.3, min: 10, max: 72 },
     late: { basePct: 0.45, min: 20, max: 140 },
 };
+const RECRUITMENT_CYCLE_MS = 3 * 60 * 1000;
 
 function getTotalUnitCountAcrossVillages(villages, unitId) {
     if (!unitId) return 0;
@@ -249,13 +250,15 @@ export function manageRecruitmentForGoal({
         : 0;
     const queueTargetMs = queueTargetMinutes * 60 * 1000;
     let unitsNeededByQueue = 0;
+    let queueCoverageMs = 0;
+    let singleUnitTimeMs = 0;
     const isOpenEndedTarget = step.countMode === 'queue_cycles'
         || step.count === Infinity
         || !Number.isFinite(step.count);
 
     if (queueTargetMs > 0) {
-        const queueCoverageMs = getQueueCoverageMs(village, trainingBuilding.id);
-        const singleUnitTimeMs = getSingleUnitTrainingTimeMs(village, trainingBuilding, unitData, gameSpeed);
+        queueCoverageMs = getQueueCoverageMs(village, trainingBuilding.id);
+        singleUnitTimeMs = getSingleUnitTrainingTimeMs(village, trainingBuilding, unitData, gameSpeed);
 
         if (singleUnitTimeMs > 0 && queueCoverageMs < queueTargetMs) {
             unitsNeededByQueue = Math.ceil((queueTargetMs - queueCoverageMs) / singleUnitTimeMs);
@@ -301,6 +304,10 @@ export function manageRecruitmentForGoal({
 
     let batchSize = batchPlan.batchSize;
 
+    if (queueTargetMs > 0 && unitsNeededByQueue > 0) {
+        batchSize = Math.min(unitsNeededByQueue, effectiveAffordableTotal);
+    }
+
     const countToTrain = Math.min(unitsNeeded, batchSize);
     if (countToTrain <= 0) return { success: false, reason: 'INSUFFICIENT_RESOURCES' };
 
@@ -315,8 +322,29 @@ export function manageRecruitmentForGoal({
         const ratioPct = Math.round((batchPlan.ratio || 0) * 100);
         const queueInfo = Number.isFinite(batchPlan.queueUnits) ? `, Queue:${batchPlan.queueUnits}` : '';
         const queueTargetInfo = queueTargetMinutes > 0 ? `, QueueTarget:${queueTargetMinutes}m` : '';
-        log('success', village, 'Reclutamiento', `Orden para ${countToTrain}x ${unitId} enviada (Max:${effectiveAffordableTotal}, Mode:${batchPlan.phase}, Batch:${ratioPct}%${queueInfo}${queueTargetInfo}).`);
-        return { success: true, count: countToTrain, unitId, batchMeta: batchPlan };
+        const queueCoverageBeforeCycles = queueCoverageMs > 0
+            ? (queueCoverageMs / RECRUITMENT_CYCLE_MS)
+            : 0;
+        const queueCoverageAfterMs = queueCoverageMs + (countToTrain * (singleUnitTimeMs || 0));
+        const queueCoverageAfterCycles = queueCoverageAfterMs > 0
+            ? (queueCoverageAfterMs / RECRUITMENT_CYCLE_MS)
+            : 0;
+        const queueCoverageTargetCycles = queueTargetMs > 0
+            ? (queueTargetMs / RECRUITMENT_CYCLE_MS)
+            : 0;
+
+        const queueCycleInfo = queueTargetMs > 0
+            ? `, CiclosCola:${queueCoverageBeforeCycles.toFixed(2)}->${queueCoverageAfterCycles.toFixed(2)}/${queueCoverageTargetCycles.toFixed(2)}`
+            : '';
+
+        log('success', village, 'Reclutamiento', `Orden para ${countToTrain}x ${unitId} enviada (Max:${effectiveAffordableTotal}, Mode:${batchPlan.phase}, Batch:${ratioPct}%${queueInfo}${queueTargetInfo}${queueCycleInfo}).`);
+        return {
+            success: true,
+            count: countToTrain,
+            unitId,
+            timePerUnit: singleUnitTimeMs,
+            batchMeta: batchPlan,
+        };
     }
 
     log('fail', village, 'Reclutamiento', `Orden para ${countToTrain}x ${unitId} rechazada. Razón: ${result.reason}`, result.details);

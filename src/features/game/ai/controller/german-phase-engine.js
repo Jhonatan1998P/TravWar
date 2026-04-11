@@ -199,23 +199,23 @@ const PHASE_CYCLE_TARGETS_BY_DIFFICULTY = Object.freeze({
     Normal: {
         phase1Emergency: { defensiveInfantry: 3, total: 3 },
         phase2: { total: 20, offensiveInfantry: 14 },
-        phase3: { total: 34, offensiveInfantry: 26, scout: 8 },
-        phase4: { total: 48, offensiveInfantry: 28, offensiveCavalry: 14, scout: 6 },
-        phase5: { total: 90, offensiveInfantry: 30, offensiveCavalry: 22, ram: 14, catapult: 10, scout: 8, expansion: 6 },
+        phase3: { total: 34, offensiveInfantry: 26, scout: 4 },
+        phase4: { total: 48, offensiveInfantry: 28, offensiveCavalry: 14, scout: 3 },
+        phase5: { total: 90, offensiveInfantry: 30, offensiveCavalry: 22, ram: 14, catapult: 10, scout: 4, expansion: 6 },
     },
     Dificil: {
         phase1Emergency: { defensiveInfantry: 4, total: 4 },
         phase2: { total: 24, offensiveInfantry: 17 },
-        phase3: { total: 42, offensiveInfantry: 32, scout: 10 },
-        phase4: { total: 62, offensiveInfantry: 36, offensiveCavalry: 18, scout: 8 },
-        phase5: { total: 122, offensiveInfantry: 40, offensiveCavalry: 30, ram: 20, catapult: 14, scout: 10, expansion: 8 },
+        phase3: { total: 42, offensiveInfantry: 32, scout: 5 },
+        phase4: { total: 62, offensiveInfantry: 36, offensiveCavalry: 18, scout: 4 },
+        phase5: { total: 122, offensiveInfantry: 40, offensiveCavalry: 30, ram: 20, catapult: 14, scout: 5, expansion: 8 },
     },
     Pesadilla: {
         phase1Emergency: { defensiveInfantry: 5, total: 5 },
         phase2: { total: 30, offensiveInfantry: 21 },
-        phase3: { total: 52, offensiveInfantry: 40, scout: 12 },
-        phase4: { total: 80, offensiveInfantry: 46, offensiveCavalry: 24, scout: 10 },
-        phase5: { total: 164, offensiveInfantry: 52, offensiveCavalry: 40, ram: 28, catapult: 20, scout: 14, expansion: 10 },
+        phase3: { total: 52, offensiveInfantry: 40, scout: 6 },
+        phase4: { total: 80, offensiveInfantry: 46, offensiveCavalry: 24, scout: 5 },
+        phase5: { total: 164, offensiveInfantry: 52, offensiveCavalry: 40, ram: 28, catapult: 20, scout: 7, expansion: 10 },
     },
 });
 
@@ -366,6 +366,17 @@ function evaluateCycleTargets(phaseState, difficulty, phaseKey) {
     const targets = getCycleTargetForPhase(difficulty, phaseKey);
     const ready = (snapshot.total || 0) >= (targets.total || 0);
     return { ready, cycles: snapshot, targets };
+}
+
+export function getGermanPhaseCycleStatus(phaseState, difficulty, phaseKey) {
+    const cycles = getCycleProgressSnapshot(phaseState, phaseKey);
+    const targets = getCycleTargetForPhase(difficulty, phaseKey);
+    return {
+        completed: cycles.total || 0,
+        max: targets.total || 0,
+        cycles,
+        targets,
+    };
 }
 
 function resolveCycleBucketByUnit(village, unitId) {
@@ -1996,10 +2007,14 @@ function handlePhaseActionResult({
     village,
     gameSpeed,
     log,
+    onSuccess,
 }) {
     if (!result) return { terminal: false };
 
     if (result.success) {
+        if (typeof onSuccess === 'function') {
+            onSuccess(result);
+        }
         return { terminal: true };
     }
 
@@ -2031,6 +2046,35 @@ function handlePhaseActionResult({
     }
 
     return { terminal: false };
+}
+
+function registerRecruitmentCommitFromAction({ result, phaseState, phaseId, village, difficulty, log }) {
+    if (!result?.success) return;
+    if (!Number.isFinite(result.count) || result.count <= 0) return;
+    if (!result.unitId) return;
+    if (!Number.isFinite(result.timePerUnit) || result.timePerUnit <= 0) return;
+
+    recordGermanPhaseRecruitmentProgress({
+        phaseState,
+        phaseKey: phaseId,
+        village,
+        unitId: result.unitId,
+        count: result.count,
+        timePerUnit: result.timePerUnit,
+    });
+
+    if (typeof log === 'function') {
+        const status = getGermanPhaseCycleStatus(phaseState, difficulty, phaseId);
+        const percent = status.max > 0 ? ((status.completed / status.max) * 100) : 0;
+        log(
+            'info',
+            village,
+            'Macro Reclutamiento',
+            `Progreso ciclos fase: ${status.completed}/${status.max} (${percent.toFixed(1)}%).`,
+            null,
+            'economic',
+        );
+    }
 }
 
 function resetSubGoalOnPhaseTransition(phaseState, now) {
@@ -2378,6 +2422,14 @@ export function runGermanEconomicPhaseCycle({
             village,
             gameSpeed,
             log,
+            onSuccess: successResult => registerRecruitmentCommitFromAction({
+                result: successResult,
+                phaseState,
+                phaseId: GERMAN_PHASE_IDS.phase1,
+                village,
+                difficulty,
+                log,
+            }),
         });
         if (emergencyHandling.terminal) {
             return { handled: true, phaseState };
@@ -2469,6 +2521,14 @@ export function runGermanEconomicPhaseCycle({
                 village,
                 gameSpeed,
                 log,
+                onSuccess: successResult => registerRecruitmentCommitFromAction({
+                    result: successResult,
+                    phaseState,
+                    phaseId: GERMAN_PHASE_IDS.phase2,
+                    village,
+                    difficulty,
+                    log,
+                }),
             });
             if (phaseTwoRecruitmentHandling.terminal) {
                 return { handled: true, phaseState };
@@ -2502,6 +2562,14 @@ export function runGermanEconomicPhaseCycle({
                 village,
                 gameSpeed,
                 log,
+                onSuccess: successResult => registerRecruitmentCommitFromAction({
+                    result: successResult,
+                    phaseState,
+                    phaseId: GERMAN_PHASE_IDS.phase2,
+                    village,
+                    difficulty,
+                    log,
+                }),
             });
             if (phaseTwoFallbackRecruitmentHandling.terminal) {
                 return { handled: true, phaseState };
@@ -2584,6 +2652,14 @@ export function runGermanEconomicPhaseCycle({
                 village,
                 gameSpeed,
                 log,
+                onSuccess: successResult => registerRecruitmentCommitFromAction({
+                    result: successResult,
+                    phaseState,
+                    phaseId: GERMAN_PHASE_IDS.phase3,
+                    village,
+                    difficulty,
+                    log,
+                }),
             });
             if (phaseThreeRecruitmentHandling.terminal) {
                 return { handled: true, phaseState };
@@ -2617,6 +2693,14 @@ export function runGermanEconomicPhaseCycle({
                 village,
                 gameSpeed,
                 log,
+                onSuccess: successResult => registerRecruitmentCommitFromAction({
+                    result: successResult,
+                    phaseState,
+                    phaseId: GERMAN_PHASE_IDS.phase3,
+                    village,
+                    difficulty,
+                    log,
+                }),
             });
             if (phaseThreeFallbackRecruitmentHandling.terminal) {
                 return { handled: true, phaseState };
@@ -2699,6 +2783,14 @@ export function runGermanEconomicPhaseCycle({
                 village,
                 gameSpeed,
                 log,
+                onSuccess: successResult => registerRecruitmentCommitFromAction({
+                    result: successResult,
+                    phaseState,
+                    phaseId: GERMAN_PHASE_IDS.phase4,
+                    village,
+                    difficulty,
+                    log,
+                }),
             });
             if (phaseFourRecruitmentHandling.terminal) {
                 return { handled: true, phaseState };
@@ -2732,6 +2824,14 @@ export function runGermanEconomicPhaseCycle({
                 village,
                 gameSpeed,
                 log,
+                onSuccess: successResult => registerRecruitmentCommitFromAction({
+                    result: successResult,
+                    phaseState,
+                    phaseId: GERMAN_PHASE_IDS.phase4,
+                    village,
+                    difficulty,
+                    log,
+                }),
             });
             if (phaseFourFallbackRecruitmentHandling.terminal) {
                 return { handled: true, phaseState };
@@ -2817,6 +2917,14 @@ export function runGermanEconomicPhaseCycle({
         village,
         gameSpeed,
         log,
+        onSuccess: successResult => registerRecruitmentCommitFromAction({
+            result: successResult,
+            phaseState,
+            phaseId: GERMAN_PHASE_IDS.phase5,
+            village,
+            difficulty,
+            log,
+        }),
     });
     if (phaseFiveRecruitmentHandling.terminal) {
         return { handled: true, phaseState };
@@ -2850,6 +2958,14 @@ export function runGermanEconomicPhaseCycle({
         village,
         gameSpeed,
         log,
+        onSuccess: successResult => registerRecruitmentCommitFromAction({
+            result: successResult,
+            phaseState,
+            phaseId: GERMAN_PHASE_IDS.phase5,
+            village,
+            difficulty,
+            log,
+        }),
     });
     if (phaseFiveFallbackRecruitmentHandling.terminal) {
         return { handled: true, phaseState };

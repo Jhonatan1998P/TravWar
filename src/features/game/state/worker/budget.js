@@ -1,5 +1,7 @@
 const RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
 const DEFAULT_RATIO = Object.freeze({ econ: 0.5, mil: 0.5 });
+export const BUDGET_REBALANCE_INTERVAL_GAME_MINUTES = 10;
+export const BUDGET_REBALANCE_INTERVAL_GAME_MS = BUDGET_REBALANCE_INTERVAL_GAME_MINUTES * 60 * 1000;
 
 function getNormalizedRatio(budgetRatio) {
     const rawEcon = Number.isFinite(budgetRatio?.econ) ? Math.max(0, budgetRatio.econ) : DEFAULT_RATIO.econ;
@@ -63,6 +65,18 @@ export function rebalanceVillageBudgetToRatio(village, budgetRatio = village?.bu
         village.budget.mil[resource] = milValue;
         resourceData.current = econValue + milValue;
     });
+}
+
+export function rebalanceAIVillageBudgets(villages = []) {
+    let rebalancedCount = 0;
+
+    villages.forEach(village => {
+        if (!village?.ownerId?.startsWith('ai_')) return;
+        rebalanceVillageBudgetToRatio(village, village.budgetRatio);
+        rebalancedCount += 1;
+    });
+
+    return rebalancedCount;
 }
 
 export function addResourceIncomeToVillage(village, resource, amount, options = {}) {
