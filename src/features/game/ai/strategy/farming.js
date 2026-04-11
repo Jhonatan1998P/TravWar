@@ -5,6 +5,185 @@ import { calculateBeastBountyValue } from '../../core/OasisEconomy.js';
 
 const DEFAULT_TRAVEL_COST_PER_DISTANCE = 8;
 const DEFAULT_TRAVEL_COST_PER_MINUTE = 15;
+const OASIS_RAID_BATCH_MAX_TARGETS = 5;
+const OASIS_RAID_MISSION_TYPES = new Set(['attack', 'raid']);
+const OASIS_RETURN_SOURCE_TILE_TYPE = 'oasis';
+const OASIS_RAID_MIN_ATTACK_RATIO = 1.02;
+const OASIS_RAID_COUNT_STEPS = [1, 1.08, 1.15, 1.25, 1.4, 1.6];
+
+function getMovementTroopCount(movement) {
+    if (!movement?.payload?.troops || typeof movement.payload.troops !== 'object') return 0;
+    return Object.values(movement.payload.troops).reduce((sum, amount) => sum + (amount || 0), 0);
+}
+
+function getAttackerProportions(attackPoints) {
+    const total = Number(attackPoints?.total) || 0;
+    if (total <= 0) return { infantry: 0.5, cavalry: 0.5 };
+
+    const infantryRatio = Math.max(0, Math.min(1, (attackPoints.infantry || 0) / total));
+    const cavalryRatio = Math.max(0, Math.min(1, (attackPoints.cavalry || 0) / total));
+    const sum = infantryRatio + cavalryRatio;
+
+    if (sum <= 0) return { infantry: 0.5, cavalry: 0.5 };
+    return {
+        infantry: infantryRatio / sum,
+        cavalry: cavalryRatio / sum,
+    };
+}
+
+function calculateLossesByRatio(troops, ratio) {
+    const losses = {};
+    for (const unitId in troops) {
+        const originalCount = troops[unitId] || 0;
+        if (originalCount <= 0) continue;
+        const lost = Math.round(originalCount * ratio);
+        if (lost > 0) losses[unitId] = Math.min(lost, originalCount);
+    }
+    return losses;
+}
+
+function simulateOasisRaidBattleModel({
+    squad,
+    defenderTroops,
+    attRace,
+    attackerSmithyUpgrades,
+    attackerPopulation,
+}) {
+    const attackPoints = CombatFormulas.calculateAttackPoints(squad, attRace, attackerSmithyUpgrades || {});
+    if ((attackPoints.total || 0) <= 0) {
+        return {
+            winner: 'defender',
+            losses: calculateLossesByRatio(squad, 1),
+            defenderLosses: {},
+        };
+    }
+
+    const attackerProportions = getAttackerProportions(attackPoints);
+    const moraleBonus = CombatFormulas.getMoraleBonus(Math.max(0, attackerPopulation || 0), 0);
+    const defensePoints = CombatFormulas.calculateDefensePoints(
+        [{ troops: defenderTroops, race: 'nature', smithyUpgrades: {} }],
+        attackerProportions,
+        'nature',
+        0,
+        0,
+        moraleBonus,
+    );
+
+    const attackerWins = attackPoints.total > defensePoints;
+    const attackerLossPercent = attackerWins
+        ? CombatFormulas.calculateRaidWinnerLosses(attackPoints.total, defensePoints)
+        : 1.0 - CombatFormulas.calculateRaidWinnerLosses(defensePoints, attackPoints.total);
+    const defenderLossPercent = 1.0 - attackerLossPercent;
+
+    return {
+        winner: attackerWins ? 'attacker' : 'defender',
+        losses: calculateLossesByRatio(squad, attackerLossPercent),
+        defenderLosses: calculateLossesByRatio(defenderTroops, defenderLossPercent),
+    };
+}
+
+function getOffensiveRaidUnits(availableTroops, attRace, attackerSmithyUpgrades = {}) {
+    const raceUnits = gameData.units[attRace].troops;
+    const offensiveUnits = [];
+
+    for (const unitId in availableTroops) {
+        const count = availableTroops[unitId] || 0;
+        if (count <= 0) continue;
+
+        const unitData = raceUnits.find(unit => unit.id === unitId);
+        if (!unitData) continue;
+        if (unitData.role !== 'offensive') continue;
+        if (unitData.type !== 'infantry' && unitData.type !== 'cavalry') continue;
+
+        const totalCost = getUnitTotalCost(unitData);
+        const smithyBonus = 1 + ((attackerSmithyUpgrades[unitId] || 0) * 0.0075);
+        const effectiveAttack = unitData.stats.attack * smithyBonus;
+        if (effectiveAttack <= 0 || totalCost <= 0) continue;
+
+        offensiveUnits.push({
+            id: unitId,
+            count,
+            unitData,
+            totalCost,
+            effectiveAttack,
+            attackPerCost: effectiveAttack / totalCost,
+        });
+    }
+
+    offensiveUnits.sort((a, b) => {
+        if (b.attackPerCost !== a.attackPerCost) return b.attackPerCost - a.attackPerCost;
+        return b.effectiveAttack - a.effectiveAttack;
+    });
+
+    return offensiveUnits;
+}
+
+function getCandidateCounts(minCount, maxCount) {
+    if (!Number.isFinite(minCount) || !Number.isFinite(maxCount) || maxCount <= 0) return [];
+
+    const counts = new Set();
+    counts.add(Math.max(1, Math.min(maxCount, minCount)));
+
+    OASIS_RAID_COUNT_STEPS.forEach(step => {
+        counts.add(Math.max(1, Math.min(maxCount, Math.ceil(minCount * step))));
+    });
+
+    counts.add(maxCount);
+    return Array.from(counts).sort((a, b) => a - b);
+}
+
+function compareOasisRaidOptions(left, right) {
+    if (!left) return 1;
+    if (!right) return -1;
+
+    if (right.rewardNet !== left.rewardNet) return right.rewardNet - left.rewardNet;
+    if (left.lossValue !== right.lossValue) return left.lossValue - right.lossValue;
+
+    const leftTroops = Object.values(left.squad).reduce((sum, value) => sum + value, 0);
+    const rightTroops = Object.values(right.squad).reduce((sum, value) => sum + value, 0);
+    return leftTroops - rightTroops;
+}
+
+function isOutboundOasisAttackMovement(movement, ownerId, resolveTileTypeFromCoords) {
+    if (!movement || movement.ownerId !== ownerId) return false;
+    if (!OASIS_RAID_MISSION_TYPES.has(movement.type)) return false;
+    if (!movement.targetCoords || typeof resolveTileTypeFromCoords !== 'function') return false;
+    return resolveTileTypeFromCoords(movement.targetCoords) === OASIS_RETURN_SOURCE_TILE_TYPE;
+}
+
+function isOasisReturnMovement(movement, ownerId) {
+    if (!movement || movement.ownerId !== ownerId) return false;
+    if (movement.type !== 'return') return false;
+    return movement.payload?.returnContext?.sourceTileType === OASIS_RETURN_SOURCE_TILE_TYPE;
+}
+
+function getActiveOasisBatchState({ currentMovements, ownerId, resolveTileTypeFromCoords }) {
+    const movements = Array.isArray(currentMovements) ? currentMovements : [];
+
+    let outboundCount = 0;
+    let returnCount = 0;
+    let totalTroops = 0;
+
+    movements.forEach(movement => {
+        if (isOutboundOasisAttackMovement(movement, ownerId, resolveTileTypeFromCoords)) {
+            outboundCount += 1;
+            totalTroops += getMovementTroopCount(movement);
+            return;
+        }
+
+        if (isOasisReturnMovement(movement, ownerId)) {
+            returnCount += 1;
+            totalTroops += getMovementTroopCount(movement);
+        }
+    });
+
+    return {
+        hasActiveBatch: (outboundCount + returnCount) > 0,
+        outboundCount,
+        returnCount,
+        totalTroops,
+    };
+}
 
 function getCombatCandidateUnits(availableTroops, attRace) {
     const raceUnits = gameData.units[attRace].troops;
@@ -106,71 +285,65 @@ function calculateBestOasisRaidConfig({
     attRace,
     distance,
     troopSpeed,
-    simulateCombat,
+    attackerSmithyUpgrades,
+    attackerPopulation,
+    plannedSlots,
 }) {
-    const availableUnits = getCombatCandidateUnits(availableTroops, attRace);
-    if (availableUnits.length === 0) return null;
+    const offensiveUnits = getOffensiveRaidUnits(availableTroops, attRace, attackerSmithyUpgrades);
+    if (offensiveUnits.length === 0) return null;
 
     const defPower = getDefensePower(defenderTroops, 'nature');
     if (defPower <= 0) return null;
 
-    const targetProfiles = [
-        { ratio: 1.15, sortKey: 'speedEff', label: 'ligera_rapida' },
-        { ratio: 1.3, sortKey: 'attackEff', label: 'media_equilibrada' },
-        { ratio: 1.5, sortKey: 'attackEff', label: 'pesada_segura' },
-        { ratio: 1.35, sortKey: 'carryEff', label: 'mixta_movil' },
-    ];
-
-    const candidateSquads = [];
-    const seen = new Set();
-
-    targetProfiles.forEach(profile => {
-        const targetAttack = defPower * profile.ratio;
-        const candidate = buildAttackFocusedSquad(availableUnits, targetAttack, profile.sortKey);
-        if (!candidate) return;
-
-        const squadKey = Object.entries(candidate.squad)
-            .sort((a, b) => a[0].localeCompare(b[0]))
-            .map(([unitId, count]) => `${unitId}:${count}`)
-            .join('|');
-
-        if (seen.has(squadKey)) return;
-        seen.add(squadKey);
-
-        candidateSquads.push({ ...candidate, profile: profile.label });
-    });
-
-    if (candidateSquads.length === 0) return null;
-
     const { distanceCost, minuteCost } = getRaidTravelCostConfig();
-    let best = null;
+    let bestOption = null;
 
-    candidateSquads.forEach(candidate => {
-        const simulation = simulateCombat(candidate.squad, defenderTroops, 'nature', attRace, 0, 'raid');
-        const killedEstimated = simulation.defenderLosses || {};
-        const rewardGross = calculateBeastBountyValue(killedEstimated);
-        const lossValue = calculateLossValue(simulation.losses, attRace);
-        const travelMinutes = estimateTravelMinutes(distance, candidate.squad, attRace, troopSpeed);
-        const travelCost = (distance * distanceCost) + (travelMinutes * minuteCost);
-        const rewardNet = rewardGross - lossValue - travelCost;
+    offensiveUnits.forEach(unit => {
+        const minCount = Math.ceil((defPower * OASIS_RAID_MIN_ATTACK_RATIO) / unit.effectiveAttack);
+        const slotDivisor = Math.max(1, plannedSlots || 1);
+        const perAttackCap = Math.floor(unit.count / slotDivisor);
+        const maxAllowedCount = Math.min(unit.count, perAttackCap);
+        if (maxAllowedCount <= 0 || minCount > maxAllowedCount) return;
 
-        const evaluated = {
-            squad: candidate.squad,
-            profile: candidate.profile,
-            rewardGross,
-            lossValue,
-            travelCost,
-            travelMinutes,
-            rewardNet,
-            killedEstimated,
-        };
+        const candidateCounts = getCandidateCounts(minCount, maxAllowedCount);
+        candidateCounts.forEach(unitCount => {
+            const squad = { [unit.id]: unitCount };
+            const simulation = simulateOasisRaidBattleModel({
+                squad,
+                defenderTroops,
+                attRace,
+                attackerSmithyUpgrades,
+                attackerPopulation,
+            });
 
-        if (!best || evaluated.rewardNet > best.rewardNet) {
-            best = evaluated;
-        }
+            if (simulation.winner !== 'attacker') return;
+
+            const killedEstimated = simulation.defenderLosses || {};
+            const rewardGross = calculateBeastBountyValue(killedEstimated);
+            const lossValue = calculateLossValue(simulation.losses, attRace);
+            const travelMinutes = estimateTravelMinutes(distance, squad, attRace, troopSpeed);
+            const travelCost = (distance * distanceCost) + (travelMinutes * minuteCost);
+            const rewardNet = rewardGross - lossValue - travelCost;
+
+            const option = {
+                squad,
+                profile: `unidad_optima_${unit.id}`,
+                rewardGross,
+                lossValue,
+                travelCost,
+                travelMinutes,
+                rewardNet,
+                killedEstimated,
+                selectedUnitId: unit.id,
+            };
+
+            if (!bestOption || compareOasisRaidOptions(bestOption, option) > 0) {
+                bestOption = option;
+            }
+        });
     });
 
-    return best;
+    return bestOption;
 }
 
 export function calculateBestRaidConfig({
@@ -241,14 +414,35 @@ export function calculateBestRaidConfig({
     };
 }
 
+function createForceTroopPool(forces) {
+    return forces.map(force => ({ ...force.combatTroops }));
+}
+
+function hasTroopsForSquad(troopPool, squad) {
+    for (const unitId in squad) {
+        if ((troopPool[unitId] || 0) < squad[unitId]) return false;
+    }
+    return true;
+}
+
+function consumeSquadFromPool(troopPool, squad) {
+    for (const unitId in squad) {
+        troopPool[unitId] = Math.max(0, (troopPool[unitId] || 0) - squad[unitId]);
+    }
+}
+
 export function performOptimizedFarming({
     forces,
     knownTargets,
     nemesisId,
+    ownerId,
     race,
+    attackerPopulation = 0,
     troopSpeed = 1,
     simulateCombat,
     consumeTroops,
+    currentMovements,
+    resolveTileTypeFromCoords,
 }) {
     const commands = [];
     const logs = [];
@@ -276,53 +470,66 @@ export function performOptimizedFarming({
     };
 
     const farmTargets = knownTargets.filter(target => target.ownerId !== nemesisId);
+    const oasisBatchState = getActiveOasisBatchState({
+        currentMovements,
+        ownerId,
+        resolveTileTypeFromCoords,
+    });
 
-    farmTargets.forEach(target => {
-        forces.forEach((force, forceIndex) => {
-            if (force.power <= 0) return;
+    if (oasisBatchState.hasActiveBatch) {
+        logs.push(
+            '[FARMEO ROI] Lote de oasis en curso. Esperando regreso total antes de lanzar otro lote: ' +
+            `${oasisBatchState.outboundCount} ida, ${oasisBatchState.returnCount} regreso, ` +
+            `${oasisBatchState.totalTroops} tropas en ciclo.`,
+        );
+    }
 
-            const dist = Math.hypot(
-                target.coords.x - force.village.coords.x,
-                target.coords.y - force.village.coords.y,
-            );
-            if (dist > 50) return;
+    const oasisTargets = farmTargets.filter(target => target.type === 'oasis');
+    let targetSlotsForCycle = 0;
 
-            let potentialLoot = 0;
-            let defenderTroops = {};
-            let defRace = 'nature';
+    const evaluateOasisSlots = plannedSlots => {
+        const slotTelemetry = {
+            evaluatedOases: 0,
+            profitableOases: 0,
+            rejectedNoSquad: 0,
+            rejectedNonPositive: 0,
+        };
+        const candidates = [];
 
-            if (target.type === 'oasis') {
-                telemetry.evaluatedOases += 1;
+        oasisTargets.forEach(target => {
+            forces.forEach((force, forceIndex) => {
+                if (force.power <= 0) return;
+
+                const dist = Math.hypot(
+                    target.coords.x - force.village.coords.x,
+                    target.coords.y - force.village.coords.y,
+                );
+                if (dist > 50) return;
+
+                slotTelemetry.evaluatedOases += 1;
                 const beasts = target.data.state?.beasts || {};
-                defenderTroops = { ...beasts };
                 const oasisConfig = calculateBestOasisRaidConfig({
                     availableTroops: force.combatTroops,
-                    defenderTroops,
+                    defenderTroops: { ...beasts },
                     attRace: race,
                     distance: dist,
                     troopSpeed,
-                    simulateCombat,
+                    attackerSmithyUpgrades: force.village?.smithy?.upgrades || {},
+                    attackerPopulation,
+                    plannedSlots,
                 });
 
                 if (!oasisConfig) {
-                    telemetry.rejectedNoSquad += 1;
-                    logs.push(`[FARMEO ROI] Oasis ${target.coords.x}|${target.coords.y} descartado: sin escuadra viable.`);
+                    slotTelemetry.rejectedNoSquad += 1;
                     return;
                 }
-
                 if (oasisConfig.rewardNet <= 0) {
-                    telemetry.rejectedNonPositive += 1;
-                    logs.push(
-                        `[FARMEO ROI] Oasis ${target.coords.x}|${target.coords.y} descartado: ` +
-                        `RewardNet ${oasisConfig.rewardNet.toFixed(0)} <= 0 ` +
-                        `(Gross ${oasisConfig.rewardGross.toFixed(0)} - Loss ${oasisConfig.lossValue.toFixed(0)} - Travel ${oasisConfig.travelCost.toFixed(0)}).`,
-                    );
+                    slotTelemetry.rejectedNonPositive += 1;
                     return;
                 }
 
-                telemetry.profitableOases += 1;
-
-                oasisOpportunities.push({
+                slotTelemetry.profitableOases += 1;
+                candidates.push({
                     forceIndex,
                     target,
                     squad: oasisConfig.squad,
@@ -334,17 +541,105 @@ export function performOptimizedFarming({
                         travelCost: oasisConfig.travelCost,
                         travelMinutes: oasisConfig.travelMinutes,
                         profile: oasisConfig.profile,
+                        selectedUnitId: oasisConfig.selectedUnitId,
                     },
                 });
-                return;
-            } else {
-                const resources = target.intel?.payload?.resources;
-                if (resources) {
-                    potentialLoot = resources.wood + resources.stone + resources.iron + resources.food;
-                }
-                defenderTroops = target.intel?.payload?.troops || {};
-                defRace = target.data.race;
+            });
+        });
+
+        candidates.sort((a, b) => {
+            if (b.profit !== a.profit) return b.profit - a.profit;
+            return a.dist - b.dist;
+        });
+
+        const troopPoolByForce = createForceTroopPool(forces);
+        const visitedOases = new Set();
+        const selected = [];
+
+        candidates.forEach(candidate => {
+            if (selected.length >= plannedSlots) return;
+            if (visitedOases.has(candidate.target.id)) return;
+
+            const troopPool = troopPoolByForce[candidate.forceIndex];
+            if (!hasTroopsForSquad(troopPool, candidate.squad)) return;
+
+            consumeSquadFromPool(troopPool, candidate.squad);
+            selected.push(candidate);
+            visitedOases.add(candidate.target.id);
+        });
+
+        return {
+            selected,
+            telemetry: slotTelemetry,
+        };
+    };
+
+    if (!oasisBatchState.hasActiveBatch) {
+        let selectedPlan = null;
+
+        for (let plannedSlots = OASIS_RAID_BATCH_MAX_TARGETS; plannedSlots >= 1; plannedSlots--) {
+            logs.push(`[FARMEO LOTE] Evaluando lote oasis con ${plannedSlots} slots (division de tropas por ${plannedSlots}).`);
+            const slotResult = evaluateOasisSlots(plannedSlots);
+            const viableSlots = slotResult.selected.length;
+
+            logs.push(`[FARMEO LOTE] slots=${plannedSlots} | viables=${viableSlots}/${plannedSlots}.`);
+
+            if (viableSlots >= plannedSlots) {
+                selectedPlan = slotResult;
+                targetSlotsForCycle = plannedSlots;
+                logs.push(`[FARMEO LOTE] Lote confirmado: ${plannedSlots} ataques oasis rentables en este ciclo.`);
+                break;
             }
+
+            if (plannedSlots > 1) {
+                logs.push(`[FARMEO LOTE] Slot no rentable detectado. Reintentando con ${plannedSlots - 1} slots.`);
+            } else {
+                selectedPlan = slotResult;
+                targetSlotsForCycle = 1;
+            }
+        }
+
+        if (selectedPlan) {
+            telemetry.evaluatedOases += selectedPlan.telemetry.evaluatedOases;
+            telemetry.profitableOases += selectedPlan.telemetry.profitableOases;
+            telemetry.rejectedNoSquad += selectedPlan.telemetry.rejectedNoSquad;
+            telemetry.rejectedNonPositive += selectedPlan.telemetry.rejectedNonPositive;
+            oasisOpportunities.push(...selectedPlan.selected);
+        }
+
+        const sentSlots = oasisOpportunities.length;
+        const committedTroops = oasisOpportunities.reduce(
+            (sum, opportunity) => sum + Object.values(opportunity.squad || {}).reduce((inner, count) => inner + (count || 0), 0),
+            0,
+        );
+        const avgNet = sentSlots > 0
+            ? oasisOpportunities.reduce((sum, opportunity) => sum + (opportunity.profit || 0), 0) / sentSlots
+            : 0;
+
+        logs.push(
+            `[FARMEO LOTE] Resumen ciclo: objetivoSlots=${targetSlotsForCycle} enviados=${sentSlots} ` +
+            `tropasComprometidas=${committedTroops} avgNet=${avgNet.toFixed(0)}.`,
+        );
+    }
+
+    farmTargets.forEach(target => {
+        if (target.type === 'oasis') return;
+
+        forces.forEach((force, forceIndex) => {
+            if (force.power <= 0) return;
+
+            const dist = Math.hypot(
+                target.coords.x - force.village.coords.x,
+                target.coords.y - force.village.coords.y,
+            );
+            if (dist > 50) return;
+
+            const resources = target.intel?.payload?.resources;
+            const potentialLoot = resources
+                ? (resources.wood + resources.stone + resources.iron + resources.food)
+                : 0;
+            const defenderTroops = target.intel?.payload?.troops || {};
+            const defRace = target.data.race;
 
             if (potentialLoot === 0 && Object.keys(defenderTroops).length === 0) return;
 
@@ -370,29 +665,32 @@ export function performOptimizedFarming({
         });
     });
 
-    oasisOpportunities.sort((a, b) => {
-        if (b.profit !== a.profit) return b.profit - a.profit;
-        return a.dist - b.dist;
-    });
-
     nonOasisOpportunities.sort((a, b) => b.score - a.score);
 
     if (oasisOpportunities.length === 0) {
-        telemetry.noProfitableCycle = true;
-        logs.push('[FARMEO ROI] No hay oasis con RewardNet > 0 en este ciclo.');
+        telemetry.noProfitableCycle = !oasisBatchState.hasActiveBatch;
+        if (!oasisBatchState.hasActiveBatch) {
+            logs.push('[FARMEO ROI] No hay oasis con RewardNet > 0 en este ciclo.');
+        }
     } else {
         const ranking = oasisOpportunities
-            .slice(0, 5)
+            .slice(0, OASIS_RAID_BATCH_MAX_TARGETS)
             .map(op => `${op.target.coords.x}|${op.target.coords.y}:${op.profit.toFixed(0)}`)
             .join(' > ');
         logs.push(`[FARMEO ROI] Ranking oasis por RewardNet: ${ranking}`);
     }
 
     const opportunities = [...oasisOpportunities, ...nonOasisOpportunities];
+    let oasisRaidsIssuedThisCycle = 0;
 
     opportunities.forEach(opportunity => {
         const force = forces[opportunity.forceIndex];
         if (visitedTargets.has(opportunity.target.id)) return;
+
+        if (opportunity.target.type === 'oasis') {
+            if (oasisBatchState.hasActiveBatch) return;
+            if (oasisRaidsIssuedThisCycle >= OASIS_RAID_BATCH_MAX_TARGETS) return;
+        }
 
         if (opportunity.target.type === 'oasis' && opportunity.profit <= 0) {
             telemetry.rejectedNonPositive += 1;
@@ -421,6 +719,7 @@ export function performOptimizedFarming({
         });
 
         if (opportunity.target.type === 'oasis') {
+            oasisRaidsIssuedThisCycle += 1;
             telemetry.attacksIssued += 1;
             telemetry.rewardNetSum += opportunity.profit;
             if (opportunity.profit <= 0) telemetry.attacksIssuedNonPositive += 1;
@@ -435,10 +734,14 @@ export function performOptimizedFarming({
         }
 
         if (opportunity.target.type === 'oasis' && opportunity.details) {
+            const unitBreakdown = Object.entries(opportunity.squad)
+                .map(([unitId, count]) => `${unitId}:${count}`)
+                .join(',');
             logs.push(
                 `[FARMEO ROI] ${force.village.name} -> Oasis (${opportunity.details.profile}) ` +
                 `(Net: ${opportunity.profit.toFixed(0)}, Gross: ${opportunity.details.rewardGross.toFixed(0)}, ` +
-                `Loss: ${opportunity.details.lossValue.toFixed(0)}, Travel: ${opportunity.details.travelCost.toFixed(0)}, Dist: ${opportunity.dist.toFixed(1)})`,
+                `Loss: ${opportunity.details.lossValue.toFixed(0)}, Travel: ${opportunity.details.travelCost.toFixed(0)}, Dist: ${opportunity.dist.toFixed(1)}, ` +
+                `Unidad: ${opportunity.details.selectedUnitId || 'n/a'}, Tropas: ${unitBreakdown})`,
             );
         } else {
             logs.push(`[FARMEO ROI] ${force.village.name} -> ${opportunity.target.type === 'oasis' ? 'Oasis' : opportunity.target.data.name} (Profit: ${opportunity.profit.toFixed(0)}, Dist: ${opportunity.dist.toFixed(1)})`);

@@ -45,6 +45,7 @@ export function manageConstructionForGoal({
     gameState,
     step,
     attemptUpgrade,
+    attemptUpgradeDetailed,
     log,
 }) {
     const candidate = findConstructionCandidate(village, step);
@@ -64,12 +65,18 @@ export function manageConstructionForGoal({
     }
 
     const buildingName = buildingData.name || 'Campo de Recurso';
-    const success = attemptUpgrade(village, candidate.building, candidate.type);
+    const upgradeResult = typeof attemptUpgradeDetailed === 'function'
+        ? attemptUpgradeDetailed(village, candidate.building, candidate.type)
+        : { success: Boolean(attemptUpgrade(village, candidate.building, candidate.type)) };
 
-    if (success) {
+    if (upgradeResult?.success) {
         log('success', village, 'Construcción', `Iniciando mejora de ${buildingName} a Nivel ${targetLevel}.`);
         return { success: true };
     }
 
-    return { success: false, reason: 'QUEUE_FULL' };
+    return {
+        success: false,
+        reason: upgradeResult?.reason || 'QUEUE_FULL',
+        details: upgradeResult?.details,
+    };
 }

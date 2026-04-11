@@ -499,11 +499,12 @@ export class VillageProcessor {
                     this.#village.unitsInVillage[job.unitId] = (this.#village.unitsInVillage[job.unitId] || 0) + actualCompleted;
                     job.remainingCount -= actualCompleted;
                     
-                    this.#recruitmentBatch.push({ 
-                        unitId: job.unitId, 
-                        count: actualCompleted, 
-                        buildingId: job.buildingId, 
-                        villageId: this.#village.id 
+                    this.#recruitmentBatch.push({
+                        unitId: job.unitId,
+                        count: actualCompleted,
+                        buildingId: job.buildingId,
+                        timePerUnit: job.timePerUnit,
+                        villageId: this.#village.id,
                     });
                     
                     needsRecalculation = true;
@@ -550,8 +551,14 @@ export class VillageProcessor {
         if (currentTime - this.#lastBatchDispatchTime < RECRUITMENT_NOTIFICATION_BATCH_INTERVAL_MS) return;
         if (this.#recruitmentBatch.length > 0) {
             const aggregatedCompleted = this.#recruitmentBatch.reduce((acc, job) => {
-                acc[job.unitId] = acc[job.unitId] || { unitId: job.unitId, count: 0 };
-                acc[job.unitId].count += job.count;
+                const key = `${job.unitId}:${job.timePerUnit || 0}:${job.buildingId || 'unknown'}`;
+                acc[key] = acc[key] || {
+                    unitId: job.unitId,
+                    count: 0,
+                    timePerUnit: job.timePerUnit || 0,
+                    buildingId: job.buildingId || null,
+                };
+                acc[key].count += job.count;
                 return acc;
             }, {});
             this.#notifications.push({ type: 'recruitment:finished', payload: { completed: Object.values(aggregatedCompleted), villageId: this.#village.id } });

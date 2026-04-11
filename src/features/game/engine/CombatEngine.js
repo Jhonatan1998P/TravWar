@@ -554,6 +554,15 @@ export class CombatEngine {
 
         const returnTravelTime = this._movement.arrivalTime - this._movement.startTime;
         const now = Date.now();
+        const sourceTile = this._gameState.spatialIndex.get(`${this._movement.targetCoords.x}|${this._movement.targetCoords.y}`);
+        const returnContext = {
+            sourceTileType: sourceTile?.type || null,
+            sourceCoords: {
+                x: this._movement.targetCoords.x,
+                y: this._movement.targetCoords.y,
+            },
+            sourceMissionType: this._movement.type,
+        };
         
         return {
             id: `${now}-mov-return-${originVillage.id}`,
@@ -561,7 +570,7 @@ export class CombatEngine {
             ownerId: this._movement.ownerId,
             originVillageId: this._movement.originVillageId,
             targetCoords: { x: originVillage.coords.x, y: originVillage.coords.y },
-            payload: { troops, bounty, plunder },
+            payload: { troops, bounty, plunder, returnContext },
             startTime: now,
             arrivalTime: now + returnTravelTime,
         };

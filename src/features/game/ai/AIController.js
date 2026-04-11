@@ -8,6 +8,57 @@ import { applyDevelopmentBudgetMode } from './controller/economic.js';
 import { executeCommands } from './controller/commands.js';
 import { handleAttackReact, handleEspionageReact, processDodgeTasks, processReinforcementRecalls } from './controller/reactive.js';
 import { runMilitaryDecision } from './controller/military.js';
+import {
+    createDefaultGermanPhaseState,
+    GERMAN_PHASE_IDS,
+    hydrateGermanPhaseState,
+    recordGermanPhaseRecruitmentProgress,
+    runGermanEconomicPhaseCycle,
+    serializeGermanPhaseStates,
+} from './controller/german-phase-engine.js';
+
+const PHASE_LABELS = Object.freeze({
+    [GERMAN_PHASE_IDS.phase1]: 'Fase 1 - Arranque economico',
+    [GERMAN_PHASE_IDS.phase2]: 'Fase 2 - Desbloqueo militar basico',
+    [GERMAN_PHASE_IDS.phase3]: 'Fase 3 - Produccion mixta sostenida',
+    [GERMAN_PHASE_IDS.phase4]: 'Fase 4 - Presion militar y tecnologia',
+    [GERMAN_PHASE_IDS.phase5]: 'Fase 5 - Asedio y expansion',
+    [GERMAN_PHASE_IDS.phaseDone]: 'Plantilla completada',
+});
+
+const STAGE_LABELS = Object.freeze({
+    early: 'EARLY',
+    mid: 'MID',
+    late: 'LATE',
+    unknown: 'N/A',
+});
+
+const ACTION_LABELS = Object.freeze({
+    INICIO_CICLO_GESTION: 'Inicio Ciclo Gestion',
+    INICIO_CICLO_MILITAR: 'Inicio Ciclo Militar',
+    StrategicAI: 'Analisis Estrategico',
+    'Strategic AI': 'Analisis Estrategico',
+});
+
+function formatDuration(ms) {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function getStageFromPhaseId(phaseId) {
+    if (phaseId === GERMAN_PHASE_IDS.phase1 || phaseId === GERMAN_PHASE_IDS.phase2) return 'early';
+    if (phaseId === GERMAN_PHASE_IDS.phase3 || phaseId === GERMAN_PHASE_IDS.phase4) return 'mid';
+    if (phaseId === GERMAN_PHASE_IDS.phase5 || phaseId === GERMAN_PHASE_IDS.phaseDone) return 'late';
+    return 'unknown';
+}
+
+function getPhaseLabel(phaseId) {
+    return PHASE_LABELS[phaseId] || 'Fase no definida';
+}
 
 function createDefaultOasisTelemetry() {
     return {
@@ -42,6 +93,7 @@ class AIController {
     _personality;
     _race;
     _archetype;
+    _difficulty;
     _sendCommand;
     _gameConfig;
 
@@ -58,12 +110,15 @@ class AIController {
     _reinforcementTasks = [];
     _dodgeTasks = new Map();
     _oasisTelemetry = createDefaultOasisTelemetry();
+    _germanPhaseStates = new Map();
+    _lastKnownGameState = null;
 
-    constructor(ownerId, personality, race, archetype, sendCommandCallback, gameConfig) {
+    constructor(ownerId, personality, race, archetype, sendCommandCallback, gameConfig, difficulty = 'Pesadilla') {
         this._ownerId = ownerId;
         this._personality = personality;
         this._race = race;
         this._archetype = archetype;
+        this._difficulty = difficulty;
         this._sendCommand = sendCommandCallback;
         this._gameConfig = gameConfig;
 
@@ -74,7 +129,9 @@ class AIController {
         this._militaryDecisionInterval = Math.max(30000, Math.min(calculatedInterval, 300000));
         
         this._actionExecutor = new AIActionExecutor(this);
-        this._goalManager = new AIGoalManager(this, this._actionExecutor);
+        this._goalManager = this._race === 'germans'
+            ? null
+            : new AIGoalManager(this, this._actionExecutor);
     }
 
     getDecisionLog() {
@@ -90,7 +147,8 @@ class AIController {
         return [
             `=== AI Decision Log: ${this._ownerId} ===`,
             `Race: ${this._race} | Archetype: ${this._archetype}`,
-            `Personality: Pesadilla`,
+            `Personality: ${this._difficulty}`,
+            `Macro engine: ${this._race === 'germans' ? 'PhaseEngine (sin GoalManager)' : 'GoalManager legacy'}`,
             `Villages managed: ${villageCount}`,
             `Active economic goals: ${totalEconGoals}`,
             `Active military goals: ${totalMilGoals}`,
@@ -112,11 +170,24 @@ class AIController {
 
     log(level, village, action, message, details, category = null) {
         const ICONS = { info: '⚙️', success: '✅', fail: '❌', warn: '⚠️', goal: '🎯', error: '🔥' };
-        const STYLES = { info: 'color: #6c757d;', success: 'color: #28a745; font-weight: bold;', fail: 'color: #dc3545;', warn: 'color: #ffc107;', goal: 'color: #6f42c1; font-weight: bold;', error: 'color: #E91E63; font-weight: bold;' };
-        
-        const villageName = village ? `[${village.name}]` : '[Global]';
-        console.log(`%c${ICONS[level] || ''} [IA ${this._ownerId}] ${villageName} [${action}] :: ${message}`, STYLES[level] || '');
-        
+        const STYLES = {
+            info: 'color: #6c757d;',
+            success: 'color: #28a745; font-weight: bold;',
+            fail: 'color: #dc3545;',
+            warn: 'color: #ffc107;',
+            goal: 'color: #6f42c1; font-weight: bold;',
+            error: 'color: #E91E63; font-weight: bold;',
+        };
+
+        const logVillage = village || this._resolvePrimaryVillage();
+        const context = this._buildLogContext(logVillage, category);
+        const normalizedAction = ACTION_LABELS[action] || action;
+
+        console.log(
+            `%c${ICONS[level] || ''} [IA ${this._ownerId}] [Juego ${context.gameTime}] [Etapa ${context.stage}] [${context.phase}] [${context.villageLabel}] [${normalizedAction}] :: ${message}`,
+            STYLES[level] || '',
+        );
+
         if (details) {
             if (typeof details === 'string') {
                 console.log(details);
@@ -129,17 +200,83 @@ class AIController {
     getOwnerId() { return this._ownerId; }
     getRace() { return this._race; }
     getArchetype() { return this._archetype; }
+    getDifficulty() { return this._difficulty; }
     getPersonality() { return this._personality; }
     getGameConfig() { return this._gameConfig; }
     getSendCommand() { return this._sendCommand; }
     getActionExecutor() { return this._actionExecutor; }
     getGoalManager() { return this._goalManager; }
 
+    handleGameNotification(notification, gameState) {
+        this._lastKnownGameState = gameState;
+
+        if (this._race !== 'germans' || !notification || !notification.type) {
+            return;
+        }
+
+        if (notification.type !== 'recruitment:finished') {
+            return;
+        }
+
+        const payload = notification.payload || {};
+        const village = gameState?.villages?.find(candidate => candidate.id === payload.villageId);
+        if (!village) return;
+
+        const phaseState = this._germanPhaseStates.get(village.id);
+        if (!phaseState || !phaseState.activePhaseId) return;
+
+        const phaseKey = phaseState.activePhaseId;
+        if (!phaseKey || phaseKey === GERMAN_PHASE_IDS.phaseDone || phaseKey === GERMAN_PHASE_IDS.phase1) return;
+
+        for (const completed of payload.completed || []) {
+            recordGermanPhaseRecruitmentProgress({
+                phaseState,
+                phaseKey,
+                village,
+                unitId: completed.unitId,
+                count: completed.count,
+                timePerUnit: completed.timePerUnit,
+            });
+        }
+    }
+
+    _resolvePrimaryVillage() {
+        if (!this._lastKnownGameState?.villages) return null;
+        return this._lastKnownGameState.villages.find(village => village.ownerId === this._ownerId) || null;
+    }
+
+    _buildLogContext(village, category) {
+        const now = Date.now();
+        const startedAt = this._lastKnownGameState?.startedAt || now;
+        const gameSpeed = Math.max(this._gameConfig?.gameSpeed || 1, 1);
+        const elapsedRealMs = Math.max(0, now - startedAt);
+        const elapsedGameMs = elapsedRealMs * gameSpeed;
+
+        let phaseId = null;
+        if (village && this._germanPhaseStates.has(village.id)) {
+            phaseId = this._germanPhaseStates.get(village.id)?.activePhaseId || null;
+        }
+
+        const stageKey = getStageFromPhaseId(phaseId);
+        const phaseLabel = phaseId ? getPhaseLabel(phaseId) : 'Sin fase macro';
+
+        return {
+            gameTime: `T+${formatDuration(elapsedGameMs)} @${gameSpeed}x`,
+            stage: STAGE_LABELS[stageKey] || STAGE_LABELS.unknown,
+            phase: `Fase: ${phaseLabel}`,
+            villageLabel: village ? `${village.name} (${village.coords.x}|${village.coords.y})` : 'Global',
+            category: category || 'general',
+        };
+    }
+
     init(gameState, aiPlayerState) {
+        this._lastKnownGameState = gameState;
         this._reputationManager = new ReputationManager(gameState.diplomacy);
-        
-        const goalState = aiPlayerState.goalState || {};
-        this._goalManager.init(gameState, goalState);
+
+        if (this._goalManager) {
+            const goalState = aiPlayerState.goalState || {};
+            this._goalManager.init(gameState, goalState);
+        }
         
         this._actionExecutor.init(this._reputationManager);
         
@@ -149,10 +286,23 @@ class AIController {
         this._reinforcementTasks = aiPlayerState.reinforcementTasks || [];
         this._dodgeTasks = new Map(aiPlayerState.dodgeTasks || []);
         this._oasisTelemetry = this._ensureOasisTelemetryDefaults(aiPlayerState.oasisTelemetry);
+
+        if (this._race === 'germans') {
+            const persistedPhaseState = aiPlayerState.germanPhaseState || {};
+            const myVillages = gameState.villages.filter(village => village.ownerId === this._ownerId);
+            this._germanPhaseStates = new Map();
+
+            myVillages.forEach(village => {
+                this._germanPhaseStates.set(
+                    village.id,
+                    hydrateGermanPhaseState(persistedPhaseState[village.id]),
+                );
+            });
+        }
     }
     
     getState() {
-        const goalState = this._goalManager.getState();
+        const goalState = this._goalManager ? this._goalManager.getState() : {};
         return {
             goalState: goalState,
             lastEconomicDecisionTime: this._lastEconomicDecisionTime,
@@ -160,7 +310,16 @@ class AIController {
             reinforcementTasks: this._reinforcementTasks,
             dodgeTasks: Array.from(this._dodgeTasks.entries()),
             oasisTelemetry: this._oasisTelemetry,
+            germanPhaseState: serializeGermanPhaseStates(this._germanPhaseStates),
         };
+    }
+
+    _ensureGermanPhaseState(villageId) {
+        if (!this._germanPhaseStates.has(villageId)) {
+            this._germanPhaseStates.set(villageId, createDefaultGermanPhaseState());
+        }
+
+        return this._germanPhaseStates.get(villageId);
     }
 
     _updateOasisTelemetry(cycleTelemetry) {
@@ -232,6 +391,7 @@ class AIController {
     }
 
     handleReactiveEvent(eventType, data, gameState) {
+        this._lastKnownGameState = gameState;
         if (eventType === 'movement_dispatched') {
             const movement = data;
             this.log('warn', null, 'Evento Reactivo', `Detectado movimiento hostil inminente: '${movement.type}'.`, movement, 'military');
@@ -293,6 +453,7 @@ class AIController {
     }
 
     makeDecision(gameState) {
+        this._lastKnownGameState = gameState;
         this._processReinforcementRecalls(gameState);
         this._processDodgeTasks(gameState);
 
@@ -301,23 +462,56 @@ class AIController {
         if (myVillages.length === 0) return;
 
         if (!this._isThinkingEconomic && (now - this._lastEconomicDecisionTime >= this._personality.decisionInterval)) {
-            this.log('info', null, 'INICIO_CICLO_GESTION', 'Evaluating economic & military strategic actions...');
+            this.log('info', null, 'INICIO_CICLO_GESTION', 'Iniciando evaluacion economica y militar.');
             this._isThinkingEconomic = true;
             this._lastEconomicDecisionTime = now;
             try {
-                myVillages.forEach(village => this._goalManager.ensureVillageStateExists(village.id));
+                if (this._goalManager) {
+                    myVillages.forEach(village => this._goalManager.ensureVillageStateExists(village.id));
+                }
 
-                applyDevelopmentBudgetMode({
-                    myVillages,
-                    personality: this._personality,
-                    log: this.log.bind(this),
-                });
+                if (this._goalManager) {
+                    applyDevelopmentBudgetMode({
+                        myVillages,
+                        personality: this._personality,
+                        log: this.log.bind(this),
+                    });
+                }
 
                 myVillages.forEach((village, index) => {
-                    this._goalManager.processVillageState(village, index, gameState);
+                    if (this._race === 'germans') {
+                        const phaseState = this._ensureGermanPhaseState(village.id);
+                        const result = runGermanEconomicPhaseCycle({
+                            village,
+                            gameState,
+                            phaseState,
+                            difficulty: this._difficulty,
+                            gameSpeed: this._gameConfig?.gameSpeed || 1,
+                            actionExecutor: this._actionExecutor,
+                            log: this.log.bind(this),
+                        });
+
+                        this._germanPhaseStates.set(village.id, result.phaseState);
+
+                        if (!result.handled) {
+                            this.log(
+                                'warn',
+                                village,
+                                'Macro Fases',
+                                'El motor por fases devolvio handled=false; se evita fallback legacy por hard cutover.',
+                                { phaseId: phaseState.activePhaseId },
+                                'economic',
+                            );
+                        }
+                        return;
+                    }
+
+                    if (this._goalManager) {
+                        this._goalManager.processVillageState(village, index, gameState);
+                    }
                 });
             } catch (error) {
-                this.log('error', null, 'Ciclo de Gestión', 'Error in strategic logic', error);
+                this.log('error', null, 'Ciclo de Gestion', 'Error en la logica estrategica.', error);
             } finally {
                 this._isThinkingEconomic = false;
             }
@@ -354,7 +548,7 @@ class AIController {
                 this._updateOasisTelemetry(telemetry.oasisFarming);
             }
         } catch (error) {
-            this.log('error', null, 'Error en Ciclo Militar', 'Error in military decision logic', error.message + '\n' + error.stack, 'military');
+            this.log('error', null, 'Error en Ciclo Militar', 'Error en la logica militar.', error.message + '\n' + error.stack, 'military');
         } finally {
             this._isThinkingMilitary = false;
         }

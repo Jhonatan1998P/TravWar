@@ -53,6 +53,38 @@ function getQueuedUnitsForBuilding(village, buildingId) {
         .reduce((sum, job) => sum + (job.remainingCount ?? job.count ?? 0), 0);
 }
 
+function getRecruitmentQueueTailEndTime(village, buildingId) {
+    const now = Date.now();
+    let tailEnd = now;
+
+    village.recruitmentQueue
+        .filter(job => job.buildingId === buildingId)
+        .forEach(job => {
+            const remainingUnits = Math.max(0, (job.remainingCount ?? job.count ?? 0) - 1);
+            const unitTime = job.timePerUnit || 0;
+            const jobTailEnd = (job.endTime || now) + (remainingUnits * unitTime);
+            if (jobTailEnd > tailEnd) tailEnd = jobTailEnd;
+        });
+
+    return tailEnd;
+}
+
+function getQueueCoverageMs(village, buildingId) {
+    const now = Date.now();
+    const tailEnd = getRecruitmentQueueTailEndTime(village, buildingId);
+    return Math.max(0, tailEnd - now);
+}
+
+function getSingleUnitTrainingTimeMs(village, trainingBuilding, unitData, gameSpeed) {
+    if (!trainingBuilding || !unitData) return 0;
+
+    const levelData = gameData.buildings[trainingBuilding.type]?.levels?.[Math.max(0, (trainingBuilding.level || 1) - 1)];
+    const timeFactor = levelData?.attribute?.trainingTimeFactor || 1;
+    const speed = Math.max(gameSpeed || 1, 1);
+
+    return ((unitData.trainTime / timeFactor) / speed) * 1000;
+}
+
 function getPhaseBatchConfig(village, gameSpeed) {
     const phase = getVillagePhase(village);
     const baseConfig = PHASE_BATCH_CONFIG[phase];
@@ -212,8 +244,42 @@ export function manageRecruitmentForGoal({
     const scopedVillages = getVillagesForGoalScope(allVillages, village, goalScope);
     const unitsOwned = getTotalUnitCountAcrossVillages(scopedVillages, unitId);
 
-    const targetAmount = step.count === Infinity ? 9999999 : step.count;
-    const unitsNeeded = targetAmount - unitsOwned;
+    const queueTargetMinutes = Number.isFinite(step.queueTargetMinutes)
+        ? Math.max(0, step.queueTargetMinutes)
+        : 0;
+    const queueTargetMs = queueTargetMinutes * 60 * 1000;
+    let unitsNeededByQueue = 0;
+    const isOpenEndedTarget = step.countMode === 'queue_cycles'
+        || step.count === Infinity
+        || !Number.isFinite(step.count);
+
+    if (queueTargetMs > 0) {
+        const queueCoverageMs = getQueueCoverageMs(village, trainingBuilding.id);
+        const singleUnitTimeMs = getSingleUnitTrainingTimeMs(village, trainingBuilding, unitData, gameSpeed);
+
+        if (singleUnitTimeMs > 0 && queueCoverageMs < queueTargetMs) {
+            unitsNeededByQueue = Math.ceil((queueTargetMs - queueCoverageMs) / singleUnitTimeMs);
+        }
+
+        if (unitsNeededByQueue <= 0 && isOpenEndedTarget) {
+            return {
+                success: true,
+                reason: 'QUEUE_TARGET_MET',
+                unitId,
+                queueCoverageMs,
+                queueTargetMs,
+            };
+        }
+    }
+
+    const targetAmount = isOpenEndedTarget ? Number.POSITIVE_INFINITY : Math.max(0, step.count);
+    const unitsNeededByTarget = Number.isFinite(targetAmount)
+        ? (targetAmount - unitsOwned)
+        : Number.POSITIVE_INFINITY;
+    const unitsNeeded = queueTargetMs > 0
+        ? (isOpenEndedTarget ? unitsNeededByQueue : Math.max(unitsNeededByQueue, unitsNeededByTarget))
+        : unitsNeededByTarget;
+
     if (unitsNeeded <= 0) return { success: true };
 
     const militaryBudget = getVillageBudget(village, 'mil');
@@ -248,7 +314,8 @@ export function manageRecruitmentForGoal({
     if (result.success) {
         const ratioPct = Math.round((batchPlan.ratio || 0) * 100);
         const queueInfo = Number.isFinite(batchPlan.queueUnits) ? `, Queue:${batchPlan.queueUnits}` : '';
-        log('success', village, 'Reclutamiento', `Orden para ${countToTrain}x ${unitId} enviada (Max:${effectiveAffordableTotal}, Mode:${batchPlan.phase}, Batch:${ratioPct}%${queueInfo}).`);
+        const queueTargetInfo = queueTargetMinutes > 0 ? `, QueueTarget:${queueTargetMinutes}m` : '';
+        log('success', village, 'Reclutamiento', `Orden para ${countToTrain}x ${unitId} enviada (Max:${effectiveAffordableTotal}, Mode:${batchPlan.phase}, Batch:${ratioPct}%${queueInfo}${queueTargetInfo}).`);
         return { success: true, count: countToTrain, unitId, batchMeta: batchPlan };
     }
 

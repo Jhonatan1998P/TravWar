@@ -65,7 +65,7 @@ export function rebalanceVillageBudgetToRatio(village, budgetRatio = village?.bu
     });
 }
 
-export function addResourceIncomeToVillage(village, resource, amount) {
+export function addResourceIncomeToVillage(village, resource, amount, options = {}) {
     if (!village?.resources?.[resource] || !Number.isFinite(amount) || amount <= 0) return;
 
     const resourceData = village.resources[resource];
@@ -81,6 +81,20 @@ export function addResourceIncomeToVillage(village, resource, amount) {
 
     const ratio = getNormalizedRatio(village.budgetRatio || DEFAULT_RATIO);
     village.budgetRatio = { ...ratio };
+    const budgetBucket = options?.budgetBucket;
+
+    if (budgetBucket === 'mil') {
+        const econValue = Math.max(0, Number(village.budget.econ[resource]) || 0);
+        let milValue = (Number(village.budget.mil[resource]) || 0) + amount;
+
+        const maxMil = Math.max(0, capacity - econValue);
+        if (milValue > maxMil) milValue = maxMil;
+
+        village.budget.econ[resource] = econValue;
+        village.budget.mil[resource] = Math.max(0, milValue);
+        resourceData.current = village.budget.econ[resource] + village.budget.mil[resource];
+        return;
+    }
 
     let econValue = (Number(village.budget.econ[resource]) || 0) + (amount * ratio.econ);
     let milValue = (Number(village.budget.mil[resource]) || 0) + (amount * ratio.mil);

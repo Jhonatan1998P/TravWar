@@ -59,6 +59,7 @@ export class GameStateFactory {
         });
 
         const newGameState = {
+            startedAt: Date.now(),
             sessionId: sessionId, worldSeed: this.#config.worldSeed, villages: allVillages, players, activeVillageId: playerVillageId, mapData,
             movements: [], reports: [], unreadCounts: {}, diplomacy: { relations: {} },
             alliance: { id: null, name: null, bonuses: { productionBonusPercent: 0, constructionTimeBonusPercent: 0 } }, aiState: {},
@@ -120,6 +121,7 @@ export class GameStateFactory {
         savedState.unreadCounts ??= {};
         savedState.diplomacy ??= { relations: {} };
         savedState.aiState ??= {};
+        savedState.startedAt ??= Date.now();
         savedState.lastOasisRegenTime ??= Date.now();
         savedState.memory ??= { log: [] };
         if (savedState.aiProfiles && !(savedState.aiProfiles instanceof Map)) {

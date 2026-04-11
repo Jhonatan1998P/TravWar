@@ -171,7 +171,17 @@ export default class StrategicAI {
             if (hasMaxPriorityGoal) {
                 reasoningLog.push('[FARMEO ROI] farm bloqueado por prioridad máxima.');
             } else {
-                const farmingResults = this._performOptimizedFarming(availableForces, safeKnownTargets, nemesisId, race, personality, troopSpeed);
+                const farmingResults = this._performOptimizedFarming(
+                    availableForces,
+                    safeKnownTargets,
+                    nemesisId,
+                    race,
+                    personality,
+                    troopSpeed,
+                    gameState,
+                    ownerId,
+                    myVillages.reduce((sum, village) => sum + (village.population?.current || 0), 0),
+                );
                 commands.push(...farmingResults.commands);
                 if (farmingResults.logs.length > 0) reasoningLog.push(...farmingResults.logs);
                 oasisFarmingTelemetry = farmingResults.telemetry || null;
@@ -321,16 +331,24 @@ export default class StrategicAI {
         });
     }
 
-    _performOptimizedFarming(forces, knownTargets, nemesisId, race, personality, troopSpeed) {
+    _performOptimizedFarming(forces, knownTargets, nemesisId, race, personality, troopSpeed, gameState, ownerId, attackerPopulation) {
         return performOptimizedFarming({
             forces,
             knownTargets,
             nemesisId,
+            ownerId,
             race,
             personality,
+            attackerPopulation,
             troopSpeed,
             simulateCombat: this._simulateCombat.bind(this),
             consumeTroops: this._consumeTroops.bind(this),
+            currentMovements: gameState?.movements,
+            resolveTileTypeFromCoords: coords => {
+                if (!coords || !gameState) return null;
+                const tile = gameState.spatialIndex.get(`${coords.x}|${coords.y}`);
+                return tile?.type || null;
+            },
         });
     }
 

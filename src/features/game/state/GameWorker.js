@@ -20,14 +20,77 @@ import { addResourceIncomeToVillage, initializeAIVillageBudget } from './worker/
 registerWorkerDiagnostics(self);
 
 const LOG_MILITARY_DECISIONS = true;
-const LOG_ECONOMIC_DECISIONS = false;
-const LOG_MILITARY_DETAILS = false; 
-const LOG_ECONOMIC_DETAILS = false;
+const LOG_ECONOMIC_DECISIONS = true;
+const LOG_MILITARY_DETAILS = true;
+const LOG_ECONOMIC_DETAILS = true;
 
 const MAX_REPORTS = 20;
 const PROTECTION_POPULATION_THRESHOLD = 1;
 const MAX_MEMORY_ENTRIES = 200;
 const mainInterval = 500;
+
+const GERMAN_PHASE_LABELS = Object.freeze({
+    german_phase_1_economic_bootstrap: 'Fase 1 - Arranque economico',
+    german_phase_2_basic_military_unlock: 'Fase 2 - Desbloqueo militar basico',
+    german_phase_3_sustained_mixed_production: 'Fase 3 - Produccion mixta sostenida',
+    german_phase_4_military_pressure_tech: 'Fase 4 - Presion militar y tecnologia',
+    german_phase_5_siege_expansion: 'Fase 5 - Asedio y expansion',
+    german_phase_template_complete: 'Plantilla completada',
+});
+
+function formatDuration(ms) {
+    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function getStageFromPhaseId(phaseId) {
+    if (!phaseId) return 'N/A';
+    if (phaseId.includes('_phase_1_') || phaseId.includes('_phase_2_')) return 'EARLY';
+    if (phaseId.includes('_phase_3_') || phaseId.includes('_phase_4_')) return 'MID';
+    if (phaseId.includes('_phase_5_') || phaseId.includes('_template_complete')) return 'LATE';
+    return 'N/A';
+}
+
+function getVillageById(villageId) {
+    if (!villageId || !gameState?.villages) return null;
+    return gameState.villages.find(village => village.id === villageId) || null;
+}
+
+function getPhaseContext({ ownerId = null, villageId = null } = {}) {
+    const village = getVillageById(villageId);
+    const resolvedOwnerId = ownerId || village?.ownerId;
+    if (!resolvedOwnerId || !resolvedOwnerId.startsWith('ai_')) {
+        return { stage: 'N/A', phase: 'Sin fase macro', village };
+    }
+
+    const phaseByVillage = gameState?.aiState?.[resolvedOwnerId]?.germanPhaseState;
+    if (!phaseByVillage || typeof phaseByVillage !== 'object') {
+        return { stage: 'N/A', phase: 'Sin fase macro', village };
+    }
+
+    const targetVillageId = villageId || Object.keys(phaseByVillage)[0];
+    const phaseId = phaseByVillage[targetVillageId]?.activePhaseId;
+    if (!phaseId) {
+        return { stage: 'N/A', phase: 'Sin fase macro', village };
+    }
+
+    return {
+        stage: getStageFromPhaseId(phaseId),
+        phase: GERMAN_PHASE_LABELS[phaseId] || phaseId,
+        village,
+    };
+}
+
+function getGameTimeLabel() {
+    const now = Date.now();
+    const startedAt = gameState?.startedAt || now;
+    const speed = Math.max(gameConfig?.gameSpeed || 1, 1);
+    const elapsedGameMs = Math.max(0, now - startedAt) * speed;
+    return `T+${formatDuration(elapsedGameMs)} @${speed}x`;
+}
 
 let gameState = null;
 let gameConfig = null;
@@ -37,7 +100,7 @@ let sessionId = null;
 let aiControllers = [];
 let villageProcessors = [];
 
-function _log(level, action, message, details = null) {
+function _log(level, action, message, details = null, context = {}) {
     const economicActions = [
         'Construcción', 'Construcción Fallida', 'Acción en Espera',
         'Cola Libre', 'Ahorro de Recursos', 'Ciclo Económico', 'Nuevo Objetivo economic'
@@ -68,7 +131,15 @@ function _log(level, action, message, details = null) {
     const ICONS = { info: '⚙️', success: '✅', fail: '❌', warn: '⚠️', goal: '🎯', error: '🔥' };
     const STYLES = { info: 'color: #6c757d;', success: 'color: #28a745; font-weight: bold;', fail: 'color: #dc3545;', warn: 'color: #ffc107;', error: 'color: #E91E63; font-weight: bold;' };
 
-    console.log(`%c${ICONS[level] || '➡️'} [WORKER] [${action}] :: ${message}`, STYLES[level] || '');
+    const phaseContext = getPhaseContext(context);
+    const villageLabel = phaseContext.village
+        ? `${phaseContext.village.name} (${phaseContext.village.coords.x}|${phaseContext.village.coords.y})`
+        : 'Global';
+
+    console.log(
+        `%c${ICONS[level] || '➡️'} [WORKER] [Juego ${getGameTimeLabel()}] [Etapa ${phaseContext.stage}] [Fase ${phaseContext.phase}] [${villageLabel}] [${action}] :: ${message}`,
+        STYLES[level] || '',
+    );
     if (details) {
         console.log(details);
     }
@@ -85,7 +156,10 @@ function mainLoop() {
     try {
         villageProcessors.forEach(processor => {
             const notifications = processor.update(currentTime, lastTick);
-            notifications.forEach(notification => self.postMessage(notification));
+            notifications.forEach(notification => {
+                aiControllers.forEach(controller => controller.handleGameNotification(notification, gameState));
+                self.postMessage(notification);
+            });
         });
 
         processMovements(currentTime);
@@ -204,6 +278,9 @@ function processMovements(currentTime) {
                 gameData,
             });
         },
+        logMovement: (level, action, message, details, context = {}) => {
+            _log(level, action, message, details, context);
+        },
         handlers: {
             reinforcement: handleReinforcementArrival,
             settle: handleSettleArrival,
@@ -287,7 +364,7 @@ function handleReturnArrival(movement) {
         const totalAmount = bountyAmount + plunderAmount;
 
         if (totalAmount > 0) {
-            addResourceIncomeToVillage(village, res, totalAmount);
+            addResourceIncomeToVillage(village, res, totalAmount, { budgetBucket: 'mil' });
         }
     }
 }
@@ -388,32 +465,70 @@ function handleAICommand(commandType, payload) {
 
     const processor = villageProcessors.find(p => p.getVillageId() === villageId);
     if (!processor) return { success: false, reason: 'PROCESSOR_NOT_FOUND' };
+    const village = gameState.villages.find(v => v.id === villageId);
+    const context = { villageId, ownerId: village?.ownerId };
     
     let result;
     switch (commandType) {
         case 'upgrade_building':
             result = processor.queueBuildingUpgrade(payload);
-            _log(result.success ? 'success' : 'fail', 'Construcción', `IA: ${result.success ? 'Encolado' : 'Rechazado'}. Razón: ${result.reason || 'N/A'}`);
+            _log(
+                result.success ? 'success' : 'fail',
+                'Construccion',
+                `IA ${result.success ? 'encolo' : 'rechazo'} mejora de edificio ${payload.buildingType || payload.buildingId || 'N/A'}. Razon: ${result.reason || 'N/A'}`,
+                { payload, result },
+                context,
+            );
             return result;
         case 'recruit_units':
             result = processor.queueRecruitment(payload);
-            _log(result.success ? 'success' : 'fail', 'Reclutamiento', `IA: ${result.success ? 'Encolado' : 'Rechazado'}. Razón: ${result.reason || 'N/A'}`);
+            _log(
+                result.success ? 'success' : 'fail',
+                'Reclutamiento',
+                `IA ${result.success ? 'encolo' : 'rechazo'} reclutamiento ${payload.unitId || 'N/A'} x${payload.count || 0}. Razon: ${result.reason || 'N/A'}`,
+                { payload, result },
+                context,
+            );
             return result;
         case 'research_unit':
             result = processor.queueResearch(payload);
-            _log(result.success ? 'success' : 'fail', 'Investigación', `IA: ${result.success ? 'Encolado' : 'Rechazado'}. Razón: ${result.reason || 'N/A'}`);
+            _log(
+                result.success ? 'success' : 'fail',
+                'Investigacion',
+                `IA ${result.success ? 'encolo' : 'rechazo'} investigacion de ${payload.unitId || 'N/A'}. Razon: ${result.reason || 'N/A'}`,
+                { payload, result },
+                context,
+            );
             return result;
         case 'upgrade_unit':
             result = processor.queueSmithyUpgrade(payload);
-            _log(result.success ? 'success' : 'fail', 'Herrería', `IA: ${result.success ? 'Encolado' : 'Rechazado'}. Razón: ${result.reason || 'N/A'}`);
+            _log(
+                result.success ? 'success' : 'fail',
+                'Herreria',
+                `IA ${result.success ? 'encolo' : 'rechazo'} mejora de herreria para ${payload.unitId || 'N/A'}. Razon: ${result.reason || 'N/A'}`,
+                { payload, result },
+                context,
+            );
             return result;
         case 'send_movement':
             result = handleSendMovementCommand(payload);
-            _log(result.success ? 'success' : 'fail', 'Movimiento', `IA: ${result.success ? 'Enviado' : 'Rechazado'}. Razón: ${result.reason || 'N/A'}`);
+            _log(
+                result.success ? 'success' : 'fail',
+                'Movimiento',
+                `IA ${result.success ? 'envio' : 'rechazo'} movimiento ${payload.missionType || 'N/A'} hacia (${payload.targetCoords?.x ?? '?'}|${payload.targetCoords?.y ?? '?'}) - Razon: ${result.reason || 'N/A'}`,
+                { payload, result },
+                context,
+            );
             return result;
         case 'send_merchants':
             result = handleSendMerchantsCommand(payload);
-            _log(result.success ? 'success' : 'fail', 'Comercio', `IA: ${result.success ? 'Enviado' : 'Rechazado'}. Razón: ${result.reason || 'N/A'}`);
+            _log(
+                result.success ? 'success' : 'fail',
+                'Comercio',
+                `IA ${result.success ? 'envio' : 'rechazo'} comerciantes hacia (${payload.targetCoords?.x ?? '?'}|${payload.targetCoords?.y ?? '?'}). Razon: ${result.reason || 'N/A'}`,
+                { payload, result },
+                context,
+            );
             return result;
     }
     return { success: false, reason: 'UNKNOWN_COMMAND' };
@@ -479,7 +594,7 @@ self.onmessage = function(event) {
             const aiPlayerState = gameState.aiState[player.id] || {};
             gameState.aiState[player.id] = aiPlayerState;
             
-            const controller = new AIController(player.id, personality, player.race, archetype, handleAICommand, gameConfig);
+            const controller = new AIController(player.id, personality, player.race, archetype, handleAICommand, gameConfig, personalityName);
             controller.init(gameState, aiPlayerState);
             aiControllers.push(controller);
         });

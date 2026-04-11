@@ -3,7 +3,7 @@ export function executeCommands({ commands, gameState, sendCommand, log }) {
         const { comando, villageId, parametros } = command;
         const village = gameState.villages.find(candidate => candidate.id === villageId);
         if (!village) {
-            log('warn', null, 'Comando Inválido', `Origin village ${villageId} not found.`, command, 'military');
+            log('warn', null, 'Comando Invalido', `Aldea origen ${villageId} no encontrada.`, command, 'military');
             continue;
         }
 
@@ -16,7 +16,7 @@ export function executeCommands({ commands, gameState, sendCommand, log }) {
                     Object.values(parametros.tropas).every(quantity => quantity <= 0);
 
                 if (invalidTroops) {
-                    log('warn', village, 'Comando Inválido', `Attempted ${comando} with 0 troops.`, command, 'military');
+                    log('warn', village, 'Comando Invalido', `Intento de ${comando} con 0 tropas.`, command, 'military');
                     continue;
                 }
 
@@ -34,9 +34,9 @@ export function executeCommands({ commands, gameState, sendCommand, log }) {
                 });
 
                 if (result.success) {
-                    log('success', village, 'Comando Enviado', `${comando} order sent successfully.`, parametros, 'military');
+                    log('success', village, 'Comando Enviado', `Orden ${comando} enviada correctamente.`, parametros, 'military');
                 } else {
-                    log('fail', village, 'Comando Fallido', `Worker rejected the ${comando} order. Reason: ${result.reason}`, result.details, 'military');
+                    log('fail', village, 'Comando Fallido', `Worker rechazo la orden ${comando}. Razon: ${result.reason}`, result.details, 'military');
                 }
                 break;
             }

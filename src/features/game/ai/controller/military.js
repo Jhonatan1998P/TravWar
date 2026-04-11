@@ -36,13 +36,13 @@ export function runMilitaryDecision({
     log,
     reputationManager,
 }) {
-    log('info', null, 'INICIO_CICLO_MILITAR', 'Evaluating military actions (Deterministic).');
+    log('info', null, 'INICIO_CICLO_MILITAR', 'Evaluando acciones militares (determinista).');
 
     const aiPlayerState = gameState.players.find(player => player.id === ownerId);
     if (!aiPlayerState) return null;
 
     if (aiPlayerState.isUnderProtection) {
-        log('info', null, 'Ciclo Militar Omitido', 'AI is under beginner protection.', null, 'military');
+        log('info', null, 'Ciclo Militar Omitido', 'La IA esta bajo proteccion de principiante.', null, 'military');
         return null;
     }
 
@@ -52,7 +52,7 @@ export function runMilitaryDecision({
 
     const requiredTroops = totalPopulation * 0.15;
     if (combatTroopCount < requiredTroops) {
-        log('warn', null, 'Ciclo Militar Omitido', `Gathering forces. Combat troops (${combatTroopCount}) are below the required threshold (${requiredTroops.toFixed(0)}).`, null, 'military');
+        log('warn', null, 'Ciclo Militar Omitido', `Reagrupando fuerzas: tropas de combate (${combatTroopCount}) por debajo del umbral (${requiredTroops.toFixed(0)}).`, null, 'military');
         return null;
     }
 
@@ -73,7 +73,7 @@ export function runMilitaryDecision({
         });
     }
 
-    log('info', null, 'Strategic AI', 'Computing utility scores for potential targets...', null, 'military');
+    log('info', null, 'Strategic AI', 'Calculando utilidad de objetivos potenciales...', null, 'military');
     const gameSpeed = gameConfig.gameSpeed || 1;
 
     const response = strategicAI.computeMilitaryTurn(
@@ -91,7 +91,7 @@ export function runMilitaryDecision({
     );
 
     if (response.razonamiento) {
-        log('goal', null, 'Razonamiento Estratégico', 'The General has issued the following analysis:', response.razonamiento, 'military');
+        log('goal', null, 'Razonamiento Estrategico', 'El general emitio el siguiente analisis:', response.razonamiento, 'military');
     }
 
     const rawCommands = response.comandos || [];
@@ -121,10 +121,10 @@ export function runMilitaryDecision({
     }
 
     if (commandsToExecute.length > 0) {
-        log('success', null, 'Órdenes Recibidas', `Executing ${commandsToExecute.length} military commands.`, commandsToExecute, 'military');
+        log('success', null, 'Ordenes Recibidas', `Ejecutando ${commandsToExecute.length} comandos militares.`, commandsToExecute, 'military');
         executeCommands(commandsToExecute, gameState);
     } else {
-        log('info', null, 'Sin Comandos', 'The AI General issued no commands this cycle.', null, 'military');
+        log('info', null, 'Sin Comandos', 'El general no emitio comandos en este ciclo.', null, 'military');
     }
 
     const gateTelemetry = response.telemetry?.militaryGate;
@@ -133,10 +133,10 @@ export function runMilitaryDecision({
             'info',
             null,
             'Gate Militar',
-            `maxPriority=${gateTelemetry.hasMaxPriorityGoal ? 'yes' : 'no'} ` +
-            `blocked=${gateTelemetry.farmBlockedByMaxPriorityGoal ? 'yes' : 'no'} ` +
-            `mustering=${gateTelemetry.isMusteringForWar ? 'yes' : 'no'} ` +
-            `farmEval=${gateTelemetry.farmEvaluationExecuted ? 'yes' : 'no'}`,
+            `maxPrioridad=${gateTelemetry.hasMaxPriorityGoal ? 'si' : 'no'} ` +
+            `bloqueado=${gateTelemetry.farmBlockedByMaxPriorityGoal ? 'si' : 'no'} ` +
+            `reagrupando=${gateTelemetry.isMusteringForWar ? 'si' : 'no'} ` +
+            `evalGranja=${gateTelemetry.farmEvaluationExecuted ? 'si' : 'no'}`,
             null,
             'military',
         );

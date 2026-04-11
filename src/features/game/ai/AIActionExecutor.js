@@ -71,13 +71,18 @@ class AIActionExecutor {
     }
 
     _attemptUpgrade(village, building, newType = null) {
+        const result = this._attemptUpgradeDetailed(village, building, newType);
+        return Boolean(result?.success);
+    }
+
+    _attemptUpgradeDetailed(village, building, newType = null) {
         const typeToBuild = newType || building.type;
         const result = this._controller.getSendCommand()('upgrade_building', {
             buildingId: building.id,
             buildingType: typeToBuild,
             villageId: village.id,
         });
-        return result.success;
+        return result;
     }
 
     getResourceTypeFromStep(step) {
@@ -90,6 +95,7 @@ class AIActionExecutor {
             gameState,
             step,
             attemptUpgrade: this._attemptUpgrade.bind(this),
+            attemptUpgradeDetailed: this._attemptUpgradeDetailed.bind(this),
             log: this._controller.log.bind(this._controller),
         });
     }
@@ -98,7 +104,13 @@ class AIActionExecutor {
         const unitId = this.resolveUnitId(step.unitType);
         if (!unitId) return { success: false, reason: 'INVALID_UNIT_ID' };
 
-        if (village.research.completed.includes(unitId)) return { success: true };
+        if (village.research.completed.includes(unitId)) {
+            return { success: true, reason: 'ALREADY_RESEARCHED', unitId };
+        }
+
+        if (village.research.queue.some(job => job.unitId === unitId)) {
+            return { success: true, reason: 'ALREADY_QUEUED', unitId };
+        }
 
         const result = this._controller.getSendCommand()('research_unit', { unitId, villageId: village.id });
         if (result.success) {
@@ -106,7 +118,7 @@ class AIActionExecutor {
         } else {
             this._controller.log('fail', village, 'Investigación', `La orden para investigar ${unitId} fue rechazada. Razón: ${result.reason}`, result.details);
         }
-        return { success: result.success, reason: result.reason };
+        return { success: result.success, reason: result.reason, unitId };
     }
 
     _manageUpgradeForGoal(village, gameState, step) {

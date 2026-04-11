@@ -62,10 +62,21 @@ function processCombatMovement({
     updateAIProfiles,
     registerOasisAttack,
     maxReports,
+    logMovement,
 }) {
     const targetTile = gameState.spatialIndex.get(`${movement.targetCoords.x}|${movement.targetCoords.y}`);
     const combatEngine = createCombatEngine();
     const results = combatEngine.processMovement(movement);
+
+    if (typeof logMovement === 'function') {
+        logMovement(
+            'info',
+            'Combate',
+            `Resolviendo ${movement.type} desde ${movement.originVillageId} hacia (${movement.targetCoords.x}|${movement.targetCoords.y}).`,
+            null,
+            { villageId: movement.originVillageId, ownerId: movement.ownerId },
+        );
+    }
 
     results.reportsToCreate.forEach(report => {
         gameState.reports.unshift(report);
@@ -84,6 +95,16 @@ function processCombatMovement({
         }
 
         updateAIProfiles(report);
+
+        if (typeof logMovement === 'function' && report.type && (report.type === 'attack' || report.type === 'raid' || report.type === 'espionage')) {
+            logMovement(
+                report.type === 'espionage' ? 'info' : 'success',
+                report.type === 'espionage' ? 'Espionaje' : 'Ataque',
+                `Reporte ${report.type}: ${report.attacker?.villageName || 'Origen'} -> ${report.defender?.villageName || 'Objetivo'} | ganador: ${report.winner || 'N/A'}`,
+                report.summary || null,
+                { ownerId: report.ownerId, villageId: report.originVillageId || movement.originVillageId },
+            );
+        }
     });
 
     results.movementsToCreate.forEach(newMovement => {
@@ -117,11 +138,22 @@ export function processMovements({
     createCombatEngine,
     updateAIProfiles,
     registerOasisAttack,
+    logMovement,
     maxReports = 20,
     handlers,
 }) {
     while (gameState.movements.length > 0 && currentTime >= gameState.movements[0].arrivalTime) {
         const movement = gameState.movements.shift();
+
+        if (typeof logMovement === 'function') {
+            logMovement(
+                'info',
+                'Movimiento',
+                `Procesando movimiento ${movement.type} -> (${movement.targetCoords?.x ?? '?'}|${movement.targetCoords?.y ?? '?'})`,
+                null,
+                { villageId: movement.originVillageId, ownerId: movement.ownerId },
+            );
+        }
 
         switch (movement.type) {
             case 'attack':
@@ -136,6 +168,7 @@ export function processMovements({
                     updateAIProfiles,
                     registerOasisAttack,
                     maxReports,
+                    logMovement,
                 });
                 break;
             case 'reinforcement':
