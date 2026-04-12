@@ -4,6 +4,7 @@ import AIGoalManager from './AIGoalManager.js';
 import AIActionExecutor from './AIActionExecutor.js';
 import StrategicAI from './StrategicAI.js';
 import { AI_CONTROLLER_CONSTANTS } from './config/AIConstants.js';
+import { gameData } from '../core/GameData.js';
 import { applyDevelopmentBudgetMode } from './controller/economic.js';
 import { executeCommands } from './controller/commands.js';
 import { handleAttackReact, handleEspionageReact, processDodgeTasks, processReinforcementRecalls } from './controller/reactive.js';
@@ -16,14 +17,32 @@ import {
     runGermanEconomicPhaseCycle,
     serializeGermanPhaseStates,
 } from './controller/german-phase-engine.js';
+import {
+    createDefaultEgyptianPhaseState,
+    EGYPTIAN_PHASE_IDS,
+    hydrateEgyptianPhaseState,
+    runEgyptianEconomicPhaseCycle,
+    serializeEgyptianPhaseStates,
+} from './controller/egyptian-phase-engine.js';
 
-const PHASE_LABELS = Object.freeze({
-    [GERMAN_PHASE_IDS.phase1]: 'Fase 1 - Arranque economico',
-    [GERMAN_PHASE_IDS.phase2]: 'Fase 2 - Desbloqueo militar basico',
-    [GERMAN_PHASE_IDS.phase3]: 'Fase 3 - Produccion mixta sostenida',
-    [GERMAN_PHASE_IDS.phase4]: 'Fase 4 - Presion militar y tecnologia',
-    [GERMAN_PHASE_IDS.phase5]: 'Fase 5 - Asedio y expansion',
-    [GERMAN_PHASE_IDS.phaseDone]: 'Plantilla completada',
+const PHASE_LABELS_BY_RACE = Object.freeze({
+    germans: {
+        [GERMAN_PHASE_IDS.phase1]: 'Fase 1 - Arranque economico',
+        [GERMAN_PHASE_IDS.phase2]: 'Fase 2 - Desbloqueo militar basico',
+        [GERMAN_PHASE_IDS.phase3]: 'Fase 3 - Produccion mixta sostenida',
+        [GERMAN_PHASE_IDS.phase4]: 'Fase 4 - Presion militar y tecnologia',
+        [GERMAN_PHASE_IDS.phase5]: 'Fase 5 - Asedio y expansion',
+        [GERMAN_PHASE_IDS.phaseDone]: 'Plantilla completada',
+    },
+    egyptians: {
+        [EGYPTIAN_PHASE_IDS.phase1]: 'Fase 1 - Eco Fortificada',
+        [EGYPTIAN_PHASE_IDS.phase2]: 'Fase 2 - Nucleo Defensivo Temprano',
+        [EGYPTIAN_PHASE_IDS.phase3]: 'Fase 3 - Escalado Defensivo',
+        [EGYPTIAN_PHASE_IDS.phase4]: 'Fase 4 - Preparacion Expansion Segura',
+        [EGYPTIAN_PHASE_IDS.phase5]: 'Fase 5 - Expansion Custodiada',
+        [EGYPTIAN_PHASE_IDS.phase6]: 'Fase 6 - Control Resiliente Tardio',
+        [EGYPTIAN_PHASE_IDS.phaseDone]: 'Plantilla completada',
+    },
 });
 
 const STAGE_LABELS = Object.freeze({
@@ -40,6 +59,87 @@ const ACTION_LABELS = Object.freeze({
     'Strategic AI': 'Analisis Estrategico',
 });
 
+const COMBAT_STATE_TTL_BY_THREAT_LEVEL_MS = Object.freeze({
+    none: 30000,
+    low: 45000,
+    medium: 60000,
+    high: 90000,
+    critical: 120000,
+});
+
+const DEFAULT_COMBAT_STATE_TTL_MS = 60000;
+
+const BASE_LOCK_DURATIONS_MS = Object.freeze({
+    movementLockByVillage: 15000,
+    reactionCooldownByMovement: 20000,
+    counterattackCooldownByVillage: 45000,
+    constructionEmergencyLockByVillage: 30000,
+});
+
+const COMMAND_LAYER_PRIORITY = Object.freeze({
+    reactive_critical: 50,
+    reactive_high: 40,
+    macro_emergency: 30,
+    macro_normal: 20,
+    reactive_low: 10,
+});
+
+const COMMAND_WINDOW_TTL_MS = 12000;
+
+const MILITARY_CONSTRUCTION_TYPES = new Set([
+    'rallyPoint',
+    'barracks',
+    'academy',
+    'smithy',
+    'stable',
+    'workshop',
+    'cityWall',
+]);
+
+function getCombatStateTtlMs(threatLevel, ttlOverrideMs = null) {
+    if (Number.isFinite(ttlOverrideMs) && ttlOverrideMs > 0) {
+        return ttlOverrideMs;
+    }
+
+    return COMBAT_STATE_TTL_BY_THREAT_LEVEL_MS[threatLevel] || DEFAULT_COMBAT_STATE_TTL_MS;
+}
+
+function createDefaultVillageCombatState(villageId, now = Date.now()) {
+    return {
+        villageId,
+        threatLevel: 'none',
+        threatType: 'mixed',
+        posture: 'hybrid',
+        preferredResponse: 'hold',
+        attackPowerEstimate: 0,
+        localDefenseEstimate: 0,
+        imperialDefenseEstimate: 0,
+        canHoldLocally: false,
+        canHoldWithReinforcements: false,
+        shouldPreserveOffense: false,
+        shouldCounterattack: false,
+        shouldPauseEconomicConstruction: false,
+        shouldBoostEmergencyRecruitment: false,
+        counterWindowOpen: false,
+        counterWindowExpiresAt: null,
+        expiresAt: now + DEFAULT_COMBAT_STATE_TTL_MS,
+        sourceMovementIds: [],
+        lastDecisionReason: 'initialized',
+    };
+}
+
+function mapEntriesFromPersistedMap(persistedMap) {
+    if (!persistedMap) return [];
+    if (Array.isArray(persistedMap)) return persistedMap;
+    if (typeof persistedMap === 'object') return Object.entries(persistedMap);
+    return [];
+}
+
+function sanitizeSourceMovementIds(sourceMovementIds) {
+    if (!Array.isArray(sourceMovementIds)) return [];
+    return [...new Set(sourceMovementIds.filter(Boolean))];
+}
+
 function formatDuration(ms) {
     const totalSeconds = Math.max(0, Math.floor(ms / 1000));
     const hours = Math.floor(totalSeconds / 3600);
@@ -53,11 +153,15 @@ function getStageFromPhaseId(phaseId) {
     if (phaseId === GERMAN_PHASE_IDS.phase1 || phaseId === GERMAN_PHASE_IDS.phase2) return 'early';
     if (phaseId === GERMAN_PHASE_IDS.phase3 || phaseId === GERMAN_PHASE_IDS.phase4) return 'mid';
     if (phaseId === GERMAN_PHASE_IDS.phase5 || phaseId === GERMAN_PHASE_IDS.phaseDone) return 'late';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase1 || phaseId === EGYPTIAN_PHASE_IDS.phase2) return 'early';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase3 || phaseId === EGYPTIAN_PHASE_IDS.phase4) return 'mid';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase5 || phaseId === EGYPTIAN_PHASE_IDS.phase6 || phaseId === EGYPTIAN_PHASE_IDS.phaseDone) return 'late';
     return 'unknown';
 }
 
-function getPhaseLabel(phaseId) {
-    return PHASE_LABELS[phaseId] || 'Fase no definida';
+function getPhaseLabel(race, phaseId) {
+    const labels = PHASE_LABELS_BY_RACE[race] || {};
+    return labels[phaseId] || 'Fase no definida';
 }
 
 function createDefaultOasisTelemetry() {
@@ -94,6 +198,7 @@ class AIController {
     _race;
     _archetype;
     _difficulty;
+    _sendCommandRaw;
     _sendCommand;
     _gameConfig;
 
@@ -111,6 +216,13 @@ class AIController {
     _dodgeTasks = new Map();
     _oasisTelemetry = createDefaultOasisTelemetry();
     _germanPhaseStates = new Map();
+    _egyptianPhaseStates = new Map();
+    _villageCombatState = new Map();
+    _movementLockByVillage = new Map();
+    _reactionCooldownByMovement = new Map();
+    _counterattackCooldownByVillage = new Map();
+    _constructionEmergencyLockByVillage = new Map();
+    _commandWindowByVillage = new Map();
     _lastKnownGameState = null;
 
     constructor(ownerId, personality, race, archetype, sendCommandCallback, gameConfig, difficulty = 'Pesadilla') {
@@ -119,7 +231,8 @@ class AIController {
         this._race = race;
         this._archetype = archetype;
         this._difficulty = difficulty;
-        this._sendCommand = sendCommandCallback;
+        this._sendCommandRaw = sendCommandCallback;
+        this._sendCommand = this._dispatchCommand.bind(this);
         this._gameConfig = gameConfig;
 
         this._strategicAI = new StrategicAI();
@@ -129,7 +242,7 @@ class AIController {
         this._militaryDecisionInterval = Math.max(30000, Math.min(calculatedInterval, 300000));
         
         this._actionExecutor = new AIActionExecutor(this);
-        this._goalManager = this._race === 'germans'
+        this._goalManager = (this._race === 'germans' || this._race === 'egyptians')
             ? null
             : new AIGoalManager(this, this._actionExecutor);
     }
@@ -142,18 +255,23 @@ class AIController {
         const totalMilGoals = Object.values(goalInfo).reduce((sum, v) => sum + (v.militaryGoalStack?.length || 0), 0);
         const dodgeTaskCount = state.dodgeTasks?.length || 0;
         const reinforcementTaskCount = state.reinforcementTasks?.length || 0;
+        const villageCombatStateCount = state.villageCombatState?.length || 0;
+        const movementLockCount = state.movementLockByVillage?.length || 0;
+        const reactionCooldownCount = state.reactionCooldownByMovement?.length || 0;
         const oasisTelemetry = state.oasisTelemetry || this._oasisTelemetry;
 
         return [
             `=== AI Decision Log: ${this._ownerId} ===`,
             `Race: ${this._race} | Archetype: ${this._archetype}`,
             `Personality: ${this._difficulty}`,
-            `Macro engine: ${this._race === 'germans' ? 'PhaseEngine (sin GoalManager)' : 'GoalManager legacy'}`,
+            `Macro engine: ${this._race === 'germans' || this._race === 'egyptians' ? 'PhaseEngine (sin GoalManager)' : 'GoalManager legacy'}`,
             `Villages managed: ${villageCount}`,
             `Active economic goals: ${totalEconGoals}`,
             `Active military goals: ${totalMilGoals}`,
             `Pending dodge tasks: ${dodgeTaskCount}`,
             `Pending reinforcement recalls: ${reinforcementTaskCount}`,
+            `Active village combat states: ${villageCombatStateCount}`,
+            `Active movement locks: ${movementLockCount} | Reaction cooldowns: ${reactionCooldownCount}`,
             `Oasis gate: cycles=${oasisTelemetry.militaryCycles || 0}, farmEval=${oasisTelemetry.cyclesFarmEvaluated || 0}, blockedMax=${oasisTelemetry.cyclesFarmBlockedByMaxPriority || 0}, mustering=${oasisTelemetry.cyclesMusteringForWar || 0}, blockRate=${((oasisTelemetry.farmBlockedRate || 0) * 100).toFixed(1)}%`,
             `Oasis telemetry: decisions=${oasisTelemetry.decisions}, eval=${oasisTelemetry.evaluatedOases}, atk=${oasisTelemetry.attacksIssued}, atk<=0=${oasisTelemetry.attacksIssuedNonPositive}`,
             `Oasis KPIs: npRate=${((oasisTelemetry.attackNonPositiveRate || 0) * 100).toFixed(1)}%, avgNet=${Math.round(oasisTelemetry.avgRewardNet || 0)}, loss/gross=${(oasisTelemetry.avgLossToGross || 0).toFixed(2)}, unique=${oasisTelemetry.uniqueOasesAttacked}, skipNoProfit=${oasisTelemetry.skippedCyclesNoProfitable}`,
@@ -203,7 +321,7 @@ class AIController {
     getDifficulty() { return this._difficulty; }
     getPersonality() { return this._personality; }
     getGameConfig() { return this._gameConfig; }
-    getSendCommand() { return this._sendCommand; }
+    getSendCommand() { return this._getCommandSender({ sourceLayer: 'macro' }); }
     getActionExecutor() { return this._actionExecutor; }
     getGoalManager() { return this._goalManager; }
 
@@ -268,10 +386,12 @@ class AIController {
         let phaseId = null;
         if (village && this._germanPhaseStates.has(village.id)) {
             phaseId = this._germanPhaseStates.get(village.id)?.activePhaseId || null;
+        } else if (village && this._egyptianPhaseStates.has(village.id)) {
+            phaseId = this._egyptianPhaseStates.get(village.id)?.activePhaseId || null;
         }
 
         const stageKey = getStageFromPhaseId(phaseId);
-        const phaseLabel = phaseId ? getPhaseLabel(phaseId) : 'Sin fase macro';
+        const phaseLabel = phaseId ? getPhaseLabel(this._race, phaseId) : 'Sin fase macro';
 
         return {
             gameTime: `T+${formatDuration(elapsedGameMs)} @${gameSpeed}x`,
@@ -299,6 +419,11 @@ class AIController {
         this._reinforcementTasks = aiPlayerState.reinforcementTasks || [];
         this._dodgeTasks = new Map(aiPlayerState.dodgeTasks || []);
         this._oasisTelemetry = this._ensureOasisTelemetryDefaults(aiPlayerState.oasisTelemetry);
+        this._villageCombatState = this._hydrateVillageCombatStateMap(aiPlayerState.villageCombatState);
+        this._movementLockByVillage = this._hydrateTimedFlagMap(aiPlayerState.movementLockByVillage);
+        this._reactionCooldownByMovement = this._hydrateTimedFlagMap(aiPlayerState.reactionCooldownByMovement);
+        this._counterattackCooldownByVillage = this._hydrateTimedFlagMap(aiPlayerState.counterattackCooldownByVillage);
+        this._constructionEmergencyLockByVillage = this._hydrateTimedFlagMap(aiPlayerState.constructionEmergencyLockByVillage);
 
         if (this._race === 'germans') {
             const persistedPhaseState = aiPlayerState.germanPhaseState || {};
@@ -311,10 +436,29 @@ class AIController {
                     hydrateGermanPhaseState(persistedPhaseState[village.id]),
                 );
             });
+        } else if (this._race === 'egyptians') {
+            const persistedPhaseState = aiPlayerState.egyptianPhaseState || {};
+            const myVillages = gameState.villages.filter(village => village.ownerId === this._ownerId);
+            this._egyptianPhaseStates = new Map();
+
+            myVillages.forEach(village => {
+                this._egyptianPhaseStates.set(
+                    village.id,
+                    hydrateEgyptianPhaseState(persistedPhaseState[village.id]),
+                );
+            });
         }
+
+        gameState.villages
+            .filter(village => village.ownerId === this._ownerId)
+            .forEach(village => this._ensureVillageCombatState(village.id));
+
+        this._expireReactiveCoordinationState();
     }
     
     getState() {
+        this._expireReactiveCoordinationState();
+
         const goalState = this._goalManager ? this._goalManager.getState() : {};
         return {
             goalState: goalState,
@@ -324,7 +468,495 @@ class AIController {
             dodgeTasks: Array.from(this._dodgeTasks.entries()),
             oasisTelemetry: this._oasisTelemetry,
             germanPhaseState: serializeGermanPhaseStates(this._germanPhaseStates),
+            egyptianPhaseState: serializeEgyptianPhaseStates(this._egyptianPhaseStates),
+            villageCombatState: Array.from(this._villageCombatState.entries()),
+            movementLockByVillage: Array.from(this._movementLockByVillage.entries()),
+            reactionCooldownByMovement: Array.from(this._reactionCooldownByMovement.entries()),
+            counterattackCooldownByVillage: Array.from(this._counterattackCooldownByVillage.entries()),
+            constructionEmergencyLockByVillage: Array.from(this._constructionEmergencyLockByVillage.entries()),
         };
+    }
+
+    _hydrateVillageCombatStateMap(persistedMap) {
+        const now = Date.now();
+        const hydratedMap = new Map();
+
+        mapEntriesFromPersistedMap(persistedMap).forEach(([villageId, persistedState]) => {
+            if (!villageId || !persistedState || typeof persistedState !== 'object') return;
+
+            const baseState = createDefaultVillageCombatState(villageId, now);
+            const mergedState = {
+                ...baseState,
+                ...persistedState,
+                villageId,
+                sourceMovementIds: sanitizeSourceMovementIds(persistedState.sourceMovementIds),
+            };
+
+            const ttlMs = getCombatStateTtlMs(mergedState.threatLevel);
+            const expiresAt = Number.isFinite(mergedState.expiresAt)
+                ? mergedState.expiresAt
+                : now + ttlMs;
+
+            if (expiresAt <= now) return;
+
+            hydratedMap.set(villageId, {
+                ...mergedState,
+                expiresAt,
+            });
+        });
+
+        return hydratedMap;
+    }
+
+    _hydrateTimedFlagMap(persistedMap) {
+        const now = Date.now();
+        const hydratedMap = new Map();
+
+        mapEntriesFromPersistedMap(persistedMap).forEach(([key, persistedEntry]) => {
+            if (!key || !persistedEntry || typeof persistedEntry !== 'object') return;
+            if (!Number.isFinite(persistedEntry.expiresAt) || persistedEntry.expiresAt <= now) return;
+
+            hydratedMap.set(key, {
+                ...persistedEntry,
+                expiresAt: persistedEntry.expiresAt,
+            });
+        });
+
+        return hydratedMap;
+    }
+
+    _ensureVillageCombatState(villageId, now = Date.now()) {
+        const currentState = this._villageCombatState.get(villageId);
+        if (currentState && Number.isFinite(currentState.expiresAt) && currentState.expiresAt > now) {
+            return currentState;
+        }
+
+        const nextState = createDefaultVillageCombatState(villageId, now);
+        this._villageCombatState.set(villageId, nextState);
+        return nextState;
+    }
+
+    getVillageCombatState(villageId) {
+        const now = Date.now();
+        const currentState = this._villageCombatState.get(villageId);
+        if (!currentState) return null;
+        if (!Number.isFinite(currentState.expiresAt) || currentState.expiresAt <= now) {
+            this._villageCombatState.delete(villageId);
+            return null;
+        }
+
+        return currentState;
+    }
+
+    upsertVillageCombatState(villageId, partialState = {}, options = {}) {
+        const now = options.now || Date.now();
+        const baseState = this._ensureVillageCombatState(villageId, now);
+        const sourceMovementIds = sanitizeSourceMovementIds([
+            ...(baseState.sourceMovementIds || []),
+            ...(partialState.sourceMovementIds || []),
+            ...(options.sourceMovementIds || []),
+        ]);
+
+        const mergedState = {
+            ...baseState,
+            ...partialState,
+            villageId,
+            sourceMovementIds,
+        };
+
+        const ttlMs = getCombatStateTtlMs(mergedState.threatLevel, options.ttlMs);
+        mergedState.expiresAt = now + ttlMs;
+
+        if (options.lastDecisionReason) {
+            mergedState.lastDecisionReason = options.lastDecisionReason;
+        }
+
+        this._villageCombatState.set(villageId, mergedState);
+        return mergedState;
+    }
+
+    clearVillageCombatState(villageId) {
+        this._villageCombatState.delete(villageId);
+    }
+
+    _setTimedFlag(flagMap, key, durationMs, metadata = {}) {
+        if (!key) return null;
+
+        const now = Date.now();
+        const ttlMs = Math.max(1000, Number.isFinite(durationMs) ? durationMs : 0);
+        const entry = {
+            key,
+            createdAt: now,
+            expiresAt: now + ttlMs,
+            reason: metadata.reason || null,
+            sourceMovementId: metadata.sourceMovementId || null,
+        };
+
+        flagMap.set(key, entry);
+        return entry;
+    }
+
+    _getActiveTimedFlag(flagMap, key, now = Date.now()) {
+        const entry = flagMap.get(key);
+        if (!entry) return null;
+        if (!Number.isFinite(entry.expiresAt) || entry.expiresAt <= now) {
+            flagMap.delete(key);
+            return null;
+        }
+
+        return entry;
+    }
+
+    _cleanupTimedFlagMap(flagMap, now = Date.now()) {
+        for (const [key, entry] of flagMap.entries()) {
+            if (!entry || !Number.isFinite(entry.expiresAt) || entry.expiresAt <= now) {
+                flagMap.delete(key);
+            }
+        }
+    }
+
+    setMovementLockForVillage(villageId, durationMs = BASE_LOCK_DURATIONS_MS.movementLockByVillage, metadata = {}) {
+        return this._setTimedFlag(this._movementLockByVillage, villageId, durationMs, metadata);
+    }
+
+    getMovementLockForVillage(villageId) {
+        return this._getActiveTimedFlag(this._movementLockByVillage, villageId);
+    }
+
+    hasMovementLockForVillage(villageId) {
+        return Boolean(this.getMovementLockForVillage(villageId));
+    }
+
+    setReactionCooldownForMovement(movementId, durationMs = BASE_LOCK_DURATIONS_MS.reactionCooldownByMovement, metadata = {}) {
+        return this._setTimedFlag(this._reactionCooldownByMovement, movementId, durationMs, metadata);
+    }
+
+    getReactionCooldownForMovement(movementId) {
+        return this._getActiveTimedFlag(this._reactionCooldownByMovement, movementId);
+    }
+
+    hasReactionCooldownForMovement(movementId) {
+        return Boolean(this.getReactionCooldownForMovement(movementId));
+    }
+
+    setCounterattackCooldownForVillage(villageId, durationMs = BASE_LOCK_DURATIONS_MS.counterattackCooldownByVillage, metadata = {}) {
+        return this._setTimedFlag(this._counterattackCooldownByVillage, villageId, durationMs, metadata);
+    }
+
+    getCounterattackCooldownForVillage(villageId) {
+        return this._getActiveTimedFlag(this._counterattackCooldownByVillage, villageId);
+    }
+
+    hasCounterattackCooldownForVillage(villageId) {
+        return Boolean(this.getCounterattackCooldownForVillage(villageId));
+    }
+
+    setConstructionEmergencyLockForVillage(villageId, durationMs = BASE_LOCK_DURATIONS_MS.constructionEmergencyLockByVillage, metadata = {}) {
+        return this._setTimedFlag(this._constructionEmergencyLockByVillage, villageId, durationMs, metadata);
+    }
+
+    getConstructionEmergencyLockForVillage(villageId) {
+        return this._getActiveTimedFlag(this._constructionEmergencyLockByVillage, villageId);
+    }
+
+    hasConstructionEmergencyLockForVillage(villageId) {
+        return Boolean(this.getConstructionEmergencyLockForVillage(villageId));
+    }
+
+    _expireReactiveCoordinationState() {
+        const now = Date.now();
+
+        for (const [villageId, state] of this._villageCombatState.entries()) {
+            if (!state || !Number.isFinite(state.expiresAt) || state.expiresAt <= now) {
+                this._villageCombatState.delete(villageId);
+            }
+        }
+
+        this._cleanupTimedFlagMap(this._movementLockByVillage, now);
+        this._cleanupTimedFlagMap(this._reactionCooldownByMovement, now);
+        this._cleanupTimedFlagMap(this._counterattackCooldownByVillage, now);
+        this._cleanupTimedFlagMap(this._constructionEmergencyLockByVillage, now);
+
+        for (const [villageId, windowState] of this._commandWindowByVillage.entries()) {
+            if (!windowState || !Number.isFinite(windowState.expiresAt) || windowState.expiresAt <= now) {
+                this._commandWindowByVillage.delete(villageId);
+            }
+        }
+    }
+
+    _getCommandSender(context = {}) {
+        return (commandType, payload) => this._sendCommand(commandType, payload, context);
+    }
+
+    _inferVillageIdFromCommand(commandType, payload = {}) {
+        if (!payload || typeof payload !== 'object') return null;
+        if (payload.villageId) return payload.villageId;
+        if (payload.originVillageId) return payload.originVillageId;
+
+        if (commandType === 'send_movement' && payload.originVillageId) {
+            return payload.originVillageId;
+        }
+
+        return null;
+    }
+
+    _classifyCommandCategory(commandType) {
+        if (commandType === 'send_movement') return 'movement';
+        if (commandType === 'upgrade_building') return 'construction';
+        if (commandType === 'research_unit') return 'research';
+        if (commandType === 'upgrade_unit') return 'smithy';
+        if (commandType === 'recruit_units') return 'recruitment';
+        if (commandType === 'send_merchants') return 'economic_trade';
+        return 'other';
+    }
+
+    _resolveLayerPriority(villageId, context = {}) {
+        if (context.layerPriority && COMMAND_LAYER_PRIORITY[context.layerPriority]) {
+            return context.layerPriority;
+        }
+
+        const sourceLayer = context.sourceLayer || 'macro';
+        if (sourceLayer === 'reactive') {
+            const combatState = villageId ? this.getVillageCombatState(villageId) : null;
+            if (!combatState) return 'reactive_low';
+            if (combatState.threatLevel === 'critical') return 'reactive_critical';
+            if (combatState.threatLevel === 'high') return 'reactive_high';
+            return 'reactive_low';
+        }
+
+        if (sourceLayer === 'macro') {
+            const combatState = villageId ? this.getVillageCombatState(villageId) : null;
+            if (
+                combatState &&
+                (combatState.threatLevel === 'high' || combatState.threatLevel === 'critical' || combatState.shouldPauseEconomicConstruction)
+            ) {
+                return 'macro_emergency';
+            }
+            return 'macro_normal';
+        }
+
+        if (sourceLayer === 'military') {
+            return 'reactive_low';
+        }
+
+        return 'macro_normal';
+    }
+
+    _hasPendingDodgeForVillage(villageId) {
+        for (const task of this._dodgeTasks.values()) {
+            if (task?.villageId === villageId) return true;
+        }
+        return false;
+    }
+
+    _isConstructionCommandAllowedUnderEmergency(commandType, payload = {}, priorityLayer, villageId) {
+        if (commandType !== 'upgrade_building') return true;
+
+        if (!villageId) return true;
+        const lock = this.getConstructionEmergencyLockForVillage(villageId);
+        const combatState = this.getVillageCombatState(villageId);
+        const underEmergency = Boolean(lock) || Boolean(combatState?.shouldPauseEconomicConstruction);
+        if (!underEmergency) return true;
+
+        const buildingType = payload.buildingType;
+        if (buildingType && MILITARY_CONSTRUCTION_TYPES.has(buildingType)) {
+            return true;
+        }
+
+        return COMMAND_LAYER_PRIORITY[priorityLayer] >= COMMAND_LAYER_PRIORITY.macro_emergency;
+    }
+
+    _isCommandCompatibleWithWindow(villageId, nextCategory, nextPriorityScore, now) {
+        const windowState = this._commandWindowByVillage.get(villageId);
+        if (!windowState || windowState.expiresAt <= now) return true;
+
+        const sameCategory = windowState.category === nextCategory;
+        if (!sameCategory) return true;
+
+        return nextPriorityScore >= windowState.priorityScore;
+    }
+
+    _setCommandWindow(villageId, category, priorityScore, layerPriority, sourceLayer) {
+        if (!villageId || !category) return;
+        const now = Date.now();
+        this._commandWindowByVillage.set(villageId, {
+            category,
+            priorityScore,
+            layerPriority,
+            sourceLayer,
+            createdAt: now,
+            expiresAt: now + COMMAND_WINDOW_TTL_MS,
+        });
+    }
+
+    _dispatchCommand(commandType, payload = {}, context = {}) {
+        this._expireReactiveCoordinationState();
+
+        const villageId = this._inferVillageIdFromCommand(commandType, payload);
+        const sourceLayer = context.sourceLayer || 'macro';
+        const layerPriority = this._resolveLayerPriority(villageId, context);
+        const priorityScore = COMMAND_LAYER_PRIORITY[layerPriority] || COMMAND_LAYER_PRIORITY.macro_normal;
+        const category = this._classifyCommandCategory(commandType);
+        const now = Date.now();
+
+        if (category === 'movement' && villageId && sourceLayer !== 'reactive' && this._hasPendingDodgeForVillage(villageId)) {
+            const village = this._lastKnownGameState?.villages?.find(candidate => candidate.id === villageId) || null;
+            this.log('warn', village, 'Arbitraje Central', 'Comando bloqueado: aldea con dodge pendiente.', {
+                villageId,
+                commandType,
+                layerPriority,
+                sourceLayer,
+            }, 'military');
+            return {
+                success: false,
+                reason: 'AI_ARBITRATION_DODGE_LOCK',
+                details: { villageId, commandType, layerPriority, sourceLayer },
+            };
+        }
+
+        if (!this._isConstructionCommandAllowedUnderEmergency(commandType, payload, layerPriority, villageId)) {
+            const village = this._lastKnownGameState?.villages?.find(candidate => candidate.id === villageId) || null;
+            this.log('warn', village, 'Arbitraje Central', 'Comando bloqueado: constructionEmergencyLock activo.', {
+                villageId,
+                commandType,
+                layerPriority,
+                sourceLayer,
+            }, 'economic');
+            return {
+                success: false,
+                reason: 'AI_ARBITRATION_CONSTRUCTION_EMERGENCY_LOCK',
+                details: { villageId, commandType, layerPriority, sourceLayer },
+            };
+        }
+
+        if (villageId && !this._isCommandCompatibleWithWindow(villageId, category, priorityScore, now)) {
+            const village = this._lastKnownGameState?.villages?.find(candidate => candidate.id === villageId) || null;
+            this.log('warn', village, 'Arbitraje Central', 'Comando bloqueado: prioridad inferior en ventana activa.', {
+                villageId,
+                commandType,
+                layerPriority,
+                sourceLayer,
+                category,
+            }, 'military');
+            return {
+                success: false,
+                reason: 'AI_ARBITRATION_PRIORITY_SUPERSEDED',
+                details: { villageId, commandType, layerPriority, sourceLayer, category },
+            };
+        }
+
+        const result = this._sendCommandRaw(commandType, payload);
+        if (result?.success && villageId) {
+            this._setCommandWindow(villageId, category, priorityScore, layerPriority, sourceLayer);
+        }
+
+        return result;
+    }
+
+    _selectDeferredCounterTroops(village, ratio = 0.2, minTroops = 6) {
+        const raceUnits = gameData.units[village.race]?.troops || [];
+        const troopEntries = [];
+
+        for (const [unitId, count] of Object.entries(village.unitsInVillage || {})) {
+            if ((count || 0) <= 0) continue;
+            const unitData = raceUnits.find(unit => unit.id === unitId);
+            if (!unitData) continue;
+            const isOffensive = unitData.role === 'offensive' || unitData.role === 'catapult' || unitData.role === 'ram' || unitData.role === 'versatile';
+            if (!isOffensive) continue;
+
+            troopEntries.push({ unitId, count, role: unitData.role || 'unknown' });
+        }
+
+        troopEntries.sort((a, b) => {
+            const rank = role => {
+                if (role === 'catapult' || role === 'ram') return 0;
+                if (role === 'offensive') return 1;
+                if (role === 'versatile') return 2;
+                return 3;
+            };
+            return rank(a.role) - rank(b.role);
+        });
+
+        const totalCandidateTroops = troopEntries.reduce((sum, entry) => sum + entry.count, 0);
+        if (totalCandidateTroops < minTroops) return {};
+
+        const target = Math.max(minTroops, Math.floor(totalCandidateTroops * ratio));
+        const selected = {};
+        let picked = 0;
+
+        for (const entry of troopEntries) {
+            if (picked >= target) break;
+            const remaining = target - picked;
+            const take = Math.min(entry.count, remaining);
+            if (take > 0) {
+                selected[entry.unitId] = take;
+                picked += take;
+            }
+        }
+
+        return selected;
+    }
+
+    _processCounterWindows(gameState) {
+        const sender = this._getCommandSender({ sourceLayer: 'reactive', layerPriority: 'reactive_high' });
+        const myVillages = gameState.villages.filter(village => village.ownerId === this._ownerId);
+
+        for (const village of myVillages) {
+            const state = this.getVillageCombatState(village.id);
+            if (!state || !state.counterWindowOpen) continue;
+            if (Number.isFinite(state.counterWindowExpiresAt) && state.counterWindowExpiresAt <= Date.now()) {
+                this.upsertVillageCombatState(village.id, {
+                    counterWindowOpen: false,
+                    counterWindowExpiresAt: null,
+                }, {
+                    lastDecisionReason: 'counter_window_expired',
+                });
+                continue;
+            }
+
+            if (!state.shouldCounterattack) continue;
+            if (state.threatLevel === 'high' || state.threatLevel === 'critical') continue;
+            if (this.hasCounterattackCooldownForVillage(village.id)) continue;
+            if (this.hasMovementLockForVillage(village.id)) continue;
+            if (this._hasPendingDodgeForVillage(village.id)) continue;
+
+            const attackerVillageId = state.attackerVillageId;
+            if (!attackerVillageId) continue;
+            const attackerVillage = gameState.villages.find(candidate => candidate.id === attackerVillageId);
+            if (!attackerVillage || attackerVillage.ownerId === this._ownerId) continue;
+
+            const troops = this._selectDeferredCounterTroops(village);
+            if (!troops || Object.keys(troops).length === 0) continue;
+
+            const result = sender('send_movement', {
+                originVillageId: village.id,
+                targetCoords: { ...attackerVillage.coords },
+                troops,
+                missionType: 'raid',
+            });
+
+            if (!result?.success) continue;
+
+            this.setCounterattackCooldownForVillage(village.id, 90000, {
+                reason: 'deferred_counterwindow_launch',
+                sourceMovementId: state.sourceMovementIds?.[0] || null,
+            });
+            this.setMovementLockForVillage(village.id, 15000, {
+                reason: 'deferred_counterwindow_launch',
+                sourceMovementId: state.sourceMovementIds?.[0] || null,
+            });
+            this.upsertVillageCombatState(village.id, {
+                counterWindowOpen: false,
+                counterWindowExpiresAt: null,
+            }, {
+                lastDecisionReason: 'deferred_counterwindow_executed',
+            });
+
+            this.log('success', village, 'Counter Window', 'Contraataque diferido lanzado desde ventana tactica.', {
+                attackerVillageId,
+                troops,
+            }, 'military');
+        }
     }
 
     _ensureGermanPhaseState(villageId) {
@@ -333,6 +965,14 @@ class AIController {
         }
 
         return this._germanPhaseStates.get(villageId);
+    }
+
+    _ensureEgyptianPhaseState(villageId) {
+        if (!this._egyptianPhaseStates.has(villageId)) {
+            this._egyptianPhaseStates.set(villageId, createDefaultEgyptianPhaseState());
+        }
+
+        return this._egyptianPhaseStates.get(villageId);
     }
 
     _updateOasisTelemetry(cycleTelemetry) {
@@ -405,6 +1045,8 @@ class AIController {
 
     handleReactiveEvent(eventType, data, gameState) {
         this._lastKnownGameState = gameState;
+        this._expireReactiveCoordinationState();
+
         if (eventType === 'movement_dispatched') {
             const movement = data;
             this.log('warn', null, 'Evento Reactivo', `Detectado movimiento hostil inminente: '${movement.type}'.`, movement, 'military');
@@ -428,6 +1070,20 @@ class AIController {
             gameState,
             race: this._race,
             dodgeTasks: this._dodgeTasks,
+            villageCombatState: {
+                get: this.getVillageCombatState.bind(this),
+                upsert: this.upsertVillageCombatState.bind(this),
+                clear: this.clearVillageCombatState.bind(this),
+            },
+            locks: {
+                hasMovementLock: this.hasMovementLockForVillage.bind(this),
+                setMovementLock: this.setMovementLockForVillage.bind(this),
+            },
+            cooldowns: {
+                hasReactionCooldown: this.hasReactionCooldownForMovement.bind(this),
+                setReactionCooldown: this.setReactionCooldownForMovement.bind(this),
+            },
+            sendCommand: this._getCommandSender({ sourceLayer: 'reactive', layerPriority: 'reactive_low' }),
             log: this.log.bind(this),
         });
     }
@@ -441,9 +1097,41 @@ class AIController {
             ownerId: this._ownerId,
             gameConfig: this._gameConfig,
             dodgeTasks: this._dodgeTasks,
-            sendCommand: this._sendCommand,
+            villageCombatState: {
+                get: this.getVillageCombatState.bind(this),
+                upsert: this.upsertVillageCombatState.bind(this),
+                clear: this.clearVillageCombatState.bind(this),
+            },
+            locks: {
+                hasMovementLock: this.hasMovementLockForVillage.bind(this),
+                setMovementLock: this.setMovementLockForVillage.bind(this),
+                hasConstructionEmergencyLock: this.hasConstructionEmergencyLockForVillage.bind(this),
+                setConstructionEmergencyLock: this.setConstructionEmergencyLockForVillage.bind(this),
+            },
+            cooldowns: {
+                hasReactionCooldown: this.hasReactionCooldownForMovement.bind(this),
+                setReactionCooldown: this.setReactionCooldownForMovement.bind(this),
+                hasCounterattackCooldown: this.hasCounterattackCooldownForVillage.bind(this),
+                setCounterattackCooldown: this.setCounterattackCooldownForVillage.bind(this),
+            },
+            sendCommand: this._getCommandSender({ sourceLayer: 'reactive' }),
             log: this.log.bind(this),
         });
+
+        const targetVillage = gameState.villages.find(
+            village => village.coords.x === movement.targetCoords?.x && village.coords.y === movement.targetCoords?.y,
+        );
+        if (targetVillage) {
+            const combatState = this.getVillageCombatState(targetVillage.id);
+            if (combatState?.shouldPauseEconomicConstruction) {
+                const durationMs = combatState.threatLevel === 'critical' ? 45000 : BASE_LOCK_DURATIONS_MS.constructionEmergencyLockByVillage;
+                this.setConstructionEmergencyLockForVillage(
+                    targetVillage.id,
+                    durationMs,
+                    { reason: 'reactive_macro_emergency_lock', sourceMovementId: movement.id },
+                );
+            }
+        }
     }
 
     _processDodgeTasks(gameState) {
@@ -451,7 +1139,7 @@ class AIController {
             gameState,
             dodgeTasks: this._dodgeTasks,
             dodgeTimeThresholdMs: AI_CONTROLLER_CONSTANTS.dodgeTimeThresholdMs,
-            sendCommand: this._sendCommand,
+            sendCommand: this._getCommandSender({ sourceLayer: 'reactive', layerPriority: 'reactive_high' }),
             log: this.log.bind(this),
         });
     }
@@ -460,15 +1148,17 @@ class AIController {
         this._reinforcementTasks = processReinforcementRecalls({
             gameState,
             reinforcementTasks: this._reinforcementTasks,
-            sendCommand: this._sendCommand,
+            sendCommand: this._getCommandSender({ sourceLayer: 'reactive', layerPriority: 'reactive_high' }),
             log: this.log.bind(this),
         });
     }
 
     makeDecision(gameState) {
         this._lastKnownGameState = gameState;
+        this._expireReactiveCoordinationState();
         this._processReinforcementRecalls(gameState);
         this._processDodgeTasks(gameState);
+        this._processCounterWindows(gameState);
 
         const now = Date.now();
         const myVillages = gameState.villages.filter(v => v.ownerId === this._ownerId);
@@ -500,6 +1190,7 @@ class AIController {
                             phaseState,
                             difficulty: this._difficulty,
                             gameSpeed: this._gameConfig?.gameSpeed || 1,
+                            villageCombatState: this.getVillageCombatState(village.id),
                             actionExecutor: this._actionExecutor,
                             log: this.log.bind(this),
                         });
@@ -512,6 +1203,33 @@ class AIController {
                                 village,
                                 'Macro Fases',
                                 'El motor por fases devolvio handled=false; se evita fallback legacy por hard cutover.',
+                                { phaseId: phaseState.activePhaseId },
+                                'economic',
+                            );
+                        }
+                        return;
+                    }
+
+                    if (this._race === 'egyptians') {
+                        const phaseState = this._ensureEgyptianPhaseState(village.id);
+                        const result = runEgyptianEconomicPhaseCycle({
+                            village,
+                            gameState,
+                            phaseState,
+                            difficulty: this._difficulty,
+                            villageCombatState: this.getVillageCombatState(village.id),
+                            actionExecutor: this._actionExecutor,
+                            log: this.log.bind(this),
+                        });
+
+                        this._egyptianPhaseStates.set(village.id, result.phaseState);
+
+                        if (!result.handled) {
+                            this.log(
+                                'warn',
+                                village,
+                                'Macro Fases',
+                                'El motor egipcio devolvio handled=false; se evita fallback legacy por hard cutover.',
                                 { phaseId: phaseState.activePhaseId },
                                 'economic',
                             );
@@ -571,7 +1289,7 @@ class AIController {
         executeCommands({
             commands,
             gameState,
-            sendCommand: this._sendCommand,
+            sendCommand: this._getCommandSender({ sourceLayer: 'military', layerPriority: 'reactive_low' }),
             log: this.log.bind(this),
         });
     }

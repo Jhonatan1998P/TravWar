@@ -244,6 +244,12 @@ const MILITARY_CONSTRUCTION_TYPES = new Set([
     'workshop',
 ]);
 
+const THREAT_OVERRIDE_LOG_THROTTLE_MS = 20_000;
+const RESILIENCE_CONSTRUCTION_TYPES = new Set(['cityWall', 'warehouse', 'granary', 'mainBuilding', 'rallyPoint', 'barracks', 'academy', 'smithy', 'stable', 'workshop']);
+const MEDIUM_ALLOWED_NON_MILITARY_TYPES = new Set(['warehouse', 'granary', 'mainBuilding']);
+const HIGH_ALLOWED_NON_MILITARY_TYPES = new Set(['warehouse', 'granary', 'cityWall', 'mainBuilding']);
+const CRITICAL_ALLOWED_NON_MILITARY_TYPES = new Set(['warehouse', 'granary', 'cityWall']);
+
 function getDifficultyTemplate(difficulty) {
     return PHASE_TEMPLATE_BY_DIFFICULTY[difficulty] || PHASE_TEMPLATE_BY_DIFFICULTY.Pesadilla;
 }
@@ -1343,94 +1349,273 @@ function sameRatio(currentRatio, targetRatio) {
         && Math.abs((currentRatio.mil || 0) - targetRatio.mil) <= FLOAT_EPSILON;
 }
 
-function ensurePhaseOneRatio({ village, difficulty, log }) {
+function normalizeVillageCombatState(villageCombatState, now = Date.now()) {
+    if (!villageCombatState || typeof villageCombatState !== 'object') {
+        return {
+            threatLevel: 'none',
+            shouldPauseEconomicConstruction: false,
+            shouldBoostEmergencyRecruitment: false,
+            sourceMovementIds: [],
+        };
+    }
+
+    if (Number.isFinite(villageCombatState.expiresAt) && villageCombatState.expiresAt <= now) {
+        return {
+            threatLevel: 'none',
+            shouldPauseEconomicConstruction: false,
+            shouldBoostEmergencyRecruitment: false,
+            sourceMovementIds: [],
+        };
+    }
+
+    return {
+        threatLevel: villageCombatState.threatLevel || 'none',
+        shouldPauseEconomicConstruction: Boolean(villageCombatState.shouldPauseEconomicConstruction),
+        shouldBoostEmergencyRecruitment: Boolean(villageCombatState.shouldBoostEmergencyRecruitment),
+        sourceMovementIds: Array.isArray(villageCombatState.sourceMovementIds) ? villageCombatState.sourceMovementIds : [],
+    };
+}
+
+function getThreatRatioAdjustment(threatLevel) {
+    if (threatLevel === 'critical') return { econ: 0.2, mil: 0.8 };
+    if (threatLevel === 'high') return { econ: 0.28, mil: 0.72 };
+    if (threatLevel === 'medium') return { econ: 0.38, mil: 0.62 };
+    return null;
+}
+
+function getThreatAllowedNonMilitarySet(threatLevel) {
+    if (threatLevel === 'critical') return CRITICAL_ALLOWED_NON_MILITARY_TYPES;
+    if (threatLevel === 'high') return HIGH_ALLOWED_NON_MILITARY_TYPES;
+    if (threatLevel === 'medium') return MEDIUM_ALLOWED_NON_MILITARY_TYPES;
+    return null;
+}
+
+function applyThreatAwareRatio({ village, baseRatio, phaseState, phaseLabel, threatContext, log, now }) {
+    const threatLevel = threatContext?.threatLevel || 'none';
+    const adjustment = getThreatRatioAdjustment(threatLevel);
+
+    let finalRatio = { ...baseRatio };
+    if (adjustment) {
+        finalRatio = {
+            econ: Math.min(finalRatio.econ, adjustment.econ),
+            mil: Math.max(finalRatio.mil, adjustment.mil),
+        };
+
+        const ratioSum = finalRatio.econ + finalRatio.mil;
+        if (ratioSum > 0) {
+            finalRatio = {
+                econ: finalRatio.econ / ratioSum,
+                mil: finalRatio.mil / ratioSum,
+            };
+        }
+    }
+
+    if (sameRatio(village.budgetRatio, finalRatio)) {
+        return;
+    }
+
+    village.budgetRatio = finalRatio;
+    rebalanceVillageBudgetToRatio(village);
+
+    const canLogThreat = now - (phaseState.lastThreatOverrideLogAt || 0) >= THREAT_OVERRIDE_LOG_THROTTLE_MS;
+    if (!canLogThreat) return;
+
+    phaseState.lastThreatOverrideLogAt = now;
+    if (!adjustment) {
+        log(
+            'info',
+            village,
+            phaseLabel,
+            `Ratio eco/mil aplicado: ${(finalRatio.econ * 100).toFixed(0)}%/${(finalRatio.mil * 100).toFixed(0)}%.`,
+            null,
+            'economic',
+        );
+        return;
+    }
+
+    log(
+        'warn',
+        village,
+        `${phaseLabel} Threat Override`,
+        `Amenaza ${threatLevel}: ratio temporal eco/mil ${(finalRatio.econ * 100).toFixed(0)}%/${(finalRatio.mil * 100).toFixed(0)}%.`,
+        null,
+        'economic',
+    );
+}
+
+function composeStepFilters(...filters) {
+    const activeFilters = filters.filter(filter => typeof filter === 'function');
+    if (activeFilters.length === 0) return null;
+    return step => activeFilters.every(filter => filter(step));
+}
+
+function createThreatConstructionFilter({ threatContext, phaseState, village, log, now }) {
+    const threatLevel = threatContext?.threatLevel || 'none';
+    if (threatLevel === 'none' || threatLevel === 'low') {
+        return null;
+    }
+
+    const allowedNonMilitary = getThreatAllowedNonMilitarySet(threatLevel);
+    const shouldPauseEconomic = Boolean(threatContext?.shouldPauseEconomicConstruction);
+    const maxSlots = village.maxConstructionSlots || 1;
+    const queueLength = village.constructionQueue?.length || 0;
+    const freeSlots = Math.max(0, maxSlots - queueLength);
+
+    const canLog = now - (phaseState.lastThreatOverrideLogAt || 0) >= THREAT_OVERRIDE_LOG_THROTTLE_MS;
+    if (canLog) {
+        phaseState.lastThreatOverrideLogAt = now;
+        log(
+            'warn',
+            village,
+            'Macro Threat Override',
+            `Filtro de construccion por amenaza ${threatLevel} activado (freeSlots=${freeSlots}, pauseEco=${shouldPauseEconomic ? 'yes' : 'no'}).`,
+            null,
+            'economic',
+        );
+    }
+
+    return step => {
+        if (!step) return true;
+        if (step.type !== 'building' && step.type !== 'resource_fields_level') return true;
+        if (isMilitaryConstructionStep(step)) return true;
+
+        if (step.type === 'resource_fields_level') {
+            return !shouldPauseEconomic && threatLevel === 'medium';
+        }
+
+        const buildingType = step.buildingType;
+        if (!buildingType) return true;
+
+        if (RESILIENCE_CONSTRUCTION_TYPES.has(buildingType) && allowedNonMilitary?.has(buildingType)) {
+            return true;
+        }
+
+        if (threatLevel === 'medium') {
+            if (freeSlots <= 1) {
+                return false;
+            }
+            return !shouldPauseEconomic;
+        }
+
+        if (threatLevel === 'high') {
+            return allowedNonMilitary?.has(buildingType) || false;
+        }
+
+        if (threatLevel === 'critical') {
+            return allowedNonMilitary?.has(buildingType) || false;
+        }
+
+        return true;
+    };
+}
+
+function tryThreatEmergencyRecruitment({ village, gameState, actionExecutor, difficulty, threatContext }) {
+    const threatLevel = threatContext?.threatLevel || 'none';
+    const shouldBoost = Boolean(threatContext?.shouldBoostEmergencyRecruitment);
+    if (!shouldBoost && threatLevel !== 'high' && threatLevel !== 'critical') {
+        return { success: false, reason: 'THREAT_BOOST_NOT_REQUIRED' };
+    }
+
+    let cycles = 0;
+    if (threatLevel === 'critical') cycles = 6;
+    else if (threatLevel === 'high') cycles = 4;
+    else if (threatLevel === 'medium') cycles = 2;
+    else cycles = 1;
+
+    const emergencyCount = estimateUnitsForCycles({
+        village,
+        actionExecutor,
+        unitType: 'defensive_infantry',
+        cycles,
+        gameSpeed: 1,
+    });
+
+    if (emergencyCount <= 0) {
+        return { success: false, reason: 'PREREQUISITES_NOT_MET', details: { unitType: 'defensive_infantry' } };
+    }
+
+    const emergencyStep = {
+        type: 'units',
+        unitType: 'defensive_infantry',
+        count: emergencyCount,
+    };
+
+    const result = actionExecutor.executePlanStep(
+        village,
+        emergencyStep,
+        gameState,
+        { scope: 'per_village' },
+    );
+
+    return {
+        ...result,
+        step: cloneStep(emergencyStep),
+    };
+}
+
+function ensurePhaseOneRatio({ village, difficulty, log, phaseState, threatContext, now }) {
     const phaseConfig = getPhaseOneConfig(difficulty);
-    if (sameRatio(village.budgetRatio, phaseConfig.ratio)) {
-        return;
-    }
-
-    village.budgetRatio = { ...phaseConfig.ratio };
-    rebalanceVillageBudgetToRatio(village);
-    log(
-        'info',
+    applyThreatAwareRatio({
         village,
-        'Macro Fase 1',
-        `Ratio eco/mil aplicado: ${(phaseConfig.ratio.econ * 100).toFixed(0)}%/${(phaseConfig.ratio.mil * 100).toFixed(0)}% (${difficulty}).`,
-        null,
-        'economic',
-    );
+        baseRatio: phaseConfig.ratio,
+        phaseState,
+        phaseLabel: `Macro Fase 1 (${difficulty})`,
+        threatContext,
+        log,
+        now,
+    });
 }
 
-function ensurePhaseTwoRatio({ village, difficulty, log }) {
+function ensurePhaseTwoRatio({ village, difficulty, log, phaseState, threatContext, now }) {
     const phaseConfig = getPhaseTwoConfig(difficulty);
-    if (sameRatio(village.budgetRatio, phaseConfig.ratio)) {
-        return;
-    }
-
-    village.budgetRatio = { ...phaseConfig.ratio };
-    rebalanceVillageBudgetToRatio(village);
-    log(
-        'info',
+    applyThreatAwareRatio({
         village,
-        'Macro Fase 2',
-        `Ratio eco/mil aplicado: ${(phaseConfig.ratio.econ * 100).toFixed(0)}%/${(phaseConfig.ratio.mil * 100).toFixed(0)}% (${difficulty}).`,
-        null,
-        'economic',
-    );
+        baseRatio: phaseConfig.ratio,
+        phaseState,
+        phaseLabel: `Macro Fase 2 (${difficulty})`,
+        threatContext,
+        log,
+        now,
+    });
 }
 
-function ensurePhaseThreeRatio({ village, difficulty, log }) {
+function ensurePhaseThreeRatio({ village, difficulty, log, phaseState, threatContext, now }) {
     const phaseConfig = getPhaseThreeConfig(difficulty);
-    if (sameRatio(village.budgetRatio, phaseConfig.ratio)) {
-        return;
-    }
-
-    village.budgetRatio = { ...phaseConfig.ratio };
-    rebalanceVillageBudgetToRatio(village);
-    log(
-        'info',
+    applyThreatAwareRatio({
         village,
-        'Macro Fase 3',
-        `Ratio eco/mil aplicado: ${(phaseConfig.ratio.econ * 100).toFixed(0)}%/${(phaseConfig.ratio.mil * 100).toFixed(0)}% (${difficulty}).`,
-        null,
-        'economic',
-    );
+        baseRatio: phaseConfig.ratio,
+        phaseState,
+        phaseLabel: `Macro Fase 3 (${difficulty})`,
+        threatContext,
+        log,
+        now,
+    });
 }
 
-function ensurePhaseFourRatio({ village, difficulty, log }) {
+function ensurePhaseFourRatio({ village, difficulty, log, phaseState, threatContext, now }) {
     const phaseConfig = getPhaseFourConfig(difficulty);
-    if (sameRatio(village.budgetRatio, phaseConfig.ratio)) {
-        return;
-    }
-
-    village.budgetRatio = { ...phaseConfig.ratio };
-    rebalanceVillageBudgetToRatio(village);
-    log(
-        'info',
+    applyThreatAwareRatio({
         village,
-        'Macro Fase 4',
-        `Ratio eco/mil aplicado: ${(phaseConfig.ratio.econ * 100).toFixed(0)}%/${(phaseConfig.ratio.mil * 100).toFixed(0)}% (${difficulty}).`,
-        null,
-        'economic',
-    );
+        baseRatio: phaseConfig.ratio,
+        phaseState,
+        phaseLabel: `Macro Fase 4 (${difficulty})`,
+        threatContext,
+        log,
+        now,
+    });
 }
 
-function ensurePhaseFiveRatio({ village, difficulty, log }) {
+function ensurePhaseFiveRatio({ village, difficulty, log, phaseState, threatContext, now }) {
     const phaseConfig = getPhaseFiveConfig(difficulty);
-    if (sameRatio(village.budgetRatio, phaseConfig.ratio)) {
-        return;
-    }
-
-    village.budgetRatio = { ...phaseConfig.ratio };
-    rebalanceVillageBudgetToRatio(village);
-    log(
-        'info',
+    applyThreatAwareRatio({
         village,
-        'Macro Fase 5',
-        `Ratio eco/mil aplicado: ${(phaseConfig.ratio.econ * 100).toFixed(0)}%/${(phaseConfig.ratio.mil * 100).toFixed(0)}% (${difficulty}).`,
-        null,
-        'economic',
-    );
+        baseRatio: phaseConfig.ratio,
+        phaseState,
+        phaseLabel: `Macro Fase 5 (${difficulty})`,
+        threatContext,
+        log,
+        now,
+    });
 }
 
 function attemptConstructionStep({ village, gameState, step, actionExecutor }) {
@@ -2225,6 +2410,7 @@ export function createDefaultGermanPhaseState(now = Date.now()) {
         lastEvaluationAt: now,
         lastIdleLogAt: 0,
         lastConstructionReserveLogAt: 0,
+        lastThreatOverrideLogAt: 0,
         transitions: [],
         phase1CompletedAt: null,
         phase2StartedAt: null,
@@ -2270,6 +2456,7 @@ export function hydrateGermanPhaseState(rawState = null, now = Date.now()) {
         lastEvaluationAt: Number.isFinite(rawState.lastEvaluationAt) ? rawState.lastEvaluationAt : fallback.lastEvaluationAt,
         lastIdleLogAt: Number.isFinite(rawState.lastIdleLogAt) ? rawState.lastIdleLogAt : 0,
         lastConstructionReserveLogAt: Number.isFinite(rawState.lastConstructionReserveLogAt) ? rawState.lastConstructionReserveLogAt : 0,
+        lastThreatOverrideLogAt: Number.isFinite(rawState.lastThreatOverrideLogAt) ? rawState.lastThreatOverrideLogAt : 0,
         transitions: Array.isArray(rawState.transitions) ? rawState.transitions : [],
         phase1CompletedAt: Number.isFinite(rawState.phase1CompletedAt) ? rawState.phase1CompletedAt : null,
         phase2StartedAt: Number.isFinite(rawState.phase2StartedAt) ? rawState.phase2StartedAt : null,
@@ -2316,6 +2503,7 @@ export function serializeGermanPhaseStates(stateByVillageMap) {
             lastEvaluationAt: state.lastEvaluationAt,
             lastIdleLogAt: state.lastIdleLogAt,
             lastConstructionReserveLogAt: state.lastConstructionReserveLogAt,
+            lastThreatOverrideLogAt: state.lastThreatOverrideLogAt,
             transitions: state.transitions,
             phase1CompletedAt: state.phase1CompletedAt,
             phase2StartedAt: state.phase2StartedAt,
@@ -2344,10 +2532,12 @@ export function runGermanEconomicPhaseCycle({
     phaseState,
     difficulty,
     gameSpeed,
+    villageCombatState,
     actionExecutor,
     log,
 }) {
     const now = Date.now();
+    const threatContext = normalizeVillageCombatState(villageCombatState, now);
     const previousEvaluationAt = Number.isFinite(phaseState.lastEvaluationAt) ? phaseState.lastEvaluationAt : now;
     const evaluationDeltaMs = Math.max(0, now - previousEvaluationAt);
     phaseState.lastEvaluationAt = now;
@@ -2357,7 +2547,7 @@ export function runGermanEconomicPhaseCycle({
     }
 
     if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase1) {
-        ensurePhaseOneRatio({ village, difficulty, log });
+        ensurePhaseOneRatio({ village, difficulty, log, phaseState, threatContext, now });
 
         const exit = evaluatePhaseOneExit(village);
         if (exit.ready) {
@@ -2367,6 +2557,14 @@ export function runGermanEconomicPhaseCycle({
     }
 
     if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase1) {
+        const phaseOneThreatFilter = createThreatConstructionFilter({
+            threatContext,
+            phaseState,
+            village,
+            log,
+            now,
+        });
+
         const activeSubGoalResult = processActiveSubGoal({
             phaseState,
             village,
@@ -2379,7 +2577,12 @@ export function runGermanEconomicPhaseCycle({
             return { handled: true, phaseState };
         }
 
-        const priorityConstructionResult = tryPhaseOnePriorityConstruction({ village, gameState, actionExecutor });
+        const priorityConstructionResult = tryPhaseOnePriorityConstruction({
+            village,
+            gameState,
+            actionExecutor,
+            shouldAttemptConstructionStep: phaseOneThreatFilter,
+        });
         const phaseOnePriorityHandling = handlePhaseActionResult({
             result: priorityConstructionResult,
             phaseState,
@@ -2393,7 +2596,12 @@ export function runGermanEconomicPhaseCycle({
             return { handled: true, phaseState };
         }
 
-        const fallbackConstructionResult = tryPhaseOneFallbackConstruction({ village, gameState, actionExecutor });
+        const fallbackConstructionResult = tryPhaseOneFallbackConstruction({
+            village,
+            gameState,
+            actionExecutor,
+            shouldAttemptConstructionStep: phaseOneThreatFilter,
+        });
         const phaseOneFallbackHandling = handlePhaseActionResult({
             result: fallbackConstructionResult,
             phaseState,
@@ -2462,14 +2670,22 @@ export function runGermanEconomicPhaseCycle({
     }
 
     if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase2) {
-        ensurePhaseTwoRatio({ village, difficulty, log });
+        ensurePhaseTwoRatio({ village, difficulty, log, phaseState, threatContext, now });
         updatePhaseTwoQueueTelemetry(phaseState, village, evaluationDeltaMs);
-        const phaseTwoConstructionFilter = createConstructionStepFilter({
+        const phaseTwoConstructionReserveFilter = createConstructionStepFilter({
             phaseState,
             phaseId: GERMAN_PHASE_IDS.phase2,
             village,
             log,
         });
+        const phaseTwoThreatFilter = createThreatConstructionFilter({
+            threatContext,
+            phaseState,
+            village,
+            log,
+            now,
+        });
+        const phaseTwoConstructionFilter = composeStepFilters(phaseTwoConstructionReserveFilter, phaseTwoThreatFilter);
 
         const activeSubGoalResult = processActiveSubGoal({
             phaseState,
@@ -2489,6 +2705,34 @@ export function runGermanEconomicPhaseCycle({
         }
 
         if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase2) {
+            const phaseTwoEmergencyRecruitmentResult = tryThreatEmergencyRecruitment({
+                village,
+                gameState,
+                actionExecutor,
+                difficulty,
+                threatContext,
+            });
+            const phaseTwoEmergencyRecruitmentHandling = handlePhaseActionResult({
+                result: phaseTwoEmergencyRecruitmentResult,
+                phaseState,
+                phaseId: GERMAN_PHASE_IDS.phase2,
+                source: 'phase2_threat_emergency_recruitment',
+                village,
+                gameSpeed,
+                log,
+                onSuccess: successResult => registerRecruitmentCommitFromAction({
+                    result: successResult,
+                    phaseState,
+                    phaseId: GERMAN_PHASE_IDS.phase2,
+                    village,
+                    difficulty,
+                    log,
+                }),
+            });
+            if (phaseTwoEmergencyRecruitmentHandling.terminal) {
+                return { handled: true, phaseState };
+            }
+
             const phaseTwoConstructionResult = tryPhaseTwoPriorityConstruction({
                 village,
                 gameState,
@@ -2593,14 +2837,22 @@ export function runGermanEconomicPhaseCycle({
     }
 
     if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase3) {
-        ensurePhaseThreeRatio({ village, difficulty, log });
+        ensurePhaseThreeRatio({ village, difficulty, log, phaseState, threatContext, now });
         updatePhaseThreeQueueTelemetry(phaseState, village, evaluationDeltaMs);
-        const phaseThreeConstructionFilter = createConstructionStepFilter({
+        const phaseThreeConstructionReserveFilter = createConstructionStepFilter({
             phaseState,
             phaseId: GERMAN_PHASE_IDS.phase3,
             village,
             log,
         });
+        const phaseThreeThreatFilter = createThreatConstructionFilter({
+            threatContext,
+            phaseState,
+            village,
+            log,
+            now,
+        });
+        const phaseThreeConstructionFilter = composeStepFilters(phaseThreeConstructionReserveFilter, phaseThreeThreatFilter);
 
         const activeSubGoalResult = processActiveSubGoal({
             phaseState,
@@ -2620,6 +2872,34 @@ export function runGermanEconomicPhaseCycle({
         }
 
         if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase3) {
+            const phaseThreeEmergencyRecruitmentResult = tryThreatEmergencyRecruitment({
+                village,
+                gameState,
+                actionExecutor,
+                difficulty,
+                threatContext,
+            });
+            const phaseThreeEmergencyRecruitmentHandling = handlePhaseActionResult({
+                result: phaseThreeEmergencyRecruitmentResult,
+                phaseState,
+                phaseId: GERMAN_PHASE_IDS.phase3,
+                source: 'phase3_threat_emergency_recruitment',
+                village,
+                gameSpeed,
+                log,
+                onSuccess: successResult => registerRecruitmentCommitFromAction({
+                    result: successResult,
+                    phaseState,
+                    phaseId: GERMAN_PHASE_IDS.phase3,
+                    village,
+                    difficulty,
+                    log,
+                }),
+            });
+            if (phaseThreeEmergencyRecruitmentHandling.terminal) {
+                return { handled: true, phaseState };
+            }
+
             const phaseThreeConstructionResult = tryPhaseThreePriorityConstruction({
                 village,
                 gameState,
@@ -2724,14 +3004,22 @@ export function runGermanEconomicPhaseCycle({
     }
 
     if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase4) {
-        ensurePhaseFourRatio({ village, difficulty, log });
+        ensurePhaseFourRatio({ village, difficulty, log, phaseState, threatContext, now });
         updatePhaseFourQueueTelemetry(phaseState, village, evaluationDeltaMs);
-        const phaseFourConstructionFilter = createConstructionStepFilter({
+        const phaseFourConstructionReserveFilter = createConstructionStepFilter({
             phaseState,
             phaseId: GERMAN_PHASE_IDS.phase4,
             village,
             log,
         });
+        const phaseFourThreatFilter = createThreatConstructionFilter({
+            threatContext,
+            phaseState,
+            village,
+            log,
+            now,
+        });
+        const phaseFourConstructionFilter = composeStepFilters(phaseFourConstructionReserveFilter, phaseFourThreatFilter);
 
         const activeSubGoalResult = processActiveSubGoal({
             phaseState,
@@ -2751,6 +3039,34 @@ export function runGermanEconomicPhaseCycle({
         }
 
         if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase4) {
+            const phaseFourEmergencyRecruitmentResult = tryThreatEmergencyRecruitment({
+                village,
+                gameState,
+                actionExecutor,
+                difficulty,
+                threatContext,
+            });
+            const phaseFourEmergencyRecruitmentHandling = handlePhaseActionResult({
+                result: phaseFourEmergencyRecruitmentResult,
+                phaseState,
+                phaseId: GERMAN_PHASE_IDS.phase4,
+                source: 'phase4_threat_emergency_recruitment',
+                village,
+                gameSpeed,
+                log,
+                onSuccess: successResult => registerRecruitmentCommitFromAction({
+                    result: successResult,
+                    phaseState,
+                    phaseId: GERMAN_PHASE_IDS.phase4,
+                    village,
+                    difficulty,
+                    log,
+                }),
+            });
+            if (phaseFourEmergencyRecruitmentHandling.terminal) {
+                return { handled: true, phaseState };
+            }
+
             const phaseFourConstructionResult = tryPhaseFourPriorityConstruction({
                 village,
                 gameState,
@@ -2858,14 +3174,22 @@ export function runGermanEconomicPhaseCycle({
         return { handled: false, phaseState };
     }
 
-    ensurePhaseFiveRatio({ village, difficulty, log });
+    ensurePhaseFiveRatio({ village, difficulty, log, phaseState, threatContext, now });
     updatePhaseFiveQueueTelemetry(phaseState, village, evaluationDeltaMs);
-    const phaseFiveConstructionFilter = createConstructionStepFilter({
+    const phaseFiveConstructionReserveFilter = createConstructionStepFilter({
         phaseState,
         phaseId: GERMAN_PHASE_IDS.phase5,
         village,
         log,
     });
+    const phaseFiveThreatFilter = createThreatConstructionFilter({
+        threatContext,
+        phaseState,
+        village,
+        log,
+        now,
+    });
+    const phaseFiveConstructionFilter = composeStepFilters(phaseFiveConstructionReserveFilter, phaseFiveThreatFilter);
 
     const activeSubGoalResult = processActiveSubGoal({
         phaseState,
@@ -2882,6 +3206,34 @@ export function runGermanEconomicPhaseCycle({
     const phase5Exit = evaluatePhaseFiveExit(village, phaseState, difficulty);
     if (phase5Exit.ready) {
         transitionToDone(phaseState, now, phase5Exit, log, village);
+        return { handled: true, phaseState };
+    }
+
+    const phaseFiveEmergencyRecruitmentResult = tryThreatEmergencyRecruitment({
+        village,
+        gameState,
+        actionExecutor,
+        difficulty,
+        threatContext,
+    });
+    const phaseFiveEmergencyRecruitmentHandling = handlePhaseActionResult({
+        result: phaseFiveEmergencyRecruitmentResult,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase5,
+        source: 'phase5_threat_emergency_recruitment',
+        village,
+        gameSpeed,
+        log,
+        onSuccess: successResult => registerRecruitmentCommitFromAction({
+            result: successResult,
+            phaseState,
+            phaseId: GERMAN_PHASE_IDS.phase5,
+            village,
+            difficulty,
+            log,
+        }),
+    });
+    if (phaseFiveEmergencyRecruitmentHandling.terminal) {
         return { handled: true, phaseState };
     }
 
