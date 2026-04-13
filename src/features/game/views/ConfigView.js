@@ -290,9 +290,7 @@ class ConfigView {
 
     _startNewGame() {
         this.#confirmDialog.classList.add('hidden');
-        
-        localStorage.removeItem(STATE_STORAGE_KEY);
-        
+
         const newSessionId = Date.now().toString(36) + Math.random().toString(36).substring(2);
         sessionStorage.setItem(FORCE_NEW_GAME_SESSION_KEY, newSessionId);
 
@@ -310,9 +308,11 @@ class ConfigView {
         };
 
         this.#config.updateAndSave(newSettings);
-        
+
         sessionStorage.setItem(ACCESS_PASS_KEY, 'forced_new');
-        gameManager.resetAndStart();
+        
+        // Delegate all state cleanup to GameManager to prevent race conditions
+        gameManager.resetAndStart({ forceNew: true });
     }
 }
 

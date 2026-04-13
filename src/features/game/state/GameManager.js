@@ -10,6 +10,11 @@ const FORCE_NEW_GAME_SESSION_KEY = 'force_new_game_session';
 const SAVE_STATE_DEBOUNCE_MS = 3000;
 const DEBUG = false;
 
+/**
+ * Represents a reset reason for game session lifecycle tracking.
+ * @typedef {'fresh_start' | 'forced_reset' | 'resume'} ResetReason
+ */
+
 class GameManager {
     #worker;
     #config;
@@ -19,6 +24,8 @@ class GameManager {
     #pendingPersistState = null;
     #pendingPersistLastTick = null;
     #lastPersistedSerializedData = null;
+    #isResetting = false;
+    #resetReason = null;
 
     constructor() {
         if (GameManager.instance) {
@@ -42,21 +49,71 @@ class GameManager {
         GameManager.instance = this;
     }
 
-    resetAndStart() {
-        this.#flushPendingStatePersist();
-
+    /**
+     * Performs a complete game reset with full state cleanup.
+     * This method ensures no race conditions can occur by:
+     * 1. Setting a reset flag to block any pending persistence operations
+     * 2. Cancelling all pending persistence timers immediately
+     * 3. Clearing all pending state data
+     * 4. Clearing the last persisted serialized data cache
+     * 5. Terminating the existing worker (if any)
+     * 6. Removing localStorage state
+     * 7. Setting a new session ID
+     * 8. Starting fresh with the new session
+     * 
+     * @param {Object} [options]
+     * @param {boolean} [options.forceNew=true] - Whether to force a new game (clears all state)
+     * @returns {void}
+     */
+    resetAndStart(options = {}) {
+        const { forceNew = true } = options;
+        
+        console.log(`[GameManager] Initiating game reset. Reason: ${forceNew ? 'forced_reset' : 'fresh_start'}`);
+        
+        // Step 1: Set reset flag IMMEDIATELY to block any concurrent operations
+        this.#isResetting = true;
+        this.#resetReason = forceNew ? 'forced_reset' : 'fresh_start';
+        
+        // Step 2: Flush and cancel ALL pending persistence operations
+        this.#flushPendingStatePersist({ abort: true });
+        
+        // Step 3: Terminate existing worker to prevent any more state updates
         if (this.#worker) {
+            console.log('[GameManager] Terminating existing worker...');
             this.#worker.terminate();
             this.#worker = null;
         }
+        
+        // Step 4: Clear all internal state
         this.#isInitialized = false;
+        this.#pendingPersistState = null;
+        this.#pendingPersistLastTick = null;
+        this.#lastPersistedSerializedData = null;
+        
+        // Step 5: Remove localStorage state to prevent any recovery
+        if (forceNew) {
+            console.log('[GameManager] Clearing localStorage state...');
+            localStorage.removeItem(STATE_STORAGE_KEY);
+        }
+        
+        // Step 6: Update app store
         appStore.getState().setGameInitialized(false);
+        
+        // Step 7: Start fresh
+        console.log('[GameManager] Starting new game session...');
         this.start();
     }
 
     start() {
+        // Reset the resetting flag now that we're starting fresh
+        if (this.#isResetting) {
+            console.log(`[GameManager] Clearing reset flag. Previous reason: ${this.#resetReason}`);
+            this.#isResetting = false;
+            this.#resetReason = null;
+        }
+
         if (this.#isInitialized) {
-            console.log("GameManager ya inicializado, solicitando último estado y reanudando.");
+            console.log("[GameManager] GameManager ya inicializado, solicitando último estado y reanudando.");
             this.sendCommand('get_latest_state');
             appStore.getState().setGameInitialized(true);
             document.dispatchEvent(new CustomEvent('game:resumed'));
@@ -64,21 +121,21 @@ class GameManager {
         }
 
         if (!localStorage.getItem(CONFIG_STORAGE_KEY)) {
-            console.log("No se encontró configuración de juego en localStorage.");
+            console.log("[GameManager] No se encontró configuración de juego en localStorage.");
             appStore.getState().setLastError('no_config');
             document.dispatchEvent(new CustomEvent('game:access_denied', { detail: { reason: 'no_config' } }));
-            return; 
+            return;
         }
-        
+
         if (!window.Worker) {
-            console.error("Los Web Workers no son soportados por este navegador.");
+            console.error("[GameManager] Los Web Workers no son soportados por este navegador.");
             appStore.getState().setLastError('web_worker_not_supported');
-            document.dispatchEvent(new CustomEvent('system:error', { 
-                detail: "Tu navegador no soporta Web Workers. El juego no puede funcionar." 
+            document.dispatchEvent(new CustomEvent('system:error', {
+                detail: "Tu navegador no soporta Web Workers. El juego no puede funcionar."
             }));
             return;
         }
-        
+
         this.#worker = new GameWorker();
         this.#config = new GameConfig();
 
@@ -86,29 +143,30 @@ class GameManager {
         const savedRawData = localStorage.getItem(STATE_STORAGE_KEY);
         let savedState = null;
 
-        this.#lastPersistedSerializedData = savedRawData || null;
+        // Clear the cache here to prevent any comparison with old data
+        this.#lastPersistedSerializedData = null;
 
         if (forcedSessionId) {
-            console.log("Señal de reinicio forzado detectada. Creando nueva partida.");
+            console.log("[GameManager] Señal de reinicio forzado detectada. Creando nueva partida.");
             this.#sessionId = forcedSessionId;
+            // Double-clear localStorage to ensure no recovery
             localStorage.removeItem(STATE_STORAGE_KEY);
-            this.#lastPersistedSerializedData = null;
             sessionStorage.removeItem(FORCE_NEW_GAME_SESSION_KEY);
             savedState = null;
         } else if (savedRawData) {
             try {
                 const parsedData = JSON.parse(atob(savedRawData));
-                this.#sessionId = parsedData.sessionId; 
+                this.#sessionId = parsedData.sessionId;
                 savedState = parsedData;
-                console.log("Loaded game state from localStorage. Session ID:", this.#sessionId);
+                console.log("[GameManager] Loaded game state from localStorage. Session ID:", this.#sessionId);
             } catch (error) {
-                console.error("Error al parsear el estado guardado. Forzando nueva partida.", error);
+                console.error("[GameManager] Error al parsear el estado guardado. Forzando nueva partida.", error);
                 localStorage.removeItem(STATE_STORAGE_KEY);
                 this.#sessionId = Date.now().toString(36) + Math.random().toString(36).substring(2);
                 savedState = null;
             }
         } else {
-            console.log("No se encontró partida guardada ni señal de reinicio forzado.");
+            console.log("[GameManager] No se encontró partida guardada ni señal de reinicio forzado.");
             appStore.getState().setLastError('no_saved_game_or_force_signal');
             document.dispatchEvent(new CustomEvent('game:access_denied', { detail: { reason: 'no_saved_game_or_force_signal' } }));
             return;
@@ -116,14 +174,14 @@ class GameManager {
 
         sessionStorage.setItem(SESSION_ID_KEY, this.#sessionId);
         appStore.getState().setSessionId(this.#sessionId);
-        console.log("GameManager inicializando Web Worker con Session ID:", this.#sessionId);
+        console.log("[GameManager] inicializando Web Worker con Session ID:", this.#sessionId);
 
         const initPayload = {
             config: this.#config.getSettings(),
             savedState: savedState,
             sessionId: this.#sessionId
         };
-        
+
         this.sendCommand('init', initPayload);
         this.#worker.onmessage = this.#handleWorkerMessage.bind(this);
         this.#worker.onerror = this.#handleWorkerError.bind(this);
@@ -217,6 +275,12 @@ class GameManager {
     }
 
     #queueStatePersist(state, lastTick, options = {}) {
+        // Critical guard: never queue persistence during a reset
+        if (this.#isResetting) {
+            console.warn('[GameManager] Blocking state persistence during reset operation.');
+            return;
+        }
+
         if (!state || !lastTick || state.sessionId !== this.#sessionId) {
             console.warn("Intento de guardado de estado con sessionId incorrecto. Abortando.", {
                 stateSession: state?.sessionId,
@@ -248,10 +312,28 @@ class GameManager {
         perfCollector.observeGauge('persist.debounceMs', SAVE_STATE_DEBOUNCE_MS);
     }
 
-    #flushPendingStatePersist() {
+    /**
+     * Flushes pending state persistence to localStorage.
+     * 
+     * @param {Object} [options]
+     * @param {boolean} [options.abort=false] - If true, aborts any pending persistence without saving
+     * @returns {void}
+     */
+    #flushPendingStatePersist(options = {}) {
+        const { abort = false } = options;
+        
+        // Clear timer always
         if (this.#persistTimerId !== null) {
             clearTimeout(this.#persistTimerId);
             this.#persistTimerId = null;
+        }
+
+        // If aborting, just clear the pending state and return
+        if (abort || this.#isResetting) {
+            console.log('[GameManager] Aborting pending state persistence due to reset/clear flag.');
+            this.#pendingPersistState = null;
+            this.#pendingPersistLastTick = null;
+            return;
         }
 
         const state = this.#pendingPersistState;
@@ -264,8 +346,9 @@ class GameManager {
             return;
         }
 
+        // Critical guard: never persist state from a different session
         if (state.sessionId !== this.#sessionId) {
-            console.warn("Se omitio persistencia por sessionId inconsistente.", {
+            console.warn("[GameManager] Se omitio persistencia por sessionId inconsistente.", {
                 stateSession: state.sessionId,
                 managerSession: this.#sessionId
             });
@@ -293,11 +376,11 @@ class GameManager {
             perfCollector.incrementCounter('persist.writes');
 
             if (DEBUG) {
-                console.log("Game state saved to localStorage. Session ID:", this.#sessionId);
+                console.log("[GameManager] Game state saved to localStorage. Session ID:", this.#sessionId);
                 console.log("Saved data size:", serializedData.length, "bytes.");
             }
-            } catch (e) {
-            console.error("Error saving game state to localStorage:", e);
+        } catch (e) {
+            console.error("[GameManager] Error saving game state to localStorage:", e);
             perfCollector.incrementCounter('persist.errors');
         }
     }

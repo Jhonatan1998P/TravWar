@@ -1,3 +1,7 @@
+import {
+    getOasisSpeedMultiplier,
+} from '../../core/data/constants.js';
+
 function getWeightedRandomBeast(spawnTable, randomFunc = Math.random) {
     if (!spawnTable || spawnTable.length === 0) return null;
 
@@ -52,6 +56,10 @@ function calculateOasisPressure(oasisState, currentTime, gameData) {
     return pressure;
 }
 
+function canRegenerateBeasts(tile) {
+    return tile?.type === 'oasis' && Boolean(tile.state?.beasts) && tile.state.isClearedOnce === true;
+}
+
 export function registerOasisAttack({ tile, currentTime, gameData }) {
     if (!tile || tile.type !== 'oasis' || !tile.state) return;
 
@@ -67,7 +75,7 @@ export function registerOasisAttack({ tile, currentTime, gameData }) {
     calculateOasisPressure(tile.state, currentTime, gameData);
 }
 
-export function processOasisRegeneration({ gameState, currentTime, gameData, randomFunc = Math.random }) {
+export function processOasisRegeneration({ gameState, currentTime, gameData, gameSpeed = 1, randomFunc = Math.random }) {
     const regenCycleMs = gameData.config.oasis.beastRegenCycleMinutes * 60 * 1000;
     if (currentTime - gameState.lastOasisRegenTime < regenCycleMs) {
         return;
@@ -76,12 +84,13 @@ export function processOasisRegeneration({ gameState, currentTime, gameData, ran
     const cyclesToProcess = Math.floor((currentTime - gameState.lastOasisRegenTime) / regenCycleMs);
     if (cyclesToProcess <= 0) return;
 
-    const amountPerCycle = gameData.config.oasis.beastRegenAmount;
+    const amountPerCycle = Math.floor((gameData.config.oasis.beastRegenAmount || 1) * getOasisSpeedMultiplier(gameSpeed));
     const { alpha } = getOasisPressureConfig(gameData);
 
     for (let cycle = 0; cycle < cyclesToProcess; cycle++) {
         gameState.mapData.forEach(tile => {
-            if (tile.type !== 'oasis' || !tile.state?.beasts || !tile.state.isClearedOnce) return;
+            // La regeneracion solo se desbloquea despues de la primera limpieza total.
+            if (!canRegenerateBeasts(tile)) return;
 
             const pressure = calculateOasisPressure(tile.state, currentTime, gameData);
             const regenEff = amountPerCycle * (1 - (alpha * pressure));
@@ -103,9 +112,7 @@ export function processOasisRegeneration({ gameState, currentTime, gameData, ran
                 if (!spawnInfo) continue;
 
                 const currentAmount = tile.state.beasts[beastToSpawn] || 0;
-                if (currentAmount < spawnInfo.max) {
-                    tile.state.beasts[beastToSpawn] = Math.min(spawnInfo.max, currentAmount + 1);
-                }
+                tile.state.beasts[beastToSpawn] = currentAmount + 1;
             }
         });
     }

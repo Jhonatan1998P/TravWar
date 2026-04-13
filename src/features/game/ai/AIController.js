@@ -86,6 +86,14 @@ const COMMAND_LAYER_PRIORITY = Object.freeze({
 
 const COMMAND_WINDOW_TTL_MS = 12000;
 
+const DECISION_SPEED_MIN = 1;
+const ECONOMIC_INTERVAL_MIN_MS = 1000;
+const ECONOMIC_INTERVAL_MAX_MS = 300000;
+const MILITARY_INTERVAL_MIN_MS = 30000;
+const MILITARY_INTERVAL_MAX_MS = 300000;
+const ECONOMIC_SPEED_DIVISOR = 5;
+const MILITARY_SPEED_DIVISOR = 500;
+
 const MILITARY_CONSTRUCTION_TYPES = new Set([
     'rallyPoint',
     'barracks',
@@ -192,6 +200,22 @@ function createDefaultOasisTelemetry() {
     };
 }
 
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
+function getEconomicDecisionIntervalMs(gameSpeed) {
+    const speed = Math.max(DECISION_SPEED_MIN, Number(gameSpeed) || DECISION_SPEED_MIN);
+    const rawInterval = 300000 / (speed / ECONOMIC_SPEED_DIVISOR);
+    return Math.round(clamp(rawInterval, ECONOMIC_INTERVAL_MIN_MS, ECONOMIC_INTERVAL_MAX_MS));
+}
+
+function getMilitaryDecisionIntervalMs(gameSpeed) {
+    const speed = Math.max(DECISION_SPEED_MIN, Number(gameSpeed) || DECISION_SPEED_MIN);
+    const rawInterval = 300000 / (speed / MILITARY_SPEED_DIVISOR);
+    return Math.round(clamp(rawInterval, MILITARY_INTERVAL_MIN_MS, MILITARY_INTERVAL_MAX_MS));
+}
+
 class AIController {
     _ownerId;
     _personality;
@@ -205,6 +229,7 @@ class AIController {
     _isThinkingEconomic = false;
     _isThinkingMilitary = false;
     _lastEconomicDecisionTime = 0;
+    _economicDecisionInterval;
     _lastMilitaryDecisionTime = 0;
     _militaryDecisionInterval;
     
@@ -236,10 +261,10 @@ class AIController {
         this._gameConfig = gameConfig;
 
         this._strategicAI = new StrategicAI();
-        
-        const baseInterval = this._personality.baseMilitaryInterval
-        const calculatedInterval = baseInterval / (this._gameConfig.gameSpeed || 1);
-        this._militaryDecisionInterval = Math.max(30000, Math.min(calculatedInterval, 300000));
+
+        const gameSpeed = this._gameConfig?.gameSpeed || DECISION_SPEED_MIN;
+        this._economicDecisionInterval = getEconomicDecisionIntervalMs(gameSpeed);
+        this._militaryDecisionInterval = getMilitaryDecisionIntervalMs(gameSpeed);
         
         this._actionExecutor = new AIActionExecutor(this);
         this._goalManager = (this._race === 'germans' || this._race === 'egyptians')
@@ -277,6 +302,7 @@ class AIController {
             `Oasis KPIs: npRate=${((oasisTelemetry.attackNonPositiveRate || 0) * 100).toFixed(1)}%, avgNet=${Math.round(oasisTelemetry.avgRewardNet || 0)}, loss/gross=${(oasisTelemetry.avgLossToGross || 0).toFixed(2)}, unique=${oasisTelemetry.uniqueOasesAttacked}, skipNoProfit=${oasisTelemetry.skippedCyclesNoProfitable}`,
             `Last economic decision: ${new Date(this._lastEconomicDecisionTime).toISOString()}`,
             `Last military decision: ${new Date(this._lastMilitaryDecisionTime).toISOString()}`,
+            `Economic interval: ${this._economicDecisionInterval}ms`,
             `Military interval: ${this._militaryDecisionInterval}ms`,
             `--- Goal Details ---`,
             ...Object.entries(goalInfo).map(([villageId, vState]) =>
@@ -1164,7 +1190,7 @@ class AIController {
         const myVillages = gameState.villages.filter(v => v.ownerId === this._ownerId);
         if (myVillages.length === 0) return;
 
-        if (!this._isThinkingEconomic && (now - this._lastEconomicDecisionTime >= this._personality.decisionInterval)) {
+        if (!this._isThinkingEconomic && (now - this._lastEconomicDecisionTime >= this._economicDecisionInterval)) {
             this.log('info', null, 'INICIO_CICLO_GESTION', 'Iniciando evaluacion economica y militar.');
             this._isThinkingEconomic = true;
             this._lastEconomicDecisionTime = now;

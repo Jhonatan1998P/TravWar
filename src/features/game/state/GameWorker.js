@@ -22,6 +22,7 @@ import {
     initializeAIVillageBudget,
     rebalanceAIVillageBudgets,
 } from './worker/budget.js';
+import { isUnderBeginnerProtectionByPopulation } from '../core/data/constants.js';
 
 registerWorkerDiagnostics(self);
 
@@ -31,7 +32,6 @@ const LOG_MILITARY_DETAILS = true;
 const LOG_ECONOMIC_DETAILS = true;
 
 const MAX_REPORTS = 20;
-const PROTECTION_POPULATION_THRESHOLD = 1;
 const MAX_MEMORY_ENTRIES = 200;
 const mainInterval = 500;
 
@@ -241,7 +241,7 @@ function updatePlayerProtectionStatus() {
                 .filter(v => v.ownerId === player.id)
                 .reduce((sum, v) => sum + v.population.current, 0);
 
-            if (totalPopulation >= PROTECTION_POPULATION_THRESHOLD) {
+            if (!isUnderBeginnerProtectionByPopulation(totalPopulation)) {
                 player.isUnderProtection = false;
                 _log('info', 'Protección', `El jugador ${player.id} ha perdido la protección de principiante.`);
             }
@@ -458,6 +458,7 @@ function processOasisRegeneration(currentTime) {
         gameState,
         currentTime,
         gameData,
+        gameSpeed: gameConfig?.gameSpeed || 1,
     });
 }
 

@@ -1,11 +1,20 @@
 // RUTA: js/engine/GameStateFactory.js
 import { gameData } from '../core/GameData.js';
 import { generateLayout, generateVillageCenterLayout, TEMPLATES } from '../core/LayoutManager.js';
+import {
+    getOasisSpeedMultiplier,
+    isUnderBeginnerProtectionByPopulation,
+} from '../core/data/constants.js';
 
 const MAP_SIZE = 25;
 const MIN_VILLAGE_DISTANCE = 5;
 const PLAYER_SPAWN_RADIUS = 5;
 const OASIS_DENSITY = 0.10;
+
+function getInitialOasisBeastAmount(spawnMin, gameSpeed) {
+    const speedMultiplier = getOasisSpeedMultiplier(gameSpeed);
+    return Math.max(1, Math.floor(spawnMin * speedMultiplier));
+}
 
 export class GameStateFactory {
     #config;
@@ -54,7 +63,9 @@ export class GameStateFactory {
                     isClearedOnce: false,
                     pressure: { recentAttacks: [], current: 0 },
                 };
-                oasisTypeData.beastSpawnTable.forEach(spawn => tile.state.beasts[spawn.unitId] = spawn.min);
+                oasisTypeData.beastSpawnTable.forEach(spawn => {
+                    tile.state.beasts[spawn.unitId] = getInitialOasisBeastAmount(spawn.min, this.#config.gameSpeed);
+                });
             }
         });
 
@@ -85,7 +96,7 @@ export class GameStateFactory {
                 const totalPopulation = savedState.villages
                     .filter(v => v.ownerId === player.id)
                     .reduce((sum, v) => sum + (v.population?.current || 0), 0);
-                player.isUnderProtection = totalPopulation < 500;
+                player.isUnderProtection = isUnderBeginnerProtectionByPopulation(totalPopulation);
             }
         });
         savedState.villages.forEach(village => {
@@ -147,7 +158,9 @@ export class GameStateFactory {
             if (tile.type === 'oasis' && (!tile.state || !tile.state.beasts)) {
                 const oasisTypeData = gameData.oasisTypes[tile.oasisType];
                 tile.state = { beasts: {}, isClearedOnce: false };
-                oasisTypeData.beastSpawnTable.forEach(spawn => tile.state.beasts[spawn.unitId] = spawn.min);
+                oasisTypeData.beastSpawnTable.forEach(spawn => {
+                    tile.state.beasts[spawn.unitId] = getInitialOasisBeastAmount(spawn.min, this.#config.gameSpeed);
+                });
             }
 
             if (tile.type === 'oasis' && tile.state) {
