@@ -2239,9 +2239,21 @@ function registerRecruitmentCommitFromAction({ result, phaseState, phaseId, vill
     if (!result.unitId) return;
     if (!Number.isFinite(result.timePerUnit) || result.timePerUnit <= 0) return;
 
+    const phaseKey = phaseId === GERMAN_PHASE_IDS.phase1
+        ? 'phase1'
+        : phaseId === GERMAN_PHASE_IDS.phase2
+            ? 'phase2'
+            : phaseId === GERMAN_PHASE_IDS.phase3
+                ? 'phase3'
+                : phaseId === GERMAN_PHASE_IDS.phase4
+                    ? 'phase4'
+                    : phaseId === GERMAN_PHASE_IDS.phase5
+                        ? 'phase5'
+                        : phaseId;
+
     recordGermanPhaseRecruitmentProgress({
         phaseState,
-        phaseKey: phaseId,
+        phaseKey,
         village,
         unitId: result.unitId,
         count: result.count,
@@ -2249,7 +2261,7 @@ function registerRecruitmentCommitFromAction({ result, phaseState, phaseId, vill
     });
 
     if (typeof log === 'function') {
-        const status = getGermanPhaseCycleStatus(phaseState, difficulty, phaseId);
+        const status = getGermanPhaseCycleStatus(phaseState, difficulty, phaseKey);
         const percent = status.max > 0 ? ((status.completed / status.max) * 100) : 0;
         log(
             'info',

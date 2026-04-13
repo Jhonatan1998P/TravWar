@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "perf:budget": "node perf-budget.mjs",
     "build:check": "npm run build && npm run perf:budget",
-    "ai:baseline:phase0": "node --experimental-default-type=module ai-baseline-phase0.mjs",
-    "ai:validate:phase7": "node --experimental-default-type=module ai-validation-phase7.mjs"
+    "ai:validate:egyptian-phase-engine": "node --experimental-default-type=module ai-validation-egyptian-phase-engine.mjs",
+    "ai:harness:tribus:detallado": "node --experimental-default-type=module ai-harness-tribus-detallado-es.mjs"
   },
   "dependencies": {
     "zustand": "^5.0.8"
