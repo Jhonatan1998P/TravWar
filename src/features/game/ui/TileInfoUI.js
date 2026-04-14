@@ -72,14 +72,15 @@ class TileInfoUI {
             const originVillageId = button.dataset.origin;
             const targetX = button.dataset.x;
             const targetY = button.dataset.y;
-            const playerRace = this.#gameState.players.find(p => p.id === 'player')?.race;
+            const activeVillage = this.#gameState.villages.find(v => v.id === this.#gameState.activeVillageId);
+            const perspectiveRace = this.#gameState.players.find(p => p.id === activeVillage?.ownerId)?.race;
 
-            if (!playerRace) {
-                toastUI.show('Error: No se pudo determinar la raza del jugador.', 'error');
+            if (!perspectiveRace) {
+                toastUI.show('Error: No se pudo determinar la raza de la aldea activa.', 'error');
                 return;
             }
 
-            const settlerUnit = gameData.units[playerRace].troops.find(t => t.type === 'settler');
+            const settlerUnit = gameData.units[perspectiveRace].troops.find(t => t.type === 'settler');
 
             if (!originVillageId || !targetX || !targetY || !settlerUnit) {
                 toastUI.show('Error interno al intentar fundar.', 'error');
@@ -174,12 +175,12 @@ class TileInfoUI {
         }
 
         const activeVillage = this.#gameState.villages.find(v => v.id === this.#gameState.activeVillageId);
-        const playerRace = this.#gameState.players.find(p => p.id === 'player')?.race;
-        if (!playerRace) {
-            return { main, footer: '<p class="col-span-2 text-center text-red-500">Error: No se pudo encontrar la raza del jugador.</p>' };
+        const perspectiveRace = this.#gameState.players.find(p => p.id === activeVillage?.ownerId)?.race;
+        if (!activeVillage || !perspectiveRace) {
+            return { main, footer: '<p class="col-span-2 text-center text-red-500">Error: No se pudo encontrar la aldea activa o su raza.</p>' };
         }
         
-        const settlerUnit = gameData.units[playerRace].troops.find(t => t.type === 'settler');
+        const settlerUnit = gameData.units[perspectiveRace].troops.find(t => t.type === 'settler');
         const settlersRequired = settlementConfig.settlersRequired;
         
         const canFound = activeVillage && settlerUnit && (activeVillage.unitsInVillage[settlerUnit.id] || 0) >= settlersRequired;
@@ -242,7 +243,9 @@ class TileInfoUI {
         if (!village) return { main: '', footer: '' };
         
         const owner = this.#gameState.players.find(p => p.id === village.ownerId);
-        const ownerName = data.ownerId === 'player' ? 'Tú' : `IA (${data.race})`;
+        const activeVillage = this.#gameState.villages.find(v => v.id === this.#gameState.activeVillageId);
+        const perspectiveOwnerId = activeVillage?.ownerId || 'player';
+        const ownerName = data.ownerId === perspectiveOwnerId ? 'Tú' : `IA (${data.race})`;
         const raceName = gameData.units[data.race]?.name || 'Desconocida';
         const isProtected = owner && owner.isUnderProtection;
 
@@ -260,18 +263,22 @@ class TileInfoUI {
                       </ul>`;
 
         let footer = '';
-        const activeVillage = this.#gameState.villages.find(v => v.id === this.#gameState.activeVillageId);
         const canSendTroops = activeVillage && Object.values(activeVillage.unitsInVillage).some(count => count > 0);
-        const canSendMerchants = data.ownerId === 'player' && village.id !== activeVillage.id && activeVillage.buildings.some(b => b.type === 'marketplace' && b.level > 0);
+        const canSendMerchants = Boolean(
+            activeVillage
+            && data.ownerId === perspectiveOwnerId
+            && village.id !== activeVillage.id
+            && activeVillage.buildings.some(b => b.type === 'marketplace' && b.level > 0),
+        );
         
-        const attackIsDisabled = !canSendTroops || (isProtected && data.ownerId !== 'player');
+        const attackIsDisabled = !canSendTroops || (isProtected && data.ownerId !== perspectiveOwnerId);
         const sendTroopsDisabledAttr = attackIsDisabled ? 'disabled' : '';
         const sendMerchantsDisabled = canSendMerchants ? '' : 'disabled';
         
         footer = `<button data-action="send-troops" class="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed" ${sendTroopsDisabledAttr}>Enviar Movimiento</button>
                   <button data-action="send-merchants" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed" ${sendMerchantsDisabled}>Enviar Recursos</button>`;
         
-        if (attackIsDisabled && isProtected && data.ownerId !== 'player') {
+        if (attackIsDisabled && isProtected && data.ownerId !== perspectiveOwnerId) {
              footer += `<p class="col-span-2 text-center text-xs text-sky-400 mt-2">Este jugador está bajo protección de principiante.</p>`;
         }
 

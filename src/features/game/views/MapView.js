@@ -554,6 +554,9 @@ class MapView {
     }
 
     _drawTileTerrain(ctx, px, py, tileData, useLowDetail) {
+        const activeVillage = this.#gameState?.villages?.find(village => village.id === this.#gameState?.activeVillageId);
+        const perspectiveOwnerId = activeVillage?.ownerId || 'player';
+
         let bgColor = '#2D3748';
         if (!tileData || tileData.type === 'valley') {
             bgColor = '#6B4F4B';
@@ -568,7 +571,7 @@ class MapView {
             let detailColor = null;
             if (tileData) {
                 if (tileData.type === 'village') {
-                    detailColor = tileData.ownerId === 'player' ? '#48BB78' : '#E53E3E';
+                    detailColor = tileData.ownerId === perspectiveOwnerId ? '#48BB78' : '#E53E3E';
                 } else if (tileData.type === 'oasis') {
                     const oasisDetails = gameData.oasisTypes[tileData.oasisType];
                     const resourceType = oasisDetails.bonus.resource;
@@ -584,6 +587,9 @@ class MapView {
     }
 
     _drawTileDetails(ctx, px, py, tileData) {
+        const activeVillage = this.#gameState?.villages?.find(village => village.id === this.#gameState?.activeVillageId);
+        const perspectiveOwnerId = activeVillage?.ownerId || 'player';
+
         ctx.lineWidth = 1;
         let borderColor = null;
         let icon = null;
@@ -608,7 +614,7 @@ class MapView {
             const village = this.#gameState.villages.find(v => v.id === tileData.villageId);
             icon = this.#assets.village;
 
-            if (tileData.ownerId === 'player') {
+            if (tileData.ownerId === perspectiveOwnerId) {
                 borderColor = (village && village.id === this.#gameState.activeVillageId) ? '#FFFFFF' : '#48BB78';
             } else {
                 borderColor = '#E53E3E';

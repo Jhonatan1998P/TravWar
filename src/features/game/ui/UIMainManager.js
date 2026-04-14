@@ -199,7 +199,9 @@ class UIMainManager {
 
     #updateUnreadBadge(state) {
         if (!this.#unreadBadge) return;
-        const count = state.unreadCounts?.player || 0;
+        const activeVillage = state.villages?.find(v => v.id === state.activeVillageId);
+        const perspectiveOwnerId = activeVillage?.ownerId || 'player';
+        const count = state.unreadCounts?.[perspectiveOwnerId] || 0;
         if (count > 0) {
             this.#unreadBadge.textContent = count > 9 ? '9+' : count;
             this.#unreadBadge.classList.remove('hidden');

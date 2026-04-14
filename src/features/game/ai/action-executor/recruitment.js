@@ -7,6 +7,7 @@ const PHASE_BATCH_CONFIG = {
     late: { basePct: 0.45, min: 20, max: 140 },
 };
 const RECRUITMENT_CYCLE_MS = 3 * 60 * 1000;
+const SIEGE_TARGET_RAM_RATIO = 0.7;
 
 function getTotalUnitCountAcrossVillages(villages, unitId) {
     if (!unitId) return 0;
@@ -26,6 +27,53 @@ function getVillagesForGoalScope(allVillages, currentVillage, goalScope) {
         return [currentVillage];
     }
     return allVillages;
+}
+
+function getUnitsCountByIdsAcrossVillages(villages, unitIds) {
+    if (!Array.isArray(unitIds) || unitIds.length === 0) return 0;
+    return unitIds.reduce((sum, unitId) => sum + getTotalUnitCountAcrossVillages(villages, unitId), 0);
+}
+
+function getSiegeBalancerUnitId({ race, scopedVillages, resolveUnitId, fallbackUnitId }) {
+    const raceTroops = gameData.units[race]?.troops || [];
+    if (raceTroops.length === 0) return fallbackUnitId;
+
+    const ramUnitId = resolveUnitId('ram');
+    const catapultUnitId = resolveUnitId('catapult');
+    if (!ramUnitId || !catapultUnitId) return fallbackUnitId;
+
+    const currentRams = getUnitsCountByIdsAcrossVillages(scopedVillages, [ramUnitId]);
+    const currentCatapults = getUnitsCountByIdsAcrossVillages(scopedVillages, [catapultUnitId]);
+    const nextTotal = currentRams + currentCatapults + 1;
+
+    const ramRatioIfRam = (currentRams + 1) / nextTotal;
+    const ramRatioIfCatapult = currentRams / nextTotal;
+    const errorIfRam = Math.abs(ramRatioIfRam - SIEGE_TARGET_RAM_RATIO);
+    const errorIfCatapult = Math.abs(ramRatioIfCatapult - SIEGE_TARGET_RAM_RATIO);
+
+    if (errorIfRam < errorIfCatapult) return ramUnitId;
+    if (errorIfCatapult < errorIfRam) return catapultUnitId;
+    return fallbackUnitId || ramUnitId;
+}
+
+function resolveRecruitmentUnitId({ step, race, resolveUnitId, scopedVillages }) {
+    const requestedUnitId = resolveUnitId(step.unitType);
+    if (!requestedUnitId) return undefined;
+
+    const raceTroops = gameData.units[race]?.troops || [];
+    const requestedUnit = raceTroops.find(unit => unit.id === requestedUnitId);
+    if (!requestedUnit) return requestedUnitId;
+
+    const wantsSiegeByIdentifier = step.unitType === 'ram' || step.unitType === 'catapult' || step.unitType === 'siege';
+    const wantsSiegeByRole = requestedUnit.role === 'ram' || requestedUnit.role === 'catapult';
+    if (!wantsSiegeByIdentifier && !wantsSiegeByRole) return requestedUnitId;
+
+    return getSiegeBalancerUnitId({
+        race,
+        scopedVillages,
+        resolveUnitId,
+        fallbackUnitId: requestedUnitId,
+    });
 }
 
 function clamp(value, min, max) {
@@ -229,7 +277,15 @@ export function manageRecruitmentForGoal({
     goalScope,
     gameSpeed = 1,
 }) {
-    const unitId = resolveUnitId(step.unitType);
+    const allVillages = gameState.villages.filter(candidate => candidate.ownerId === ownerId);
+    const scopedVillages = getVillagesForGoalScope(allVillages, village, goalScope);
+
+    const unitId = resolveRecruitmentUnitId({
+        step,
+        race,
+        resolveUnitId,
+        scopedVillages,
+    });
     if (!unitId) return { success: false, reason: 'INVALID_UNIT_ID' };
 
     const unitData = gameData.units[race].troops.find(troop => troop.id === unitId);
@@ -241,8 +297,6 @@ export function manageRecruitmentForGoal({
         return { success: false, reason: 'PREREQUISITES_NOT_MET', building: trainingBuildingType };
     }
 
-    const allVillages = gameState.villages.filter(candidate => candidate.ownerId === ownerId);
-    const scopedVillages = getVillagesForGoalScope(allVillages, village, goalScope);
     const unitsOwned = getTotalUnitCountAcrossVillages(scopedVillages, unitId);
 
     const queueTargetMinutes = Number.isFinite(step.queueTargetMinutes)

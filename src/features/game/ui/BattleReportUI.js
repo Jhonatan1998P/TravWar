@@ -124,6 +124,8 @@ class BattleReportUI {
         const date = new Date(report.time).toLocaleString();
         let title = 'Informe del Sistema';
         let titleColorClass = 'text-yellow-300';
+        const activeVillage = this.#gameState?.villages?.find(village => village.id === this.#gameState?.activeVillageId);
+        const perspectiveOwnerId = activeVillage?.ownerId || 'player';
     
         if (report.type === 'settlement_success') {
             title = 'Fundación de Aldea Exitosa';
@@ -139,9 +141,9 @@ class BattleReportUI {
     
             title = `${missionType} de ${attackerName} a ${defenderName}`;
             
-            const isPlayerAttacker = report.attacker.ownerId === 'player';
+            const isPerspectiveAttacker = report.attacker.ownerId === perspectiveOwnerId;
             if (report.type.includes('espionage')) {
-                if (isPlayerAttacker) {
+                if (isPerspectiveAttacker) {
                     const totalLosses = Object.values(report.attacker.losses || {}).reduce((s, v) => s + v, 0);
                     const totalTroops = Object.values(report.attacker.troops || {}).reduce((s, v) => s + v, 0);
                     if (totalLosses === 0) titleColorClass = 'text-green-400';
@@ -152,7 +154,7 @@ class BattleReportUI {
                 }
             } else if (report.summary) {
                 const didAttackerWin = report.winner === report.attacker.playerName;
-                if (isPlayerAttacker) {
+                if (isPerspectiveAttacker) {
                     const hadLosses = Object.keys(report.attacker.losses || {}).length > 0;
                     if (didAttackerWin) {
                         titleColorClass = hadLosses ? 'text-yellow-300' : 'text-green-400';
@@ -160,12 +162,12 @@ class BattleReportUI {
                         titleColorClass = 'text-red-400';
                     }
                 } else {
-                    const playerContingent = report.defender.contingents.find(c => c.ownerId === 'player');
-                    const playerHasLosses = playerContingent && playerContingent.losses && Object.keys(playerContingent.losses).length > 0;
+                    const perspectiveContingent = report.defender.contingents.find(c => c.ownerId === perspectiveOwnerId);
+                    const perspectiveHasLosses = perspectiveContingent && perspectiveContingent.losses && Object.keys(perspectiveContingent.losses).length > 0;
                     if (didAttackerWin) {
                         titleColorClass = 'text-red-400';
                     } else {
-                        titleColorClass = playerHasLosses ? 'text-yellow-300' : 'text-green-400';
+                        titleColorClass = perspectiveHasLosses ? 'text-yellow-300' : 'text-green-400';
                     }
                 }
             }

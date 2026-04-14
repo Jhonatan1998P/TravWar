@@ -85,7 +85,12 @@ class ReportListUI {
         return `${missionType} de ${attackerName}`;
     }
 
-    #analyzeReportForPlayer(report) {
+    #getPerspectiveOwnerId(state = this.#gameState) {
+        const activeVillage = state?.villages?.find(village => village.id === state?.activeVillageId);
+        return activeVillage?.ownerId || 'player';
+    }
+
+    #analyzeReportForPlayer(report, perspectiveOwnerId) {
         const result = { icon: '', titleColorClass: 'text-white' };
         if (!report) return result;
 
@@ -97,11 +102,11 @@ class ReportListUI {
 
         if (!report.attacker || !report.defender) return result;
 
-        const isPlayerAttacker = report.attacker.ownerId === 'player';
+        const isPerspectiveAttacker = report.attacker.ownerId === perspectiveOwnerId;
 
         if (report.type.includes('espionage')) {
             result.icon = ICONS.espionage;
-            if (isPlayerAttacker) {
+            if (isPerspectiveAttacker) {
                 const totalLosses = Object.values(report.attacker.losses || {}).reduce((sum, value) => sum + value, 0);
                 const totalTroops = Object.values(report.attacker.troops || {}).reduce((sum, value) => sum + value, 0);
                 if (totalLosses === 0) result.titleColorClass = 'text-green-400';
@@ -117,7 +122,7 @@ class ReportListUI {
 
         const didAttackerWin = report.winner === report.attacker.playerName;
 
-        if (isPlayerAttacker) {
+        if (isPerspectiveAttacker) {
             result.icon = ICONS.attack;
             const losses = report.attacker.losses || {};
             const hadLosses = Object.keys(losses).length > 0;
@@ -129,8 +134,8 @@ class ReportListUI {
             }
         } else {
             result.icon = ICONS.defense;
-            const playerContingent = report.defender.contingents.find(contingent => contingent.ownerId === 'player');
-            const hadLosses = playerContingent && playerContingent.losses && Object.keys(playerContingent.losses).length > 0;
+            const perspectiveContingent = report.defender.contingents.find(contingent => contingent.ownerId === perspectiveOwnerId);
+            const hadLosses = perspectiveContingent && perspectiveContingent.losses && Object.keys(perspectiveContingent.losses).length > 0;
 
             if (didAttackerWin) {
                 result.titleColorClass = 'text-red-400';
@@ -168,7 +173,7 @@ class ReportListUI {
             return;
         }
 
-        const totalReports = this.#getPlayerReports(this.#gameState).length;
+        const totalReports = this.#getPerspectiveReports(this.#gameState).length;
         const totalPages = Math.ceil(totalReports / this.#reportsPerPage);
 
         if (pageButton.dataset.page === 'prev') {
@@ -211,9 +216,10 @@ class ReportListUI {
         this.#paginationContainer.replaceChildren(fragment);
     }
 
-    #getPlayerReports(state) {
+    #getPerspectiveReports(state) {
         if (!state || !state.reports) return [];
-        return state.reports.filter(report => report.ownerId === 'player');
+        const perspectiveOwnerId = this.#getPerspectiveOwnerId(state);
+        return state.reports.filter(report => report.ownerId === perspectiveOwnerId);
     }
 
     #createReportNode() {
@@ -252,9 +258,9 @@ class ReportListUI {
         return item;
     }
 
-    #updateReportNode(node, report, isUnread) {
+    #updateReportNode(node, report, isUnread, perspectiveOwnerId) {
         const refs = node.__refs;
-        const { icon, titleColorClass } = this.#analyzeReportForPlayer(report);
+        const { icon, titleColorClass } = this.#analyzeReportForPlayer(report, perspectiveOwnerId);
         const title = this.#getReportTitle(report);
         const date = new Date(report.time).toLocaleString('es-ES', {
             day: '2-digit',
@@ -278,25 +284,31 @@ class ReportListUI {
         if (!this.#container || !state) return;
         this.#gameState = state;
 
-        const playerReports = this.#getPlayerReports(state);
+        const perspectiveOwnerId = this.#getPerspectiveOwnerId(state);
+        const perspectiveReports = this.#getPerspectiveReports(state);
 
-        if (playerReports.length === 0) {
+        if (perspectiveReports.length === 0) {
             this.#emptyState.classList.remove('hidden');
             reconcileList(this.#list, [], report => report.id, this.#reportNodes, () => null, () => {});
             this.#paginationContainer.replaceChildren();
             return;
         }
 
-        const totalPages = Math.ceil(playerReports.length / this.#reportsPerPage);
+        const totalPages = Math.ceil(perspectiveReports.length / this.#reportsPerPage);
         if (this.#currentPage > totalPages) {
             this.#currentPage = totalPages > 0 ? totalPages : 1;
         }
 
         const startIndex = (this.#currentPage - 1) * this.#reportsPerPage;
         const endIndex = startIndex + this.#reportsPerPage;
-        const pagedReports = playerReports.slice(startIndex, endIndex);
+        const pagedReports = perspectiveReports.slice(startIndex, endIndex);
 
-        const unreadCount = state.unreadCounts?.player || 0;
+        const unreadCount = state.unreadCounts?.[perspectiveOwnerId] || 0;
+        const unreadIds = new Set(
+            perspectiveReports
+                .slice(0, unreadCount)
+                .map(report => report.id),
+        );
 
         this.#emptyState.classList.add('hidden');
 
@@ -307,13 +319,12 @@ class ReportListUI {
             this.#reportNodes,
             () => this.#createReportNode(),
             (node, report) => {
-                const reportIndex = state.reports.findIndex(currentReport => currentReport.id === report.id);
-                const isUnread = reportIndex > -1 && reportIndex < unreadCount;
-                this.#updateReportNode(node, report, isUnread);
+                const isUnread = unreadIds.has(report.id);
+                this.#updateReportNode(node, report, isUnread, perspectiveOwnerId);
             }
         );
 
-        this.#renderPagination(playerReports.length);
+        this.#renderPagination(perspectiveReports.length);
     }
 }
 

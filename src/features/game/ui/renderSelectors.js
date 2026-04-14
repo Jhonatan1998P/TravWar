@@ -52,7 +52,9 @@ export function selectVillageListSignature(payload) {
 
 export function selectUnreadPlayerReports(payload) {
     const state = getState(payload);
-    return state?.unreadCounts?.player || 0;
+    const activeVillage = getActiveVillage(state);
+    const ownerId = activeVillage?.ownerId || 'player';
+    return state?.unreadCounts?.[ownerId] || 0;
 }
 
 export function selectReportsSignature(payload) {

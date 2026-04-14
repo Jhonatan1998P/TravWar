@@ -2,6 +2,13 @@ import { RESOURCE_FIELD_BUILDING_TYPES } from '../../core/data/constants.js';
 import { getBuildingLevelData, getRaceTroops } from '../../core/data/lookups.js';
 import { rebalanceVillageBudgetToRatio } from '../../state/worker/budget.js';
 import { countCombatTroopsInVillages } from '../utils/AITroopUtils.js';
+import {
+    buildPrerequisiteResolverStepFromBlock,
+    clonePhaseStep,
+    getPhaseStepQueueType,
+    isRecoverablePhaseBlockReason,
+    runPriorityStepList,
+} from './phase-engine-common.js';
 
 export const GERMAN_PHASE_IDS = Object.freeze({
     phase1: 'german_phase_1_economic_bootstrap',
@@ -225,15 +232,6 @@ const SUBGOAL_KIND = Object.freeze({
     waitQueue: 'wait_queue',
     waitResources: 'wait_resources',
 });
-
-const RECOVERABLE_BLOCK_REASONS = new Set([
-    'PREREQUISITES_NOT_MET',
-    'RESEARCH_REQUIRED',
-    'INSUFFICIENT_RESOURCES',
-    'QUEUE_FULL',
-    'EXPANSION_BUILDING_LOW_LEVEL',
-    'EXPANSION_SLOTS_FULL',
-]);
 
 const MILITARY_CONSTRUCTION_TYPES = new Set([
     'rallyPoint',
@@ -733,8 +731,7 @@ function getStepCostEstimate(village, step) {
 }
 
 function cloneStep(step) {
-    if (!step || typeof step !== 'object') return null;
-    return { ...step };
+    return clonePhaseStep(step);
 }
 
 function getStepSignature(step) {
@@ -769,7 +766,7 @@ function getRetryIntervalMs(gameSpeed) {
 }
 
 function isRecoverableBlockReason(reason) {
-    return RECOVERABLE_BLOCK_REASONS.has(reason);
+    return isRecoverablePhaseBlockReason(reason);
 }
 
 function runStepList({
@@ -779,39 +776,13 @@ function runStepList({
     shouldAttemptStep = null,
     stopOnRecoverableBlock = false,
 }) {
-    let firstBlocking = null;
-
-    for (const step of steps) {
-        if (typeof shouldAttemptStep === 'function' && !shouldAttemptStep(step)) {
-            continue;
-        }
-
-        const result = executeStep(step) || { success: false, reason: 'UNKNOWN_ERROR' };
-        const enriched = {
-            ...result,
-            step: cloneStep(step),
-        };
-
-        if (enriched.success || enriched.reason === 'QUEUE_FULL') {
-            return enriched;
-        }
-
-        if (isRecoverableBlockReason(enriched.reason)) {
-            if (!firstBlocking) {
-                firstBlocking = enriched;
-            }
-
-            if (stopOnRecoverableBlock) {
-                return enriched;
-            }
-        }
-    }
-
-    if (firstBlocking) {
-        return firstBlocking;
-    }
-
-    return { success: false, reason: noActionReason };
+    return runPriorityStepList({
+        steps,
+        executeStep,
+        noActionReason,
+        shouldAttemptStep,
+        stopOnRecoverableBlock,
+    });
 }
 
 function isMilitaryConstructionStep(step) {
@@ -927,12 +898,7 @@ function getBlockedStepPriorityClass(phaseId, step) {
 }
 
 function getQueueTypeForStep(step) {
-    if (!step) return 'unknown';
-    if (step.type === 'building' || step.type === 'resource_fields_level') return 'construction';
-    if (step.type === 'research') return 'research';
-    if (step.type === 'upgrade') return 'smithy';
-    if (step.type === 'units' || step.type === 'proportional_units') return 'recruitment';
-    return 'unknown';
+    return getPhaseStepQueueType(step);
 }
 
 function isQueueAvailable(village, queueType) {
@@ -1010,54 +976,12 @@ function hasEstimatedResourcesForStep(village, step) {
     return true;
 }
 
-function getNextExpansionPalaceLevel(village) {
-    const current = getEffectiveBuildingTypeLevel(village, 'palace');
-    if (current < 10) return 10;
-    if (current < 15) return 15;
-    if (current < 20) return 20;
-    return 20;
-}
-
 function buildPrerequisiteSubGoalStep(village, blockedResult) {
-    const required = blockedResult?.details?.required;
-    if (required && typeof required === 'object') {
-        const [buildingType, level] = Object.entries(required)[0] || [];
-        if (buildingType) {
-            return {
-                type: 'building',
-                buildingType,
-                level: Number(level) || 1,
-            };
-        }
-    }
-
-    if (typeof blockedResult?.building === 'string') {
-        return {
-            type: 'building',
-            buildingType: blockedResult.building,
-            level: 1,
-        };
-    }
-
-    if (blockedResult?.reason === 'EXPANSION_BUILDING_LOW_LEVEL' || blockedResult?.reason === 'EXPANSION_SLOTS_FULL') {
-        return {
-            type: 'building',
-            buildingType: 'palace',
-            level: getNextExpansionPalaceLevel(village),
-        };
-    }
-
-    if (blockedResult?.reason === 'RESEARCH_REQUIRED') {
-        const unitId = blockedResult?.details?.unitId || blockedResult?.unitId;
-        if (!unitId) return null;
-        return {
-            type: 'research',
-            unitType: unitId,
-            unitId,
-        };
-    }
-
-    return null;
+    return buildPrerequisiteResolverStepFromBlock({
+        village,
+        blockedResult,
+        getEffectiveBuildingLevel: getEffectiveBuildingTypeLevel,
+    });
 }
 
 function resolveResearchUnitId(actionExecutor, identifier) {
@@ -1301,7 +1225,7 @@ function processActiveSubGoal({
         return { handled: true };
     }
 
-    if (result.reason === 'PREREQUISITES_NOT_MET' || result.reason === 'RESEARCH_REQUIRED' || result.reason === 'EXPANSION_BUILDING_LOW_LEVEL' || result.reason === 'EXPANSION_SLOTS_FULL') {
+    if (isRecoverableBlockReason(result.reason)) {
         const nestedResolver = buildPrerequisiteSubGoalStep(village, {
             ...result,
             step: resolverStep,
@@ -2055,9 +1979,32 @@ function tryPhaseFourFallbackRecruitment({ village, gameState, actionExecutor })
     });
 }
 
+function shouldPreferConquestExpansion(village) {
+    const palaceLevel = getEffectiveBuildingTypeLevel(village, 'palace');
+    const workshopLevel = getEffectiveBuildingTypeLevel(village, 'workshop');
+    const raceTroops = getRaceTroops(village.race || 'germans');
+
+    const offensiveAndSiegeIds = raceTroops
+        .filter(unit => unit.role === 'offensive' || unit.role === 'ram' || unit.role === 'catapult')
+        .map(unit => unit.id);
+
+    const offensiveAndSiegeCount = offensiveAndSiegeIds.reduce(
+        (sum, unitId) => sum + getTotalUnitCountInVillageAndQueue(village, unitId),
+        0,
+    );
+
+    return palaceLevel >= PHASE_FIVE_PRIORITY.palaceTargetLevel
+        && workshopLevel >= PHASE_FIVE_PRIORITY.workshopTargetLevel
+        && offensiveAndSiegeCount >= 250;
+}
+
 function tryPhaseFivePriorityRecruitment({ village, gameState, actionExecutor }) {
     const raceTroops = getRaceTroops(village.race || 'germans');
     const chiefUnitId = raceTroops.find(unit => unit.type === 'chief')?.id || 'chief_german';
+    const preferConquest = shouldPreferConquestExpansion(village);
+    const expansionUnitPriority = preferConquest
+        ? [chiefUnitId, 'settler']
+        : ['settler', chiefUnitId];
 
     const steps = [];
 
@@ -2073,7 +2020,7 @@ function tryPhaseFivePriorityRecruitment({ village, gameState, actionExecutor })
         steps.push({ type: 'research', unitType: 'offensive_cavalry' });
     }
 
-    if (shouldEnqueueResearch(village, actionExecutor, chiefUnitId)) {
+    if (preferConquest && shouldEnqueueResearch(village, actionExecutor, chiefUnitId)) {
         steps.push({ type: 'research', unitType: chiefUnitId });
     }
 
@@ -2108,18 +2055,12 @@ function tryPhaseFivePriorityRecruitment({ village, gameState, actionExecutor })
             countMode: 'queue_cycles',
             queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5,
         },
-        {
+        ...expansionUnitPriority.map(unitType => ({
             type: 'units',
-            unitType: 'settler',
+            unitType,
             countMode: 'queue_cycles',
             queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5,
-        },
-        {
-            type: 'units',
-            unitType: chiefUnitId,
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5,
-        },
+        })),
     );
 
     return runStepList({
@@ -2132,6 +2073,10 @@ function tryPhaseFivePriorityRecruitment({ village, gameState, actionExecutor })
 function tryPhaseFiveFallbackRecruitment({ village, gameState, actionExecutor }) {
     const raceTroops = getRaceTroops(village.race || 'germans');
     const chiefUnitId = raceTroops.find(unit => unit.type === 'chief')?.id || 'chief_german';
+    const preferConquest = shouldPreferConquestExpansion(village);
+    const expansionUnitPriority = preferConquest
+        ? [chiefUnitId, 'settler']
+        : ['settler', chiefUnitId];
 
     const steps = [
         { type: 'units', unitType: 'offensive_infantry', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
@@ -2139,8 +2084,7 @@ function tryPhaseFiveFallbackRecruitment({ village, gameState, actionExecutor })
         { type: 'units', unitType: 'ram', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
         { type: 'units', unitType: 'catapult', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
         { type: 'units', unitType: 'scout', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
-        { type: 'units', unitType: 'settler', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
-        { type: 'units', unitType: chiefUnitId, countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
+        ...expansionUnitPriority.map(unitType => ({ type: 'units', unitType, countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 })),
     ];
 
     return runStepList({

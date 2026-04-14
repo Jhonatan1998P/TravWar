@@ -20,6 +20,7 @@ import {
 import {
     createDefaultEgyptianPhaseState,
     EGYPTIAN_PHASE_IDS,
+    getEgyptianPhaseCycleStatus,
     hydrateEgyptianPhaseState,
     runEgyptianEconomicPhaseCycle,
     serializeEgyptianPhaseStates,
@@ -170,6 +171,16 @@ function getStageFromPhaseId(phaseId) {
 function getPhaseLabel(race, phaseId) {
     const labels = PHASE_LABELS_BY_RACE[race] || {};
     return labels[phaseId] || 'Fase no definida';
+}
+
+function getEgyptianPhaseKey(phaseId) {
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase1) return 'phase1';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase2) return 'phase2';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase3) return 'phase3';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase4) return 'phase4';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase5) return 'phase5';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase6) return 'phase6';
+    return null;
 }
 
 function createDefaultOasisTelemetry() {
@@ -354,7 +365,7 @@ class AIController {
     handleGameNotification(notification, gameState) {
         this._lastKnownGameState = gameState;
 
-        if (this._race !== 'germans' || !notification || !notification.type) {
+        if ((this._race !== 'germans' && this._race !== 'egyptians') || !notification || !notification.type) {
             return;
         }
 
@@ -366,32 +377,52 @@ class AIController {
         const village = gameState?.villages?.find(candidate => candidate.id === payload.villageId);
         if (!village) return;
 
-        const phaseState = this._germanPhaseStates.get(village.id);
+        if (this._race === 'germans') {
+            const phaseState = this._germanPhaseStates.get(village.id);
+            if (!phaseState || !phaseState.activePhaseId) return;
+
+            const phaseKey = phaseState.activePhaseId;
+            if (!phaseKey || phaseKey === GERMAN_PHASE_IDS.phaseDone || phaseKey === GERMAN_PHASE_IDS.phase1) return;
+
+            const cycleStatus = getGermanPhaseCycleStatus(phaseState, this._difficulty, phaseKey);
+            const detailMap = [
+                ['offensiveInfantry', 'ofInf'],
+                ['offensiveCavalry', 'ofCav'],
+                ['defensiveInfantry', 'defInf'],
+                ['scout', 'scout'],
+                ['ram', 'ram'],
+                ['catapult', 'cata'],
+                ['expansion', 'exp'],
+            ];
+            const detail = detailMap
+                .filter(([key]) => (cycleStatus.targets?.[key] || 0) > 0)
+                .map(([key, label]) => `${label}:${cycleStatus.cycles?.[key] || 0}/${cycleStatus.targets?.[key] || 0}`)
+                .join(' | ');
+
+            this.log(
+                'info',
+                village,
+                'Macro Reclutamiento',
+                `Ciclos fase actual: ${cycleStatus.completed}/${cycleStatus.max} (${cycleStatus.max > 0 ? ((cycleStatus.completed / cycleStatus.max) * 100).toFixed(1) : '0.0'}%)${detail ? ` | ${detail}` : ''}.`,
+                null,
+                'economic',
+            );
+            return;
+        }
+
+        const phaseState = this._egyptianPhaseStates.get(village.id);
         if (!phaseState || !phaseState.activePhaseId) return;
+        if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phaseDone) return;
 
-        const phaseKey = phaseState.activePhaseId;
-        if (!phaseKey || phaseKey === GERMAN_PHASE_IDS.phaseDone || phaseKey === GERMAN_PHASE_IDS.phase1) return;
+        const phaseKey = getEgyptianPhaseKey(phaseState.activePhaseId);
+        if (!phaseKey) return;
 
-        const cycleStatus = getGermanPhaseCycleStatus(phaseState, this._difficulty, phaseKey);
-        const detailMap = [
-            ['offensiveInfantry', 'ofInf'],
-            ['offensiveCavalry', 'ofCav'],
-            ['defensiveInfantry', 'defInf'],
-            ['scout', 'scout'],
-            ['ram', 'ram'],
-            ['catapult', 'cata'],
-            ['expansion', 'exp'],
-        ];
-        const detail = detailMap
-            .filter(([key]) => (cycleStatus.targets?.[key] || 0) > 0)
-            .map(([key, label]) => `${label}:${cycleStatus.cycles?.[key] || 0}/${cycleStatus.targets?.[key] || 0}`)
-            .join(' | ');
-
+        const cycleStatus = getEgyptianPhaseCycleStatus(phaseState, this._difficulty, phaseKey);
         this.log(
             'info',
             village,
             'Macro Reclutamiento',
-            `Ciclos fase actual: ${cycleStatus.completed}/${cycleStatus.max} (${cycleStatus.max > 0 ? ((cycleStatus.completed / cycleStatus.max) * 100).toFixed(1) : '0.0'}%)${detail ? ` | ${detail}` : ''}.`,
+            `Ciclos fase actual: ${cycleStatus.completed}/${cycleStatus.max} (${cycleStatus.max > 0 ? ((cycleStatus.completed / cycleStatus.max) * 100).toFixed(1) : '0.0'}%).`,
             null,
             'economic',
         );
@@ -1243,6 +1274,7 @@ class AIController {
                             gameState,
                             phaseState,
                             difficulty: this._difficulty,
+                            gameSpeed: this._gameConfig?.gameSpeed || 1,
                             villageCombatState: this.getVillageCombatState(village.id),
                             actionExecutor: this._actionExecutor,
                             log: this.log.bind(this),

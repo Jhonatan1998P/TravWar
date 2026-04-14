@@ -1,13 +1,19 @@
 import { getRaceTroops } from '../../core/data/lookups.js';
 import { rebalanceVillageBudgetToRatio, BUDGET_REBALANCE_INTERVAL_GAME_MS } from '../../state/worker/budget.js';
+import { resolveUnitIdForRace } from '../utils/AIUnitUtils.js';
 import {
+    buildPrerequisiteResolverStepFromBlock,
+    clonePhaseStep,
     createPhaseTransition,
     getAverageResourceFieldLevel,
     getBuildingTypeLevel,
     getDifficultyTemplate,
     getEffectiveBuildingTypeLevel,
+    getPhaseStepQueueType,
     getQueueUptime,
     getUnitCountInVillageAndQueue,
+    isRecoverablePhaseBlockReason,
+    runPriorityStepList,
 } from './phase-engine-common.js';
 
 export const EGYPTIAN_PHASE_IDS = Object.freeze({
@@ -97,6 +103,42 @@ const RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG = Object.freeze({
     phase6: 5,
 });
 
+const TRAINING_CYCLE_MS = 3 * 60 * 1000;
+
+const PHASE_CYCLE_TARGETS_BY_DIFFICULTY = Object.freeze({
+    Normal: {
+        phase1: { total: 12 },
+        phase2: { total: 20 },
+        phase3: { total: 30 },
+        phase4: { total: 40 },
+        phase5: { total: 52 },
+        phase6: { total: 64 },
+    },
+    Dificil: {
+        phase1: { total: 16 },
+        phase2: { total: 26 },
+        phase3: { total: 38 },
+        phase4: { total: 50 },
+        phase5: { total: 64 },
+        phase6: { total: 78 },
+    },
+    Pesadilla: {
+        phase1: { total: 20 },
+        phase2: { total: 32 },
+        phase3: { total: 46 },
+        phase4: { total: 60 },
+        phase5: { total: 76 },
+        phase6: { total: 92 },
+    },
+});
+
+const DEFERRED_SUBGOAL_BLOCK_REASONS = new Set([
+    'PREREQUISITES_NOT_MET',
+    'RESEARCH_REQUIRED',
+    'EXPANSION_BUILDING_LOW_LEVEL',
+    'EXPANSION_SLOTS_FULL',
+]);
+
 const THREAT_MEDIUM_ALLOWED_CONSTRUCTION_TYPES = new Set([
     'warehouse',
     'granary',
@@ -144,9 +186,470 @@ const THREAT_LEVEL_BOOST = Object.freeze({
 const PHASE_IDLE_LOG_MS = 20_000;
 const EXPANSION_CHECK_MS = 25_000;
 
+const SUBGOAL_KIND = Object.freeze({
+    buildPrerequisite: 'build_prerequisite',
+    researchPrerequisite: 'research_prerequisite',
+    waitQueue: 'wait_queue',
+    waitResources: 'wait_resources',
+});
+
+const PHASE_SUBGOAL = Object.freeze({
+    baseRetryMs: 30_000,
+    minRetryMs: 2_000,
+    logThrottleMs: 20_000,
+    maxAttemptsBeforeReset: 8,
+    maxHistory: 40,
+});
+
 const getBuildingLevel = getBuildingTypeLevel;
 const getEffectiveBuildingLevel = getEffectiveBuildingTypeLevel;
 const getUnitCount = getUnitCountInVillageAndQueue;
+
+function createEmptyCycleProgress() {
+    return {
+        total: 0,
+    };
+}
+
+function getEgyptianPhaseKey(phaseId) {
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase1) return 'phase1';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase2) return 'phase2';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase3) return 'phase3';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase4) return 'phase4';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase5) return 'phase5';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase6) return 'phase6';
+    return null;
+}
+
+function getPhaseCycleTargets(difficulty, phaseKey) {
+    const template = getDifficultyTemplate(PHASE_CYCLE_TARGETS_BY_DIFFICULTY, difficulty, 'Pesadilla') || {};
+    return template[phaseKey] || { total: 0 };
+}
+
+function getCycleProgressByPhase(phaseState, phaseKey) {
+    if (!phaseState.phaseCycleProgress || typeof phaseState.phaseCycleProgress !== 'object') {
+        phaseState.phaseCycleProgress = {};
+    }
+
+    if (!phaseState.phaseCycleProgress[phaseKey]) {
+        phaseState.phaseCycleProgress[phaseKey] = createEmptyCycleProgress();
+    }
+
+    return phaseState.phaseCycleProgress[phaseKey];
+}
+
+function getCycleProgressSnapshot(phaseState, phaseKey) {
+    const raw = getCycleProgressByPhase(phaseState, phaseKey);
+    return {
+        total: Math.max(0, Number(raw.total) || 0),
+    };
+}
+
+export function getEgyptianPhaseCycleStatus(phaseState, difficulty, phaseKey) {
+    const cycles = getCycleProgressSnapshot(phaseState, phaseKey);
+    const targets = getPhaseCycleTargets(difficulty, phaseKey);
+    return {
+        completed: cycles.total || 0,
+        max: Math.max(0, Number(targets.total) || 0),
+        cycles,
+        targets,
+    };
+}
+
+function recordEgyptianPhaseRecruitmentProgress({ phaseState, phaseKey, count, timePerUnit }) {
+    if (!phaseKey) return;
+    if (!Number.isFinite(count) || count <= 0) return;
+    if (!Number.isFinite(timePerUnit) || timePerUnit <= 0) return;
+
+    const progress = getCycleProgressByPhase(phaseState, phaseKey);
+    const trainedMs = Math.max(0, count * timePerUnit);
+    const cycles = Math.max(1, Math.ceil(trainedMs / TRAINING_CYCLE_MS));
+    progress.total = Math.max(0, Number(progress.total) || 0) + cycles;
+}
+
+function registerRecruitmentCommitFromAction({ result, phaseState, phaseId, village, difficulty, log }) {
+    if (!result?.success) return;
+    if (!Number.isFinite(result.count) || result.count <= 0) return;
+    if (!result.unitId) return;
+    if (!Number.isFinite(result.timePerUnit) || result.timePerUnit <= 0) return;
+
+    const phaseKey = getEgyptianPhaseKey(phaseId);
+    if (!phaseKey) return;
+
+    recordEgyptianPhaseRecruitmentProgress({
+        phaseState,
+        phaseKey,
+        count: result.count,
+        timePerUnit: result.timePerUnit,
+    });
+
+    if (typeof log === 'function') {
+        const status = getEgyptianPhaseCycleStatus(phaseState, difficulty, phaseKey);
+        const percent = status.max > 0 ? ((status.completed / status.max) * 100) : 0;
+        log(
+            'info',
+            village,
+            'Macro Reclutamiento',
+            `Ciclos fase actual: ${status.completed}/${status.max} (${percent.toFixed(1)}%).`,
+            null,
+            'economic',
+        );
+    }
+}
+
+function attachDeferredRecoverableBlock(successResult, blockedResult) {
+    if (!successResult?.success) return successResult;
+    if (!blockedResult || !isRecoverablePhaseBlockReason(blockedResult.reason)) return successResult;
+    if (!DEFERRED_SUBGOAL_BLOCK_REASONS.has(blockedResult.reason)) return successResult;
+
+    return {
+        ...successResult,
+        deferredRecoverableBlock: blockedResult,
+    };
+}
+
+function getRetryIntervalMs(gameSpeed) {
+    const normalizedSpeed = Math.max(gameSpeed || 1, 1);
+    return Math.max(PHASE_SUBGOAL.minRetryMs, Math.floor(PHASE_SUBGOAL.baseRetryMs / normalizedSpeed));
+}
+
+function getStepSignature(step) {
+    if (!step) return 'step:none';
+    if (step.type === 'building') return `building:${step.buildingType || 'unknown'}:${step.level || 0}`;
+    if (step.type === 'resource_fields_level') return `resource_fields:${step.level || 0}`;
+    if (step.type === 'units') return `units:${step.unitType || 'unknown'}:${step.count ?? 'n/a'}`;
+    if (step.type === 'research') return `research:${step.unitType || step.unitId || 'unknown'}`;
+    if (step.type === 'upgrade') return `upgrade:${step.unitType || 'unknown'}:${step.level || 0}`;
+    return `${step.type || 'unknown'}:generic`;
+}
+
+function isQueueAvailable(village, queueType) {
+    if (queueType === 'construction') {
+        return (village.constructionQueue?.length || 0) < (village.maxConstructionSlots || 1);
+    }
+    if (queueType === 'research') {
+        return (village.research?.queue?.length || 0) === 0;
+    }
+    if (queueType === 'smithy') {
+        return (village.smithy?.queue?.length || 0) === 0;
+    }
+    if (queueType === 'recruitment') {
+        return true;
+    }
+    return true;
+}
+
+function isBuildingStepCompleted(village, step) {
+    if (!step) return true;
+
+    if (step.type === 'building') {
+        return getEffectiveBuildingLevel(village, step.buildingType) >= (step.level || 1);
+    }
+
+    if (step.type === 'resource_fields_level') {
+        return getAverageResourceFieldLevel(village) >= (step.level || 1);
+    }
+
+    return false;
+}
+
+function isResearchStepCompleted(village, step) {
+    if (!step) return true;
+    const unitId = step.unitId || step.unitType;
+    if (!unitId) return false;
+    return village.research?.completed?.includes(unitId);
+}
+
+function pushSubGoalHistory(phaseState, record) {
+    phaseState.subGoalHistory = Array.isArray(phaseState.subGoalHistory) ? phaseState.subGoalHistory : [];
+    phaseState.subGoalHistory.push(record);
+    if (phaseState.subGoalHistory.length > PHASE_SUBGOAL.maxHistory) {
+        phaseState.subGoalHistory.shift();
+    }
+}
+
+function clearActiveSubGoal(phaseState, now, village, log, message = null, status = 'resolved') {
+    const activeSubGoal = phaseState.activeSubGoal;
+    if (!activeSubGoal) return;
+
+    pushSubGoalHistory(phaseState, {
+        ...activeSubGoal,
+        clearedAt: now,
+        status,
+    });
+
+    if (message) {
+        log('success', village, 'Macro SubGoal', message, null, 'economic');
+    }
+
+    phaseState.activeSubGoal = null;
+}
+
+function createOrRefreshSubGoal({
+    phaseState,
+    phaseId,
+    blockedResult,
+    source,
+    village,
+    gameSpeed,
+    log,
+}) {
+    if (!blockedResult || !isRecoverablePhaseBlockReason(blockedResult.reason)) {
+        return false;
+    }
+
+    const now = Date.now();
+    const retryMs = getRetryIntervalMs(gameSpeed);
+    const resolverStep = buildPrerequisiteResolverStepFromBlock({
+        village,
+        blockedResult,
+        getEffectiveBuildingLevel,
+    });
+    const queueType = getPhaseStepQueueType(blockedResult.step);
+
+    let kind;
+    if (blockedResult.reason === 'QUEUE_FULL') {
+        kind = SUBGOAL_KIND.waitQueue;
+    } else if (resolverStep) {
+        kind = resolverStep.type === 'research'
+            ? SUBGOAL_KIND.researchPrerequisite
+            : SUBGOAL_KIND.buildPrerequisite;
+    } else if (blockedResult.reason === 'INSUFFICIENT_RESOURCES') {
+        kind = SUBGOAL_KIND.waitResources;
+    } else {
+        kind = SUBGOAL_KIND.waitResources;
+    }
+
+    const signature = `${phaseId}|${kind}|${blockedResult.reason}|${getStepSignature(blockedResult.step)}|${getStepSignature(resolverStep)}`;
+    const existing = phaseState.activeSubGoal;
+    if (existing?.signature === signature && existing.phaseId === phaseId) {
+        existing.updatedAt = now;
+        if (existing.kind === SUBGOAL_KIND.waitResources || existing.kind === SUBGOAL_KIND.waitQueue) {
+            existing.nextAttemptAt = now + retryMs;
+        }
+        return true;
+    }
+
+    phaseState.activeSubGoal = {
+        id: `eg_sg_${now}_${Math.random().toString(36).slice(2, 7)}`,
+        signature,
+        kind,
+        phaseId,
+        source,
+        reason: blockedResult.reason,
+        createdAt: now,
+        updatedAt: now,
+        nextAttemptAt: now,
+        attempts: 0,
+        lastLogAt: 0,
+        blockedStep: clonePhaseStep(blockedResult.step),
+        resolverStep,
+        queueType,
+        latestDetails: blockedResult.details || null,
+    };
+
+    const resolverText = resolverStep
+        ? `resolver=${getStepSignature(resolverStep)}`
+        : `espera=${kind}`;
+    log(
+        'warn',
+        village,
+        'Macro SubGoal',
+        `Bloqueo detectado (${blockedResult.reason}) en ${source}. Activando subgoal ${kind} (${resolverText}).`,
+        null,
+        'economic',
+    );
+    return true;
+}
+
+function processActiveSubGoal({
+    phaseState,
+    village,
+    gameState,
+    actionExecutor,
+    gameSpeed,
+    log,
+}) {
+    const subGoal = phaseState.activeSubGoal;
+    if (!subGoal) {
+        return { handled: false };
+    }
+
+    const now = Date.now();
+    if (subGoal.phaseId !== phaseState.activePhaseId) {
+        clearActiveSubGoal(
+            phaseState,
+            now,
+            village,
+            log,
+            'Subgoal descartado por cambio de fase.',
+            'phase_changed',
+        );
+        return { handled: false };
+    }
+
+    if (subGoal.kind === SUBGOAL_KIND.waitQueue) {
+        const queueFree = isQueueAvailable(village, subGoal.queueType);
+        if (queueFree) {
+            clearActiveSubGoal(
+                phaseState,
+                now,
+                village,
+                log,
+                `Subgoal de cola resuelto (${subGoal.queueType}).`,
+            );
+            return { handled: false };
+        }
+
+        subGoal.nextAttemptAt = now + getRetryIntervalMs(gameSpeed);
+        return { handled: true };
+    }
+
+    if (subGoal.kind === SUBGOAL_KIND.waitResources) {
+        if (now < subGoal.nextAttemptAt) {
+            return { handled: true };
+        }
+
+        clearActiveSubGoal(
+            phaseState,
+            now,
+            village,
+            log,
+            'Reintentando objetivo bloqueado por recursos.',
+            'retry_after_wait_resources',
+        );
+        return { handled: false };
+    }
+
+    const resolverStep = subGoal.resolverStep;
+    const completed = subGoal.kind === SUBGOAL_KIND.researchPrerequisite
+        ? isResearchStepCompleted(village, resolverStep)
+        : isBuildingStepCompleted(village, resolverStep);
+
+    if (completed) {
+        clearActiveSubGoal(
+            phaseState,
+            now,
+            village,
+            log,
+            `Subgoal resuelto: ${getStepSignature(resolverStep)}.`,
+        );
+        return { handled: false };
+    }
+
+    if (now < subGoal.nextAttemptAt) {
+        return { handled: true };
+    }
+
+    const result = actionExecutor.executePlanStep(village, resolverStep, gameState, { scope: 'per_village' });
+    subGoal.attempts = (subGoal.attempts || 0) + 1;
+    subGoal.updatedAt = now;
+    subGoal.nextAttemptAt = now + getRetryIntervalMs(gameSpeed);
+
+    if (result.success || result.reason === 'QUEUE_FULL') {
+        if (result.reason === 'QUEUE_FULL') {
+            subGoal.kind = SUBGOAL_KIND.waitQueue;
+            subGoal.queueType = getPhaseStepQueueType(resolverStep);
+            subGoal.reason = 'QUEUE_FULL';
+            subGoal.blockedStep = clonePhaseStep(resolverStep);
+            subGoal.resolverStep = null;
+        }
+        return { handled: true };
+    }
+
+    if (result.reason === 'INSUFFICIENT_RESOURCES') {
+        subGoal.kind = SUBGOAL_KIND.waitResources;
+        subGoal.reason = 'INSUFFICIENT_RESOURCES';
+        subGoal.blockedStep = clonePhaseStep(resolverStep);
+        subGoal.resolverStep = null;
+        return { handled: true };
+    }
+
+    if (isRecoverablePhaseBlockReason(result.reason)) {
+        const nestedResolver = buildPrerequisiteResolverStepFromBlock({
+            village,
+            blockedResult: {
+                ...result,
+                step: resolverStep,
+            },
+            getEffectiveBuildingLevel,
+        });
+        if (nestedResolver) {
+            subGoal.resolverStep = nestedResolver;
+            subGoal.kind = nestedResolver.type === 'research'
+                ? SUBGOAL_KIND.researchPrerequisite
+                : SUBGOAL_KIND.buildPrerequisite;
+            subGoal.reason = result.reason;
+            return { handled: true };
+        }
+    }
+
+    if (subGoal.attempts >= PHASE_SUBGOAL.maxAttemptsBeforeReset) {
+        clearActiveSubGoal(
+            phaseState,
+            now,
+            village,
+            log,
+            `Subgoal reiniciado tras ${subGoal.attempts} intentos sin resolver.`,
+            'max_attempts_reached',
+        );
+        return { handled: false };
+    }
+
+    if (now - (subGoal.lastLogAt || 0) >= PHASE_SUBGOAL.logThrottleMs) {
+        subGoal.lastLogAt = now;
+        log(
+            'warn',
+            village,
+            'Macro SubGoal',
+            `Subgoal ${subGoal.kind} sigue bloqueado. Ultimo rechazo: ${result.reason || 'UNKNOWN'}.`,
+            result.details || null,
+            'economic',
+        );
+    }
+
+    return { handled: true };
+}
+
+function handlePhaseActionResult({
+    result,
+    phaseState,
+    phaseId,
+    source,
+    village,
+    gameSpeed,
+    log,
+    onSuccess,
+}) {
+    if (!result) return { terminal: false };
+
+    if (result.success) {
+        if (typeof onSuccess === 'function') {
+            onSuccess(result);
+        }
+        return { terminal: true };
+    }
+
+    const subGoalCreated = createOrRefreshSubGoal({
+        phaseState,
+        phaseId,
+        blockedResult: result,
+        source,
+        village,
+        gameSpeed,
+        log,
+    });
+
+    if (subGoalCreated) {
+        return { terminal: true };
+    }
+
+    return { terminal: false };
+}
+
+function getResolvedUnitId(village, unitType) {
+    return resolveUnitIdForRace(unitType, village.race || 'egyptians') || unitType;
+}
 
 function countRoleTroops(village, role) {
     const raceUnits = getRaceTroops(village.race || 'egyptians');
@@ -239,23 +742,21 @@ function tryStep(actionExecutor, village, gameState, step) {
 }
 
 function tryConstructionPriority({ actionExecutor, village, gameState, options, shouldAttemptStep = null }) {
-    for (const step of options) {
-        if (typeof shouldAttemptStep === 'function' && !shouldAttemptStep(step)) continue;
-        const result = tryStep(actionExecutor, village, gameState, step);
-        if (result?.success) return result;
-        if (result?.reason === 'QUEUE_FULL') return result;
-    }
-    return { success: false, reason: 'NO_ACTION' };
+    return runPriorityStepList({
+        steps: options,
+        executeStep: step => tryStep(actionExecutor, village, gameState, step),
+        noActionReason: 'NO_ACTION',
+        shouldAttemptStep,
+    });
 }
 
 function tryRecruitmentPriority({ actionExecutor, village, gameState, options, shouldAttemptStep = null }) {
-    for (const step of options) {
-        if (typeof shouldAttemptStep === 'function' && !shouldAttemptStep(step)) continue;
-        const result = tryStep(actionExecutor, village, gameState, step);
-        if (result?.success) return result;
-        if (result?.reason === 'QUEUE_FULL') return result;
-    }
-    return { success: false, reason: 'NO_ACTION' };
+    return runPriorityStepList({
+        steps: options,
+        executeStep: step => tryStep(actionExecutor, village, gameState, step),
+        noActionReason: 'NO_ACTION',
+        shouldAttemptStep,
+    });
 }
 
 function shouldThrottleIdleLog(phaseState, now) {
@@ -286,9 +787,18 @@ function updateReadinessScores(phaseState, village, threatContext) {
 }
 
 function transitionTo(phaseState, from, to, now, reason, log, village) {
+    if (phaseState.activeSubGoal) {
+        clearActiveSubGoal(
+            phaseState,
+            now,
+            village,
+            log,
+            'Subgoal descartado por cambio de fase.',
+            'phase_transition',
+        );
+    }
     phaseState.activePhaseId = to;
     phaseState.transitions.push(createPhaseTransition(from, to, reason, now));
-    phaseState.activeSubGoal = null;
     log('success', village, 'Macro Egipcia', `Transicion ${from} -> ${to}.`, { reason }, 'economic');
 }
 
@@ -314,9 +824,9 @@ function runThreatEmergencyBlock({ actionExecutor, village, gameState, threatCon
         village,
         gameState,
         options: [
-            { type: 'units', unitType: 'ash_warden_egypt', count: Infinity, queueTargetMinutes: 4 },
-            { type: 'units', unitType: 'anhur_guard_egypt', count: Infinity, queueTargetMinutes: 3 },
-            { type: 'units', unitType: 'slave_militia_egypt', count: Infinity, queueTargetMinutes: 3 },
+            { type: 'units', unitType: 'defensive_infantry', count: Infinity, queueTargetMinutes: 4 },
+            { type: 'units', unitType: 'defensive_cavalry', count: Infinity, queueTargetMinutes: 3 },
+            { type: 'units', unitType: 'offensive_infantry', count: Infinity, queueTargetMinutes: 3 },
         ],
     });
 }
@@ -474,7 +984,7 @@ function createThreatRecruitmentFilter(village, threatContext) {
     return step => {
         if (!step || step.type !== 'units') return true;
 
-        const unit = unitById.get(step.unitType);
+        const unit = unitById.get(getResolvedUnitId(village, step.unitType));
         if (!unit) return true;
 
         const role = unit.role;
@@ -547,16 +1057,20 @@ function runPhaseOne({ village, gameState, actionExecutor, threatContext, constr
         return { success: false, reason: 'NO_ACTION' };
     }
 
-    return tryRecruitmentPriority({
+    const recruitment = tryRecruitmentPriority({
         actionExecutor,
         village,
         gameState,
         shouldAttemptStep: recruitmentFilter,
         options: [
-            { type: 'units', unitType: 'slave_militia_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase1 },
-            { type: 'units', unitType: 'ash_warden_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase1 },
+            { type: 'units', unitType: 'defensive_infantry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase1 },
+            { type: 'units', unitType: 'defensive_cavalry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase1 },
         ],
     });
+
+    return recruitment.success
+        ? attachDeferredRecoverableBlock(recruitment, construction)
+        : recruitment;
 }
 
 function runPhaseTwo({ village, gameState, actionExecutor, threatContext, constructionFilter, recruitmentFilter }) {
@@ -582,12 +1096,14 @@ function runPhaseTwo({ village, gameState, actionExecutor, threatContext, constr
         gameState,
         shouldAttemptStep: recruitmentFilter,
         options: [
-            { type: 'units', unitType: 'slave_militia_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase2 },
-            { type: 'units', unitType: 'ash_warden_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase2 },
-            { type: 'units', unitType: 'sopdu_explorer_egypt', count: 8 },
+            { type: 'units', unitType: 'defensive_infantry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase2 },
+            { type: 'units', unitType: 'defensive_cavalry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase2 },
+            { type: 'units', unitType: 'scout', count: 8 },
         ],
     });
-    if (recruitment.success) return recruitment;
+    if (recruitment.success) {
+        return attachDeferredRecoverableBlock(recruitment, construction);
+    }
 
     if (isHighThreat(threatContext)) {
         return tryConstructionPriority({
@@ -621,18 +1137,22 @@ function runPhaseThree({ village, gameState, actionExecutor, constructionFilter,
     });
     if (construction.success) return construction;
 
-    return tryRecruitmentPriority({
+    const recruitment = tryRecruitmentPriority({
         actionExecutor,
         village,
         gameState,
         shouldAttemptStep: recruitmentFilter,
         options: [
-            { type: 'units', unitType: 'ash_warden_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase3 },
-            { type: 'units', unitType: 'sopdu_explorer_egypt', count: 12 },
-            { type: 'units', unitType: 'anhur_guard_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase3 },
-            { type: 'units', unitType: 'slave_militia_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase3 },
+            { type: 'units', unitType: 'defensive_infantry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase3 },
+            { type: 'units', unitType: 'scout', count: 12 },
+            { type: 'units', unitType: 'defensive_cavalry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase3 },
+            { type: 'units', unitType: 'offensive_infantry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase3 },
         ],
     });
+
+    return recruitment.success
+        ? attachDeferredRecoverableBlock(recruitment, construction)
+        : recruitment;
 }
 
 function runPhaseFour({ village, gameState, actionExecutor, constructionFilter, recruitmentFilter }) {
@@ -654,18 +1174,22 @@ function runPhaseFour({ village, gameState, actionExecutor, constructionFilter, 
     });
     if (construction.success) return construction;
 
-    return tryRecruitmentPriority({
+    const recruitment = tryRecruitmentPriority({
         actionExecutor,
         village,
         gameState,
         shouldAttemptStep: recruitmentFilter,
         options: [
-            { type: 'units', unitType: 'ash_warden_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase4 },
-            { type: 'units', unitType: 'anhur_guard_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase4 },
-            { type: 'units', unitType: 'sopdu_explorer_egypt', count: 16 },
-            { type: 'units', unitType: 'khopesh_warrior_egypt', count: 40 },
+            { type: 'units', unitType: 'defensive_infantry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase4 },
+            { type: 'units', unitType: 'defensive_cavalry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase4 },
+            { type: 'units', unitType: 'scout', count: 16 },
+            { type: 'units', unitType: 'offensive_infantry', count: 40 },
         ],
     });
+
+    return recruitment.success
+        ? attachDeferredRecoverableBlock(recruitment, construction)
+        : recruitment;
 }
 
 function shouldEnableContextualOffense({ phaseState, threatContext, gameState, village }) {
@@ -680,11 +1204,19 @@ function shouldEnableContextualSiege({ phaseState, threatContext, gameState, vil
     return myVillageCount >= 3 && (phaseState.defenseReadinessScore || 0) >= 130;
 }
 
+function shouldPreferConquestExpansion({ phaseState, threatContext, gameState, village }) {
+    if (threatContext.threatLevel !== 'none' && threatContext.threatLevel !== 'low') return false;
+    const myVillageCount = gameState.villages.filter(candidate => candidate.ownerId === village.ownerId).length;
+    const palaceLevel = getEffectiveBuildingLevel(village, 'palace');
+    return myVillageCount >= 2 && palaceLevel >= 12 && (phaseState.defenseReadinessScore || 0) >= 115;
+}
+
 function canAttemptSafeExpansion({ threatContext, phaseState, village }) {
     const blockedByThreat = threatContext.threatLevel === 'high' || threatContext.threatLevel === 'critical';
     if (blockedByThreat) return false;
 
-    const settlersReady = getUnitCount(village, 'settler_egypt') >= 3;
+    const settlerUnitId = getResolvedUnitId(village, 'settler');
+    const settlersReady = settlerUnitId ? getUnitCount(village, settlerUnitId) >= 3 : false;
     if (!settlersReady) return false;
 
     const defensiveCore = countDefensiveCoreUnits(village);
@@ -726,22 +1258,29 @@ function runPhaseFive({
     if (construction.success) return construction;
 
     const recruitmentOptions = [
-        { type: 'units', unitType: 'ash_warden_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
-        { type: 'units', unitType: 'anhur_guard_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
-        { type: 'units', unitType: 'settler_egypt', count: 3 },
+        { type: 'units', unitType: 'defensive_infantry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
+        { type: 'units', unitType: 'defensive_cavalry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
     ];
+
+    if (shouldPreferConquestExpansion({ phaseState, threatContext, gameState, village })) {
+        recruitmentOptions.push({ type: 'units', unitType: 'chief', count: 1 });
+        recruitmentOptions.push({ type: 'units', unitType: 'settler', count: 3 });
+    } else {
+        recruitmentOptions.push({ type: 'units', unitType: 'settler', count: 3 });
+        recruitmentOptions.push({ type: 'units', unitType: 'chief', count: 1 });
+    }
 
     if (shouldEnableContextualOffense({ phaseState, threatContext, gameState, village })) {
         recruitmentOptions.push(
-            { type: 'units', unitType: 'nomarch_egypt', count: 1 },
-            { type: 'units', unitType: 'resheph_chariot_egypt', count: 20 },
+            { type: 'units', unitType: 'chief', count: 1 },
+            { type: 'units', unitType: 'offensive_cavalry', count: 20 },
         );
     }
 
     if (shouldEnableContextualSiege({ phaseState, threatContext, gameState, village })) {
         recruitmentOptions.push(
-            { type: 'units', unitType: 'ram_egypt', count: 6 },
-            { type: 'units', unitType: 'catapult_egypt', count: 3 },
+            { type: 'units', unitType: 'ram', count: 6 },
+            { type: 'units', unitType: 'catapult', count: 3 },
         );
     }
 
@@ -752,7 +1291,9 @@ function runPhaseFive({
         shouldAttemptStep: recruitmentFilter,
         options: recruitmentOptions,
     });
-    if (recruitment.success) return recruitment;
+    if (recruitment.success) {
+        return attachDeferredRecoverableBlock(recruitment, construction);
+    }
 
     if ((now - phaseState.lastSafeExpansionCheckAt) >= EXPANSION_CHECK_MS) {
         phaseState.kpiExpansionAttempts = Math.max(0, phaseState.kpiExpansionAttempts || 0) + 1;
@@ -796,14 +1337,16 @@ function runPhaseSix({ village, gameState, actionExecutor, phaseState, now, thre
         gameState,
         shouldAttemptStep: recruitmentFilter,
         options: [
-            { type: 'units', unitType: 'ash_warden_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase6 },
-            { type: 'units', unitType: 'anhur_guard_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase6 },
-            { type: 'units', unitType: 'resheph_chariot_egypt', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase6 },
-            { type: 'units', unitType: 'ram_egypt', count: Infinity, queueTargetMinutes: 2 },
-            { type: 'units', unitType: 'catapult_egypt', count: Infinity, queueTargetMinutes: 2 },
+            { type: 'units', unitType: 'defensive_infantry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase6 },
+            { type: 'units', unitType: 'defensive_cavalry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase6 },
+            { type: 'units', unitType: 'offensive_cavalry', count: Infinity, queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase6 },
+            { type: 'units', unitType: 'ram', count: Infinity, queueTargetMinutes: 2 },
+            { type: 'units', unitType: 'catapult', count: Infinity, queueTargetMinutes: 2 },
         ],
     });
-    if (recruitment.success) return recruitment;
+    if (recruitment.success) {
+        return attachDeferredRecoverableBlock(recruitment, construction);
+    }
 
     if ((now - phaseState.lastSafeExpansionCheckAt) >= EXPANSION_CHECK_MS) {
         phaseState.kpiExpansionAttempts = Math.max(0, phaseState.kpiExpansionAttempts || 0) + 1;
@@ -930,6 +1473,7 @@ export function runEgyptianEconomicPhaseCycle({
     gameState,
     phaseState,
     difficulty,
+    gameSpeed = 1,
     villageCombatState,
     actionExecutor,
     log,
@@ -946,12 +1490,7 @@ export function runEgyptianEconomicPhaseCycle({
         return { handled: true, phaseState };
     }
 
-    const phaseKey = phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase1 ? 'phase1'
-        : phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase2 ? 'phase2'
-            : phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase3 ? 'phase3'
-                : phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase4 ? 'phase4'
-                    : phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase5 ? 'phase5'
-                        : 'phase6';
+    const phaseKey = getEgyptianPhaseKey(phaseState.activePhaseId) || 'phase6';
 
     applyPhaseRatio({ village, difficulty, phaseId: phaseKey, threatContext, phaseState, log, now });
     updateReadinessScores(phaseState, village, threatContext);
@@ -969,9 +1508,40 @@ export function runEgyptianEconomicPhaseCycle({
         phaseState.kpiStoragePressureCriticalSamples = Math.max(0, phaseState.kpiStoragePressureCriticalSamples || 0) + 1;
     }
 
+    const activeSubGoalResult = processActiveSubGoal({
+        phaseState,
+        village,
+        gameState,
+        actionExecutor,
+        gameSpeed,
+        log,
+    });
+    if (activeSubGoalResult.handled) {
+        return { handled: true, phaseState };
+    }
+
     const emergency = runThreatEmergencyBlock({ actionExecutor, village, gameState, threatContext });
+    const emergencyHandling = handlePhaseActionResult({
+        result: emergency,
+        phaseState,
+        phaseId: phaseState.activePhaseId,
+        source: 'egyptian_threat_emergency_recruitment',
+        village,
+        gameSpeed,
+        log,
+        onSuccess: successResult => registerRecruitmentCommitFromAction({
+            result: successResult,
+            phaseState,
+            phaseId: phaseState.activePhaseId,
+            village,
+            difficulty,
+            log,
+        }),
+    });
     if (emergency.success) {
         phaseState.kpiEmergencyRecruitmentCycles = Math.max(0, phaseState.kpiEmergencyRecruitmentCycles || 0) + 1;
+    }
+    if (emergencyHandling.terminal) {
         return { handled: true, phaseState };
     }
 
@@ -1048,6 +1618,39 @@ export function runEgyptianEconomicPhaseCycle({
             constructionFilter,
             recruitmentFilter,
         });
+    }
+
+    if (result.success && result.deferredRecoverableBlock) {
+        createOrRefreshSubGoal({
+            phaseState,
+            phaseId: phaseState.activePhaseId,
+            blockedResult: result.deferredRecoverableBlock,
+            source: `egyptian_${phaseState.activePhaseId}_deferred_block`,
+            village,
+            gameSpeed,
+            log,
+        });
+    }
+
+    const actionHandling = handlePhaseActionResult({
+        result,
+        phaseState,
+        phaseId: phaseState.activePhaseId,
+        source: `egyptian_${phaseState.activePhaseId}_action`,
+        village,
+        gameSpeed,
+        log,
+        onSuccess: successResult => registerRecruitmentCommitFromAction({
+            result: successResult,
+            phaseState,
+            phaseId: phaseState.activePhaseId,
+            village,
+            difficulty,
+            log,
+        }),
+    });
+    if (actionHandling.terminal) {
+        return { handled: true, phaseState };
     }
 
     if (!result.success && !shouldThrottleIdleLog(phaseState, now)) {

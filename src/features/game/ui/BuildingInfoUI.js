@@ -780,8 +780,8 @@ class BuildingInfoUI {
     
     _updateTroopList() {
         const activeVillage = this.#currentGameState.villages.find(v => v.id === this.#currentGameState.activeVillageId);
-        const playerState = this.#currentGameState.players.find(p => p.id === 'player');
-        if (!activeVillage || !playerState) return;
+        const ownerState = this.#currentGameState.players.find(p => p.id === activeVillage?.ownerId);
+        if (!activeVillage || !ownerState) return;
 
         const buildingState = activeVillage.buildings.find(b => b.id === this.#currentSlotId);
         const currentLevel = buildingState ? buildingState.level : 0;
@@ -811,7 +811,7 @@ class BuildingInfoUI {
 
         if (!unitTypeToTrain) return;
 
-        const trainableUnits = gameData.units[playerState.race]?.troops.filter(troop => 
+        const trainableUnits = gameData.units[ownerState.race]?.troops.filter(troop => 
             Array.isArray(unitTypeToTrain) ? unitTypeToTrain.includes(troop.type) : troop.type === unitTypeToTrain
         );
 

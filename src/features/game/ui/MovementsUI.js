@@ -234,26 +234,24 @@ class MovementsUI {
             )
         );
 
-        if (currentOwnerId === 'player') {
-            const incomingAttacks = movements.filter(movement =>
-                movement.ownerId !== 'player' && (movement.type === 'attack' || movement.type === 'raid')
-            );
+        const incomingAttacks = movements.filter(movement =>
+            movement.ownerId !== currentOwnerId && (movement.type === 'attack' || movement.type === 'raid')
+        );
 
-            incomingAttacks.forEach(attack => {
-                if (!this.#notifiedAttackIds.has(attack.id)) {
-                    const targetName = this._getVillageName(attack.targetCoords);
-                    toastUI.show(`¡Ataque enemigo en camino a ${targetName}!`, 'error', 5000);
-                    this.#notifiedAttackIds.add(attack.id);
-                }
-            });
+        incomingAttacks.forEach(attack => {
+            if (!this.#notifiedAttackIds.has(attack.id)) {
+                const targetName = this._getVillageName(attack.targetCoords);
+                toastUI.show(`¡Ataque enemigo en camino a ${targetName}!`, 'error', 5000);
+                this.#notifiedAttackIds.add(attack.id);
+            }
+        });
 
-            const currentAttackIds = new Set(incomingAttacks.map(attack => attack.id));
-            this.#notifiedAttackIds.forEach(id => {
-                if (!currentAttackIds.has(id)) {
-                    this.#notifiedAttackIds.delete(id);
-                }
-            });
-        }
+        const currentAttackIds = new Set(incomingAttacks.map(attack => attack.id));
+        this.#notifiedAttackIds.forEach(id => {
+            if (!currentAttackIds.has(id)) {
+                this.#notifiedAttackIds.delete(id);
+            }
+        });
 
         this.#emptyState.classList.toggle('hidden', movements.length > 0);
 

@@ -66,7 +66,9 @@ class ReportsView {
     
     _handleNewReport(event) {
         const { report } = event.detail;
-        if (this.#gameState && report.attacker.villageId && this.#gameState.villages.find(v => v.id === report.attacker.villageId)?.ownerId === 'player') {
+        const activeVillage = this.#gameState?.villages?.find(v => v.id === this.#gameState?.activeVillageId);
+        const perspectiveOwnerId = activeVillage?.ownerId || 'player';
+        if (this.#gameState && report?.ownerId === perspectiveOwnerId) {
             toastUI.show('¡Nuevo informe de batalla recibido!', 'info');
         }
     }

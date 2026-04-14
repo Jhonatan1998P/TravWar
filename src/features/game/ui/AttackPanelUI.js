@@ -167,16 +167,17 @@ class AttackPanelUI {
         const missionsContainer = this.#panelElement.querySelector('#attack-panel-missions > div');
         const targetData = this.#gameState.mapData.find(t => t.x === this.#targetTile.x && t.y === this.#targetTile.y);
         const targetType = targetData?.type || 'valley';
-        const playerRace = this.#gameState.players.find(p => p.id === this.#activeVillage.ownerId)?.race;
+        const perspectiveOwnerId = this.#activeVillage.ownerId;
+        const playerRace = this.#gameState.players.find(p => p.id === perspectiveOwnerId)?.race;
         const scoutUnit = gameData.units[playerRace]?.troops.find(t => t.type === 'scout');
         const hasScouts = scoutUnit && (this.#activeVillage.unitsInVillage[scoutUnit.id] || 0) > 0;
 
         const missions = [
             { id: 'settle', label: 'Fundar Aldea', available: targetType === 'valley' },
-            { id: 'reinforcement', label: 'Apoyo', available: targetType === 'village' && targetData.ownerId === 'player' },
-            { id: 'espionage', label: 'Espionaje', available: ((targetType === 'village' && targetData.ownerId !== 'player') || targetType === 'oasis') && hasScouts },
-            { id: 'raid', label: 'Asalto', available: (targetType === 'village' && targetData.ownerId !== 'player') || targetType === 'oasis' },
-            { id: 'attack', label: 'Ataque', available: (targetType === 'village' && targetData.ownerId !== 'player') || targetType === 'oasis' }
+            { id: 'reinforcement', label: 'Apoyo', available: targetType === 'village' && targetData.ownerId === perspectiveOwnerId },
+            { id: 'espionage', label: 'Espionaje', available: ((targetType === 'village' && targetData.ownerId !== perspectiveOwnerId) || targetType === 'oasis') && hasScouts },
+            { id: 'raid', label: 'Asalto', available: (targetType === 'village' && targetData.ownerId !== perspectiveOwnerId) || targetType === 'oasis' },
+            { id: 'attack', label: 'Ataque', available: (targetType === 'village' && targetData.ownerId !== perspectiveOwnerId) || targetType === 'oasis' }
         ];
 
         let missionsHTML = '';

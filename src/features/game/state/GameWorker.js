@@ -44,6 +44,21 @@ const GERMAN_PHASE_LABELS = Object.freeze({
     german_phase_template_complete: 'Plantilla completada',
 });
 
+const EGYPTIAN_PHASE_LABELS = Object.freeze({
+    egyptian_phase_1_fortified_economy: 'Fase 1 - Eco Fortificada',
+    egyptian_phase_2_early_defensive_core: 'Fase 2 - Nucleo Defensivo Temprano',
+    egyptian_phase_3_defensive_scaling: 'Fase 3 - Escalado Defensivo',
+    egyptian_phase_4_secure_expansion_setup: 'Fase 4 - Preparacion Expansion Segura',
+    egyptian_phase_5_guarded_expansion_execution: 'Fase 5 - Expansion Custodiada',
+    egyptian_phase_6_resilient_late_control: 'Fase 6 - Control Resiliente Tardio',
+    egyptian_phase_template_complete: 'Plantilla completada',
+});
+
+const PHASE_LABELS = Object.freeze({
+    ...GERMAN_PHASE_LABELS,
+    ...EGYPTIAN_PHASE_LABELS,
+});
+
 function formatDuration(ms) {
     const totalSeconds = Math.max(0, Math.floor(ms / 1000));
     const hours = Math.floor(totalSeconds / 3600);
@@ -65,6 +80,36 @@ function getVillageById(villageId) {
     return gameState.villages.find(village => village.id === villageId) || null;
 }
 
+function resolveActivePhaseIdFromAIState(aiPlayerState, village) {
+    if (!aiPlayerState || typeof aiPlayerState !== 'object') return null;
+
+    const preferredStateByVillage = village?.race === 'egyptians'
+        ? aiPlayerState.egyptianPhaseState
+        : village?.race === 'germans'
+            ? aiPlayerState.germanPhaseState
+            : null;
+
+    const fallbackStateByVillage = village?.race === 'egyptians'
+        ? aiPlayerState.germanPhaseState
+        : aiPlayerState.egyptianPhaseState;
+
+    const stateMaps = [preferredStateByVillage, fallbackStateByVillage]
+        .filter(candidate => candidate && typeof candidate === 'object');
+
+    for (const phaseByVillage of stateMaps) {
+        if (village?.id && phaseByVillage[village.id]?.activePhaseId) {
+            return phaseByVillage[village.id].activePhaseId;
+        }
+
+        const firstVillageId = Object.keys(phaseByVillage)[0];
+        if (firstVillageId && phaseByVillage[firstVillageId]?.activePhaseId) {
+            return phaseByVillage[firstVillageId].activePhaseId;
+        }
+    }
+
+    return null;
+}
+
 function getPhaseContext({ ownerId = null, villageId = null } = {}) {
     const village = getVillageById(villageId);
     const resolvedOwnerId = ownerId || village?.ownerId;
@@ -72,20 +117,15 @@ function getPhaseContext({ ownerId = null, villageId = null } = {}) {
         return { stage: 'N/A', phase: 'Sin fase macro', village };
     }
 
-    const phaseByVillage = gameState?.aiState?.[resolvedOwnerId]?.germanPhaseState;
-    if (!phaseByVillage || typeof phaseByVillage !== 'object') {
-        return { stage: 'N/A', phase: 'Sin fase macro', village };
-    }
-
-    const targetVillageId = villageId || Object.keys(phaseByVillage)[0];
-    const phaseId = phaseByVillage[targetVillageId]?.activePhaseId;
+    const aiPlayerState = gameState?.aiState?.[resolvedOwnerId];
+    const phaseId = resolveActivePhaseIdFromAIState(aiPlayerState, village);
     if (!phaseId) {
         return { stage: 'N/A', phase: 'Sin fase macro', village };
     }
 
     return {
         stage: getStageFromPhaseId(phaseId),
-        phase: GERMAN_PHASE_LABELS[phaseId] || phaseId,
+        phase: PHASE_LABELS[phaseId] || phaseId,
         village,
     };
 }
@@ -679,7 +719,14 @@ self.onmessage = function(event) {
             if (payload && payload.villageId) gameState.activeVillageId = payload.villageId;
             break;
         case 'mark_reports_as_read':
-            if (gameState.unreadCounts) gameState.unreadCounts['player'] = 0;
+            if (gameState.unreadCounts) {
+                const targetOwnerId = payload?.ownerId
+                    || gameState.villages.find(v => v.id === gameState.activeVillageId)?.ownerId
+                    || 'player';
+                if (gameState.unreadCounts[targetOwnerId] !== undefined) {
+                    gameState.unreadCounts[targetOwnerId] = 0;
+                }
+            }
             break;
         case 'delete_report':
             if (payload.reportId) {

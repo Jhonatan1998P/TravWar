@@ -1,6 +1,6 @@
 # 📊 Reporte Harness IA Tribus (Markdown)
 
-- 🗓️ Generado: 2026-04-13T00:40:35.079Z
+- 🗓️ Generado: 2026-04-13T21:05:42.341Z
 - 🧪 Cobertura: macro por fases + eventos tácticos (espionaje, raid, ataques, asedio, conquista, contraataques, expansión).
 - ⚙️ Velocidades/semillas: `x1`, `x100`, `x1000`.
 - 🧠 Tribus evaluadas: `Egipcios`, `Germanos`.
@@ -29,36 +29,36 @@
 
 | Ciclo | Fase | Aldeas | Acciones |
 |---:|---|---:|---|
-| 1 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · campo:woodcutter -> nivel 5 |
-| 2 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · campo:woodcutter -> nivel 5 |
-| 3 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · campo:woodcutter -> nivel 5 |
-| 4 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · campo:clayPit -> nivel 5 |
-| 5 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · campo:clayPit -> nivel 5 |
-| 6 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · campo:clayPit -> nivel 5 |
-| 7 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · campo:ironMine -> nivel 5 |
-| 8 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · campo:ironMine -> nivel 5 |
-| 9 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · campo:ironMine -> nivel 5 |
-| 10 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · campo:cropland -> nivel 5 |
-| 11 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · campo:cropland -> nivel 5 |
-| 12 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · campo:cropland -> nivel 5 |
-| 13 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +5 · reclutamiento:slave_militia_egypt +4 |
-| 14 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · reclutamiento:slave_militia_egypt +4 |
-| 15 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +5 · reclutamiento:slave_militia_egypt +4 |
-| 16 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · reclutamiento:slave_militia_egypt +4 |
-| 17 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +5 · reclutamiento:slave_militia_egypt +4 |
-| 18 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · reclutamiento:slave_militia_egypt +4 |
-| 19 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · reclutamiento:slave_militia_egypt +4 |
-| 20 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · reclutamiento:slave_militia_egypt +4 |
-| 21 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · reclutamiento:slave_militia_egypt +4 |
-| 22 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · reclutamiento:slave_militia_egypt +4 |
-| 23 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · reclutamiento:slave_militia_egypt +4 |
-| 24 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · reclutamiento:slave_militia_egypt +4 |
-| 25 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · reclutamiento:slave_militia_egypt +4 |
-| 26 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +4 · reclutamiento:slave_militia_egypt +4 |
+| 1 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · campo:woodcutter -> nivel 5 |
+| 2 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · campo:woodcutter -> nivel 5 |
+| 3 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · campo:woodcutter -> nivel 5 |
+| 4 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · campo:clayPit -> nivel 5 |
+| 5 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · campo:clayPit -> nivel 5 |
+| 6 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · campo:clayPit -> nivel 5 |
+| 7 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · campo:ironMine -> nivel 5 |
+| 8 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · campo:ironMine -> nivel 5 |
+| 9 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · campo:ironMine -> nivel 5 |
+| 10 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · campo:cropland -> nivel 5 |
+| 11 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · campo:cropland -> nivel 5 |
+| 12 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · campo:cropland -> nivel 5 |
+| 13 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +5 · reclutamiento:ash_warden_egypt +4 |
+| 14 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · reclutamiento:ash_warden_egypt +4 |
+| 15 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +5 · reclutamiento:ash_warden_egypt +4 |
+| 16 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · reclutamiento:ash_warden_egypt +4 |
+| 17 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +5 · reclutamiento:ash_warden_egypt +4 |
+| 18 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · reclutamiento:ash_warden_egypt +4 |
+| 19 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · reclutamiento:ash_warden_egypt +4 |
+| 20 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · reclutamiento:ash_warden_egypt +4 |
+| 21 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · reclutamiento:ash_warden_egypt +4 |
+| 22 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · reclutamiento:ash_warden_egypt +4 |
+| 23 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · reclutamiento:ash_warden_egypt +4 |
+| 24 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · reclutamiento:ash_warden_egypt +4 |
+| 25 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · reclutamiento:ash_warden_egypt +4 |
+| 26 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +4 · reclutamiento:ash_warden_egypt +4 |
 | 27 | F5 expansion segura + drill expansion | 3 | expansion:egyptians_main funda egyptians_main_exp_1 en 52/54 |
-| 28 | F6 hardening | 3 | construccion:cityWall -> nivel 9 · reclutamiento:slave_militia_egypt +4 · campo:woodcutter -> nivel 2 |
-| 29 | F6 hardening | 3 | construccion:cityWall -> nivel 10 · reclutamiento:slave_militia_egypt +4 · campo:woodcutter -> nivel 2 |
-| 30 | F6 hardening | 3 | construccion:cityWall -> nivel 11 · reclutamiento:slave_militia_egypt +4 · campo:woodcutter -> nivel 2 |
+| 28 | F6 hardening | 3 | construccion:cityWall -> nivel 9 · reclutamiento:ash_warden_egypt +4 · campo:woodcutter -> nivel 2 |
+| 29 | F6 hardening | 3 | construccion:cityWall -> nivel 10 · reclutamiento:ash_warden_egypt +4 · campo:woodcutter -> nivel 2 |
+| 30 | F6 hardening | 3 | construccion:cityWall -> nivel 11 · reclutamiento:ash_warden_egypt +4 · campo:woodcutter -> nivel 2 |
 
 **Eventos reactivos**
 
@@ -169,36 +169,36 @@
 
 | Ciclo | Fase | Aldeas | Acciones |
 |---:|---|---:|---|
-| 1 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · campo:woodcutter -> nivel 5 |
-| 2 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · campo:woodcutter -> nivel 5 |
-| 3 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · campo:woodcutter -> nivel 5 |
-| 4 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · campo:clayPit -> nivel 5 |
-| 5 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · campo:clayPit -> nivel 5 |
-| 6 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · campo:clayPit -> nivel 5 |
-| 7 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · campo:ironMine -> nivel 5 |
-| 8 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · campo:ironMine -> nivel 5 |
-| 9 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · campo:ironMine -> nivel 5 |
-| 10 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · campo:cropland -> nivel 5 |
-| 11 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · campo:cropland -> nivel 5 |
-| 12 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · campo:cropland -> nivel 5 |
-| 13 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +10 · reclutamiento:slave_militia_egypt +8 |
-| 14 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · reclutamiento:slave_militia_egypt +8 |
-| 15 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +10 · reclutamiento:slave_militia_egypt +8 |
-| 16 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · reclutamiento:slave_militia_egypt +8 |
-| 17 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +10 · reclutamiento:slave_militia_egypt +8 |
-| 18 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · reclutamiento:slave_militia_egypt +8 |
-| 19 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · reclutamiento:slave_militia_egypt +8 |
-| 20 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · reclutamiento:slave_militia_egypt +8 |
-| 21 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · reclutamiento:slave_militia_egypt +8 |
-| 22 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · reclutamiento:slave_militia_egypt +8 |
-| 23 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · reclutamiento:slave_militia_egypt +8 |
-| 24 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · reclutamiento:slave_militia_egypt +8 |
-| 25 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · reclutamiento:slave_militia_egypt +8 |
-| 26 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +8 · reclutamiento:slave_militia_egypt +8 |
+| 1 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · campo:woodcutter -> nivel 5 |
+| 2 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · campo:woodcutter -> nivel 5 |
+| 3 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · campo:woodcutter -> nivel 5 |
+| 4 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · campo:clayPit -> nivel 5 |
+| 5 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · campo:clayPit -> nivel 5 |
+| 6 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · campo:clayPit -> nivel 5 |
+| 7 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · campo:ironMine -> nivel 5 |
+| 8 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · campo:ironMine -> nivel 5 |
+| 9 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · campo:ironMine -> nivel 5 |
+| 10 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · campo:cropland -> nivel 5 |
+| 11 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · campo:cropland -> nivel 5 |
+| 12 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · campo:cropland -> nivel 5 |
+| 13 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +10 · reclutamiento:ash_warden_egypt +8 |
+| 14 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · reclutamiento:ash_warden_egypt +8 |
+| 15 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +10 · reclutamiento:ash_warden_egypt +8 |
+| 16 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · reclutamiento:ash_warden_egypt +8 |
+| 17 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +10 · reclutamiento:ash_warden_egypt +8 |
+| 18 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · reclutamiento:ash_warden_egypt +8 |
+| 19 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · reclutamiento:ash_warden_egypt +8 |
+| 20 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · reclutamiento:ash_warden_egypt +8 |
+| 21 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · reclutamiento:ash_warden_egypt +8 |
+| 22 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · reclutamiento:ash_warden_egypt +8 |
+| 23 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · reclutamiento:ash_warden_egypt +8 |
+| 24 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · reclutamiento:ash_warden_egypt +8 |
+| 25 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · reclutamiento:ash_warden_egypt +8 |
+| 26 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +8 · reclutamiento:ash_warden_egypt +8 |
 | 27 | F5 expansion segura + drill expansion | 3 | expansion:egyptians_main funda egyptians_main_exp_1 en 54/54 |
-| 28 | F6 hardening | 3 | construccion:cityWall -> nivel 9 · reclutamiento:slave_militia_egypt +8 · campo:woodcutter -> nivel 2 |
-| 29 | F6 hardening | 3 | construccion:cityWall -> nivel 10 · reclutamiento:slave_militia_egypt +8 · campo:woodcutter -> nivel 2 |
-| 30 | F6 hardening | 3 | construccion:cityWall -> nivel 11 · reclutamiento:slave_militia_egypt +8 · campo:woodcutter -> nivel 2 |
+| 28 | F6 hardening | 3 | construccion:cityWall -> nivel 9 · reclutamiento:ash_warden_egypt +8 · campo:woodcutter -> nivel 2 |
+| 29 | F6 hardening | 3 | construccion:cityWall -> nivel 10 · reclutamiento:ash_warden_egypt +8 · campo:woodcutter -> nivel 2 |
+| 30 | F6 hardening | 3 | construccion:cityWall -> nivel 11 · reclutamiento:ash_warden_egypt +8 · campo:woodcutter -> nivel 2 |
 
 **Eventos reactivos**
 
@@ -309,36 +309,36 @@
 
 | Ciclo | Fase | Aldeas | Acciones |
 |---:|---|---:|---|
-| 1 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · campo:woodcutter -> nivel 5 |
-| 2 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · campo:woodcutter -> nivel 5 |
-| 3 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · campo:woodcutter -> nivel 5 |
-| 4 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · campo:clayPit -> nivel 5 |
-| 5 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · campo:clayPit -> nivel 5 |
-| 6 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · campo:clayPit -> nivel 5 |
-| 7 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · campo:ironMine -> nivel 5 |
-| 8 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · campo:ironMine -> nivel 5 |
-| 9 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · campo:ironMine -> nivel 5 |
-| 10 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · campo:cropland -> nivel 5 |
-| 11 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · campo:cropland -> nivel 5 |
-| 12 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · campo:cropland -> nivel 5 |
-| 13 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +20 · reclutamiento:slave_militia_egypt +16 |
-| 14 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · reclutamiento:slave_militia_egypt +16 |
-| 15 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +20 · reclutamiento:slave_militia_egypt +16 |
-| 16 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · reclutamiento:slave_militia_egypt +16 |
-| 17 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +20 · reclutamiento:slave_militia_egypt +16 |
-| 18 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · reclutamiento:slave_militia_egypt +16 |
-| 19 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · reclutamiento:slave_militia_egypt +16 |
-| 20 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · reclutamiento:slave_militia_egypt +16 |
-| 21 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · reclutamiento:slave_militia_egypt +16 |
-| 22 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · reclutamiento:slave_militia_egypt +16 |
-| 23 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · reclutamiento:slave_militia_egypt +16 |
-| 24 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · reclutamiento:slave_militia_egypt +16 |
-| 25 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · reclutamiento:slave_militia_egypt +16 |
-| 26 | F2 nucleo defensivo | 2 | reclutamiento:slave_militia_egypt +16 · reclutamiento:slave_militia_egypt +16 |
+| 1 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · campo:woodcutter -> nivel 5 |
+| 2 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · campo:woodcutter -> nivel 5 |
+| 3 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · campo:woodcutter -> nivel 5 |
+| 4 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · campo:clayPit -> nivel 5 |
+| 5 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · campo:clayPit -> nivel 5 |
+| 6 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · campo:clayPit -> nivel 5 |
+| 7 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · campo:ironMine -> nivel 5 |
+| 8 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · campo:ironMine -> nivel 5 |
+| 9 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · campo:ironMine -> nivel 5 |
+| 10 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · campo:cropland -> nivel 5 |
+| 11 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · campo:cropland -> nivel 5 |
+| 12 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · campo:cropland -> nivel 5 |
+| 13 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +20 · reclutamiento:ash_warden_egypt +16 |
+| 14 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · reclutamiento:ash_warden_egypt +16 |
+| 15 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +20 · reclutamiento:ash_warden_egypt +16 |
+| 16 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · reclutamiento:ash_warden_egypt +16 |
+| 17 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +20 · reclutamiento:ash_warden_egypt +16 |
+| 18 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · reclutamiento:ash_warden_egypt +16 |
+| 19 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · reclutamiento:ash_warden_egypt +16 |
+| 20 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · reclutamiento:ash_warden_egypt +16 |
+| 21 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · reclutamiento:ash_warden_egypt +16 |
+| 22 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · reclutamiento:ash_warden_egypt +16 |
+| 23 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · reclutamiento:ash_warden_egypt +16 |
+| 24 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · reclutamiento:ash_warden_egypt +16 |
+| 25 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · reclutamiento:ash_warden_egypt +16 |
+| 26 | F2 nucleo defensivo | 2 | reclutamiento:ash_warden_egypt +16 · reclutamiento:ash_warden_egypt +16 |
 | 27 | F5 expansion segura + drill expansion | 3 | expansion:egyptians_main funda egyptians_main_exp_1 en 52/52 |
-| 28 | F6 hardening | 3 | construccion:cityWall -> nivel 9 · reclutamiento:slave_militia_egypt +16 · campo:woodcutter -> nivel 2 |
-| 29 | F6 hardening | 3 | construccion:cityWall -> nivel 10 · reclutamiento:slave_militia_egypt +16 · campo:woodcutter -> nivel 2 |
-| 30 | F6 hardening | 3 | construccion:cityWall -> nivel 11 · reclutamiento:slave_militia_egypt +16 · campo:woodcutter -> nivel 2 |
+| 28 | F6 hardening | 3 | construccion:cityWall -> nivel 9 · reclutamiento:ash_warden_egypt +16 · campo:woodcutter -> nivel 2 |
+| 29 | F6 hardening | 3 | construccion:cityWall -> nivel 10 · reclutamiento:ash_warden_egypt +16 · campo:woodcutter -> nivel 2 |
+| 30 | F6 hardening | 3 | construccion:cityWall -> nivel 11 · reclutamiento:ash_warden_egypt +16 · campo:woodcutter -> nivel 2 |
 
 **Eventos reactivos**
 

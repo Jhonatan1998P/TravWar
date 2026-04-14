@@ -2,139 +2,53 @@
 
 **Session ID:** ses_27b55ec6effe0ziwqwedbbFZUV
 **Created:** 4/13/2026, 2:27:11 AM
-**Updated:** 4/13/2026, 6:07:01 PM
+**Updated:** 4/13/2026, 8:32:40 PM
+
+---
+
+## Assistant
+
+Perfecto, ya quedó implementado.
+
+- Actualicé el selector global de unidades en `src/features/game/ai/utils/AIUnitUtils.js` para que elija por **calidad/precio/consumo**:
+  - Prioriza rol correcto (`offensive`/`defensive`) y usa `versatile` como fallback.
+  - Considera ataque/defensa, costo total, upkeep y tiempo de entrenamiento.
+  - Agregué soporte genérico para `chief`.
+- Apliqué la regla de asedio **70% arietes / 30% catapultas** en `src/features/game/ai/action-executor/recruitment.js`:
+  - Cada intento de reclutamiento de asedio corrige la mezcla automáticamente.
+  - Funciona tanto con `ram/catapult` genérico como con ids concretos.
+- Migré el motor egipcio a categorías genéricas en `src/features/game/ai/controller/egyptian-phase-engine.js`:
+  - Ya usa `offensive_infantry`, `offensive_cavalry`, `defensive_infantry`, `defensive_cavalry`, `ram`, `catapult`, `settler`, `chief`, `scout`.
+  - Ahora también decide orden de expansión (conquista vs fundación) con preferencia contextual.
+- Ajusté el motor germano en `src/features/game/ai/controller/german-phase-engine.js`:
+  - En fase 5 ahora prioriza `chief` o `settler` según estado militar/edificios (conquista vs fundación).
+
+Validación:
+- Pasó `node --check` en los 4 archivos modificados.
+
+Nota importante y clara:
+- Esto ya decide **qué entrenar** según tu regla.
+- Si quieres, el siguiente paso es implementar la **ejecución de conquista** (órdenes ofensivas con jefe para tomar aldeas), porque ahora mismo la expansión automática fuerte sigue orientada a fundación con colonos.
 
 ---
 
 ## User
 
-puedes darme una idea para mejorar la ia, generacion de bestias, bounty de bestias y mas de los oasis. lee nuestroo codigo de los oasis y en terminos sinples y claros responde siempre
+bien ahora necesito que cuando me mueve entre las aldeas de la ia mediiante el selector de aldeas no solo vea su infraestructura sinoque mi pov cambie totalemrntr hacia la aldea ia que estoy viendo, tanto unidades, tropas, edificios, acciones todos. Como si yo mismo manejara esa aldea. cabe reaaltar que la aldea no sera mia osea del jugador sino que es un modo de bisualizar si la ia avanaza o no de forma precisa.
 
 ---
 
 ## Assistant
 
-Voy a ubicar primero dónde vive la lógica de oasis, bestias y bounty para leerla y darte una idea concreta, simple y alineada con el código.
+**Tool: todowrite**
 
-**Tool: glob**
+---
+
+## Assistant
+
+Voy a ubicar primero el selector de aldeas y los módulos que aún estén atados al jugador en vez de la aldea activa para cambiar el POV completo.
 
 **Tool: grep**
-
----
-
-## Assistant
-
-Ya ubiqué los archivos clave. Ahora voy a leer la lógica de oasis y buscar dónde se conectan con regeneración, combate y recompensas para resumirlo bien.
-
-**Tool: grep**
-
-**Tool: read**
-
-**Tool: read**
-
----
-
-## Assistant
-
-Ya vi la base de oasis: hoy el sistema solo guarda presión, regenera bestias y usa tablas fijas por tipo de oasis. Ahora miro cómo calcula la recompensa y cómo la IA decide atacar para proponerte una mejora útil.
-
-**Tool: read**
-
-**Tool: read**
-
-**Tool: read**
-
----
-
-## Assistant
-
-La lógica actual ya separa dos cosas: la IA evalúa si un oasis da ganancia, y el combate convierte las bajas de bestias en “bounty”. Ahora voy a ver esa fórmula para no proponerte algo que choque con el sistema actual.
-
-**Tool: grep**
-
-**Tool: read**
-
-**Tool: read**
-
----
-
-## Assistant
-
-Ya tengo lo importante de combate y farmeo. Solo me falta ver cómo se colocan los oasis en el mapa para cerrar la idea completa y no proponerte algo que no encaje con la generación actual.
-
-**Tool: read**
-
-**Tool: read**
-
----
-
-## Assistant
-
-Ya se ve el patrón: el mapa crea oasis de forma bastante simple, y la IA los trata como un negocio de corto plazo. Con eso ya puedo darte una propuesta clara y aterrizada.
-
-Voy a cargar la guía de arquitectura RPG para alinear la recomendación con cómo está montada la IA y el sistema de oasis.
-
-**Tool: skill**
-
----
-
-## Assistant
-
-Sí. Leyendo tu código, la mejor mejora es esta: hacer que cada oasis tenga memoria.
-
-- Hoy los oasis nacen con bestias fijas, regeneran solo después de ser limpiados y la IA los elige por ganancia neta.
-- Mi idea: agregar un `nivel de peligro` por oasis.
-- Si lo atacan mucho, sube ese peligro: aparecen bestias más fuertes, regenera más lento y el bounty mejora.
-- La IA debe leer ese peligro: ataca si hay ganancia y poco riesgo, o manda scout / espera si el oasis está muy caliente.
-- También haría que el bounty dependa del tipo de oasis: cereal da más comida, madera da más madera, y así.
-
-En simple: hoy el oasis es una bolsa de bestias; yo lo volvería un lugar vivo que responde a los ataques.
-
-Si quieres, te lo bajo a 3 cambios concretos en código.
-
----
-
-## User
-
-primero haz que nobhaa regeneracion de bestias hasta que haya sido limpiado un oasis por primera vez luego ya podra regenerar bestia normalmente asi lo limpien o dejen algunas
-
----
-
-## Assistant
-
-Voy a ajustar la lógica del oasis para que la regeneración solo arranque después de la primera limpieza total. Primero verifico dónde se marca ese estado y luego lo cambio con el mínimo impacto.
-
-**Tool: read**
-
-**Tool: read**
-
-**Tool: read**
-
----
-
-## Assistant
-
-Estoy revisando el combate del oasis porque ahí es donde se decide si se “desbloquea” la regeneración. Si la marca se pone mal, la corregimos ahí mismo.
-
-**Tool: read**
-
----
-
-## Assistant
-
-Estoy comprobando si hay otra ruta que regenere bestias fuera del worker de oasis. Si no hay otra, el cambio puede ser pequeño y seguro.
-
-**Tool: grep**
-
-**Tool: read**
-
----
-
-## Assistant
-
-Voy a mirar si el proyecto ya tiene tests parecidos para oasis. Si existe una base, dejo una verificación mínima para que no se rompa después.
-
-**Tool: glob**
 
 **Tool: glob**
 
@@ -144,265 +58,644 @@ Voy a mirar si el proyecto ya tiene tests parecidos para oasis. Si existe una ba
 
 ## Assistant
 
-Voy a dejar la regla explícita en el worker de oasis para que quede claro y no dependa de interpretación. El comportamiento seguirá siendo: nada de regeneración hasta la primera limpieza total.
-
-**Tool: apply_patch**
-
----
-
-## Assistant
-
-Voy a validar que el archivo siga parseando bien después del ajuste.
-
-**Tool: bash**
-
----
-
-## Assistant
-
-Ya pasó la validación de sintaxis. Reviso el diff final para confirmar que el cambio quedó solo donde debía.
-
-**Tool: bash**
-
----
-
-## Assistant
-
-Listo: en `src/features/game/state/worker/oasis.js` dejé la regla explícita.
-
-- Antes de la primera limpieza total, el oasis no regenera bestias.
-- Después de esa primera limpieza, sí regenera normal aunque queden algunas bestias.
-- Ya validé la sintaxis con `node --check`.
-
-Si quieres, ahora hago que la IA use esa regla para decidir mejor cuándo atacar oasis.
-
----
-
-## User
-
-has que el numero de bestias a generar sea velocidad de juego / 50 y la bestias base sean por velocidad juego / 10 capeado minimo en 1 y maximo en 100. ademas en velocidad del 1 al 49 se mantenie el valor base de velocidad x1, cada 50 de velocidad se le agrega un unonmas al multiplicador por ejemplo a velocidad de juego 1 multiplicador de bestias base y bestias regeneradas es x1 a velocidad 10x es 1x a velocidad x49 es x1 pero a velocidad 50x el multiplicador aumenta a x2 y velocidad 100x aumenta a por 3x siempre en enteros nada de decimales. permite que estontenga una constante centralizada en @src/features/game/core/data/constants.js 
-
----
-
-## Assistant
-
-Entendido. Voy a centralizar esa regla en `constants.js` y aplicarla en dos lugares: creación base de bestias del oasis y regeneración por ciclo, usando enteros y el escalado por tramos de 50 de velocidad.
-
-**Tool: read**
-
-**Tool: read**
-
-**Tool: read**
-
----
-
-## Assistant
-
-**Tool: apply_patch**
-
----
-
-## Assistant
-
-**Tool: apply_patch**
-
----
-
-## Assistant
-
-**Tool: apply_patch**
-
----
-
-## Assistant
-
-**Tool: apply_patch**
-
----
-
-## Assistant
-
-**Tool: bash**
-
-**Tool: bash**
-
-**Tool: bash**
-
-**Tool: bash**
-
----
-
-## Assistant
-
-**Tool: bash**
-
----
-
-## Assistant
-
-**Tool: read**
-
----
-
-## Assistant
-
-**Tool: bash**
-
----
-
-## Assistant
-
-**Tool: apply_patch**
-
----
-
-## Assistant
-
-**Tool: bash**
-
----
-
-## Assistant
-
-**Tool: bash**
-
----
-
-## Assistant
-
-Hecho. Ya quedó aplicado y centralizado.
-
-- Centralicé la lógica en `src/features/game/core/data/constants.js` con estas reglas:
-  - `getOasisSpeedMultiplier(gameSpeed)` => `floor(gameSpeed / 50) + 1`, cap `1..100`.
-  - `getOasisBaseBeastScale(gameSpeed)` => `floor(gameSpeed / 10)`, cap `1..100`.
-  - `getOasisRegenBeastScale(gameSpeed)` => `floor(gameSpeed / 50)`, cap `1..100`.
-
-- Apliqué esa escala en bestias base del oasis en `src/features/game/engine/GameStateFactory.js`:
-  - Base inicial por bestia = `spawn.min * baseScale * speedMultiplier` (entero, y cap por `spawn.max`).
-
-- Apliqué esa escala en regeneración en `src/features/game/state/worker/oasis.js`:
-  - Regeneración por ciclo = `regenScale * speedMultiplier` (entero).
-  - Y se mantiene tu regla anterior: no regenera hasta primera limpieza total.
-
-- Pasé la velocidad de juego al worker en `src/features/game/state/GameWorker.js`:
-  - `gameSpeed: gameConfig?.gameSpeed || 1`.
-
-Ejemplos del multiplicador (como pediste):
-- Velocidad `1` => `x1`
-- Velocidad `10` => `x1`
-- Velocidad `49` => `x1`
-- Velocidad `50` => `x2`
-- Velocidad `100` => `x3`
-
-Si quieres, en el siguiente paso te dejo una tablita completa de resultado final (base y regen) para velocidades `1, 25, 49, 50, 100, 200`.
-
----
-
-## User
-
-cuantas bestias deberia tener un oasis de hiero a 25% en velocidad x5000 y uno de barro a 25% con esta inplementacion
-
----
-
-## Assistant
-
-Con esta implementación, a velocidad `x5000` ambos oasis arrancan **capados al máximo por unidad**, así que quedan así:
-
-- `iron_25` (Oasis de hierro 25%):  
-  - `rat: 40`, `spider: 30`, `bat: 25`  
-  - **Total: 95 bestias**
-
-- `clay_25` (Oasis de barro 25%):  
-  - `rat: 40`, `spider: 30`, `wild_boar: 25`  
-  - **Total: 95 bestias**
-
-Porque en `x5000` el escalado da muy alto y termina pegando en `spawn.max` de cada bestia.
-
----
-
-## User
-
-no espera ahi esta mal el maximo debe ser 100 pero en la division de velocidad es decir velocidad = 5000 / 50 = 100 este es el valor maximo es decir si un oasis creaba 1 de rata base en x1 en x5000 crea 100 de ese animal. el cap minimo es 1 y el cap maximo es 100 por so te dije
-
----
-
-## Assistant
-
-Tienes razón, quedó mal interpretado. Voy a corregirlo para que el cap `1..100` se aplique al multiplicador por velocidad (no al total por `spawn.max`) y así en `x5000` un valor base `1` se convierta en `100`.
-
-**Tool: apply_patch**
-
----
-
-## Assistant
-
-Voy a ajustar generación base y regeneración para usar solo ese multiplicador y quitar el tope por `spawn.max`, como indicaste.
-
-**Tool: apply_patch**
-
----
-
-## Assistant
-
-**Tool: apply_patch**
-
----
-
-## Assistant
-
-**Tool: bash**
-
-**Tool: bash**
-
-**Tool: bash**
-
----
-
-## Assistant
-
-**Tool: bash**
-
----
-
-## Assistant
-
-Correcto, gracias por la aclaración. Ya lo ajusté a esa lógica.
-
-Ahora con velocidad `x5000`:
-- Multiplicador de bestias = `100` (cap en la división).
-- Ya **no** se limita por `spawn.max` de la tabla al crear/regenerar.
-
-Entonces:
-
-- `iron_25`:
-  - `rat: 10 * 100 = 1000`
-  - `spider: 8 * 100 = 800`
-  - `bat: 5 * 100 = 500`
-  - **Total: 2300**
-
-- `clay_25`:
-  - `rat: 10 * 100 = 1000`
-  - `spider: 8 * 100 = 800`
-  - `wild_boar: 5 * 100 = 500`
-  - **Total: 2300**
-
-Y la regeneración en `x5000` quedó en `+100` bestias por ciclo (antes de aplicar presión del oasis).
-
----
-
-## User
-
-cusntones el tiempo de desicion economica y cuanto es tiempo de desicion militar en las velocidad x1/x10/x100/x1000/x5000 responde con buena estructura y organizacion y con tablas todo en markdown de forna precisa detalalda y clara
-
----
-
-## Assistant
-
-Perfecto. Voy a leer dónde están definidos los intervalos de decisión económica/militar y cómo se escalan con `gameSpeed`, y luego te lo devuelvo en tablas Markdown claras.
-
 **Tool: grep**
 
 **Tool: read**
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+**Tool: read**
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+**Tool: read**
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+Estoy haciendo una pasada final para detectar cualquier lógica que siga amarrada a `player` en la UI principal y dejar el POV realmente coherente con la aldea IA activa.
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+**Tool: bash**
+
+**Tool: bash**
+
+**Tool: bash**
+
+**Tool: bash**
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+**Tool: bash**
+
+**Tool: bash**
+
+**Tool: bash**
+
+**Tool: bash**
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+**Tool: todowrite**
+
+---
+
+## Assistant
+
+**Tool: todowrite**
+
+---
+
+## Assistant
+
+Listo, ya quedó implementado el **modo POV completo por aldea activa** (incluyendo aldeas IA) sin cambiar la propiedad real de la aldea.
+
+- Ahora, al cambiar en el selector de aldeas, el “dueño de perspectiva” pasa a ser el `ownerId` de la aldea activa y la UI se comporta como si manejaras esa aldea.
+- Se ajustaron movimientos, panel de ataque, info de casilla, reportes, mapa y badge de no leídos para usar esa perspectiva dinámica.
+- La aldea sigue siendo de IA (no se transfiere propiedad), solo cambia la visualización y acciones desde UI.
+
+Archivos clave tocados:
+- `src/features/game/ui/AttackPanelUI.js`
+- `src/features/game/ui/TileInfoUI.js`
+- `src/features/game/ui/BuildingInfoUI.js`
+- `src/features/game/ui/MovementsUI.js`
+- `src/features/game/ui/ReportListUI.js`
+- `src/features/game/ui/BattleReportUI.js`
+- `src/features/game/views/ReportsView.js`
+- `src/features/game/views/MapView.js`
+- `src/features/game/ui/UIMainManager.js`
+- `src/features/game/ui/renderSelectors.js`
+- `src/features/game/state/GameWorker.js`
+- `src/features/game/state/worker/movements.js`
+
+Qué cambia concretamente:
+- **Misiones** (ataque/apoyo/espionaje) ya comparan contra el dueño de la aldea activa, no contra `player`.
+- **Fundar aldea** usa la raza/unidad de la aldea activa.
+- **Entrenamiento de tropas** muestra y usa tropas de la raza del dueño de la aldea activa.
+- **Reportes** y **no leídos** se filtran por dueño de la aldea activa.
+- **Toast de ataques** y **toast de nuevo reporte** también siguen esa perspectiva.
+- **Mapa** pinta “propio/enemigo” según dueño de la aldea activa.
+
+Validación:
+- Pasó `node --check` en todos los archivos modificados.
+
+Si quieres, el siguiente paso te lo dejo fino con un switch visual tipo “POV IA ACTIVO” en la barra superior para que sea súper claro cuándo estás viendo/controlando una aldea IA.
+
+---
+
+## User
+
+ahora, antes de seguir con esto, note un bug en donde para la ia germana y egipcia no se activa su propio control de bloqueos y activa su propio sistema de subgoals para evitar bloqueos en sus objetivos cuando se ejecut un comando averigua que sucede y corrigelo porue la ia egypcia se queda bloqueada intentandoreclutar ash warden y como no estan investigados se queda ahi. recuerda que no debes repetir codigo sino hacerlo reutilizable para ambos archicos referente a esa caracteristica que estanos discutiendo
+
+---
+
+## Assistant
+
+Entendido. Voy a revisar el motor de fases germano/egipcio (bloqueos, retries y subgoals), encontrar por qué no destraba cuando una orden falla por prerrequisitos, y lo voy a refactorizar en una utilidad compartida para ambos.
+
+**Tool: todowrite**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+**Tool: grep**
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+**Tool: bash**
+
+**Tool: bash**
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## User
+
+---
+
+## Assistant
+
+---
+## Goal
+
+El usuario está construyendo y afinando el sistema de IA del juego (oasis + decisiones + reclutamiento + POV de aldeas IA).  
+En la parte más reciente, el objetivo activo es corregir un bug de **bloqueo en motores de fase germano/egipcio** para que se activen correctamente sus **subgoals anti-bloqueo** cuando una acción falla por prerrequisitos (ejemplo: egipcios intentando reclutar `ash_warden` sin investigación).  
+Además, pidió que la solución sea **reutilizable** y sin duplicar lógica entre motores.
+
+## Instructions
+
+- Responder en términos simples y claros.
+- Implementar cambios reales en código (no solo teoría).
+- Para la corrección del bug de subgoals/bloqueos:
+  - Evitar duplicación de código.
+  - Hacer lógica reutilizable para ambos archivos/motores (germano y egipcio).
+- Contexto persistente previo del usuario:
+  - Cambios de oasis y tiempos de decisión ya realizados.
+  - Modo POV de aldeas IA ya implementado (visualización completa de aldea activa, sin transferir propiedad).
+
+## Discoveries
+
+1. **Sobre el bug de bloqueo IA**:
+   - `VillageProcessor.queueRecruitment` devuelve razones como `RESEARCH_REQUIRED`, `PREREQUISITES_NOT_MET`, `INSUFFICIENT_RESOURCES`, etc.
+   - El motor germano ya tenía sistema de subgoals, pero con utilidades internas no compartidas.
+   - El motor egipcio tenía `activeSubGoal` en estado serializado/hidratado pero **no tenía flujo funcional completo** de subgoal anti-bloqueo en ejecución de fase.
+   - En egipcio, si varias opciones de reclutamiento fallaban por prerequisitos, podía quedarse ciclando en `NO_ACTION` sin destrabe inteligente.
+
+2. **Arquitectura detectada**:
+   - `phase-engine-common.js` era muy básico al inicio (solo utilidades de nivel/colas).
+   - Había oportunidad clara de centralizar:
+     - razones recuperables de bloqueo,
+     - ejecución priorizada de pasos con propagación de bloqueo,
+     - resolver de prerequisitos a step concreto (build/research),
+     - metadatos de step (clonado/tipo de cola).
+
+3. **Estado del repo**:
+   - Se ven cambios acumulados de tareas previas (oasis, tiempos, POV, reclutamiento), no solo esta última.
+   - La validación sintáctica (`node --check`) de archivos tocados pasó.
+
+## Accomplished
+
+### Ya completado en esta sesión (antes del último pedido de resumen)
+
+1. **POV completo al seleccionar aldea IA** (sin cambiar ownership real)
+   - Se ajustó UI para usar `ownerId` de la aldea activa como perspectiva dinámica:
+     - movimientos, reportes, unread badge, battle report coloring, tile actions, mission availability, mapa (friendly/enemy color), entrenamiento por raza del owner activo, notificaciones.
+   - Archivos UI/worker afectados listados más abajo.
+
+2. **Reclutamiento por eficiencia y asedio 70/30**
+   - Se implementó selección por calidad/precio/consumo en `AIUnitUtils`.
+   - Balanceador de asedio en reclutamiento para tender a 70% arietes / 30% catapultas.
+   - Se migraron muchas opciones egipcias a unitType genérico (`offensive_infantry`, etc.).
+   - Se introdujo priorización de expansión por conquista/fundación según contexto.
+
+3. **Inicio de corrección del bug de bloqueos/subgoals con enfoque reutilizable**
+   - Se amplió `phase-engine-common.js` con utilidades compartidas:
+     - `PHASE_RECOVERABLE_BLOCK_REASONS`
+     - `isRecoverablePhaseBlockReason`
+     - `clonePhaseStep`
+     - `runPriorityStepList`
+     - `getPhaseStepQueueType`
+     - `getNextExpansionPalaceLevel`
+     - `buildPrerequisiteResolverStepFromBlock`
+   - En **germano** se empezó a consumir esa capa compartida (wrappers refactorizados):
+     - reemplazo de set local de recoverable reasons por helper común.
+     - `runStepList` ahora delega a `runPriorityStepList`.
+     - `cloneStep`, `getQueueTypeForStep`, y resolver de prerequisitos delegan a helpers comunes.
+   - En **egipcio** se implementó flujo funcional de subgoals anti-bloqueo:
+     - creación/refresh de subgoal al detectar bloqueo recuperable.
+     - procesamiento del subgoal en cada ciclo.
+     - limpieza con historial en transición de fase.
+     - integración en `runEgyptianEconomicPhaseCycle` (procesa subgoal activo, maneja resultado de acciones con `handlePhaseActionResult`).
+   - Se pasó `gameSpeed` desde `AIController` a `runEgyptianEconomicPhaseCycle`.
+
+### En progreso / pendiente inmediato
+
+- **Verificación funcional (no solo sintaxis)** del bug reportado:
+  - Confirmar en runtime que egipcios dejan de atascarse con reclutamiento no investigado y que efectivamente crean subgoal de investigación/construcción.
+  - Confirmar que germanos también activan control de bloqueos en los casos reportados.
+- Revisar si conviene ajustar prioridades/reintentos/log throttling del subgoal egipcio tras pruebas.
+- Hacer smoke test de regresión para no romper flujo de fases ni producción militar/económica.
+
+## Relevant files / directories
+
+### Núcleo de la corrección de bloqueos/subgoals (tema actual)
+- `src/features/game/ai/controller/phase-engine-common.js`  
+  (ampliado con utilidades reutilizables de bloqueo/subgoal/step-list)
+- `src/features/game/ai/controller/german-phase-engine.js`  
+  (refactor parcial para usar utilidades compartidas de bloqueo)
+- `src/features/game/ai/controller/egyptian-phase-engine.js`  
+  (implementación funcional de subgoals anti-bloqueo + uso de utilidades compartidas)
+- `src/features/game/ai/AIController.js`  
+  (pasa `gameSpeed` a ciclo egipcio)
+
+### Archivos relacionados que ya venían tocados en tareas previas del hilo
+- IA reclutamiento/eficiencia:
+  - `src/features/game/ai/utils/AIUnitUtils.js`
+  - `src/features/game/ai/action-executor/recruitment.js`
+- POV aldea activa (modo inspección IA):
+  - `src/features/game/ui/renderSelectors.js`
+  - `src/features/game/ui/UIMainManager.js`
+  - `src/features/game/ui/ReportListUI.js`
+  - `src/features/game/views/ReportsView.js`
+  - `src/features/game/ui/BattleReportUI.js`
+  - `src/features/game/ui/MovementsUI.js`
+  - `src/features/game/ui/TileInfoUI.js`
+  - `src/features/game/ui/AttackPanelUI.js`
+  - `src/features/game/ui/BuildingInfoUI.js`
+  - `src/features/game/views/MapView.js`
+  - `src/features/game/state/GameWorker.js`
+  - `src/features/game/state/worker/movements.js`
+- Oasis / escalado / decisiones (previamente):
+  - `src/features/game/core/data/constants.js`
+  - `src/features/game/engine/GameStateFactory.js`
+  - `src/features/game/state/worker/oasis.js`
+---
+
+---
+
+## User
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+**Tool: read**
+
+**Tool: read**
+
+**Tool: read**
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: read**
+
+---
+
+## Assistant
+
+**Tool: grep**
+
+---
+
+## Assistant
 
 **Tool: read**
 
@@ -430,7 +723,13 @@ Perfecto. Voy a leer dónde están definidos los intervalos de decisión económ
 
 **Tool: glob**
 
-**Tool: grep**
+**Tool: glob**
+
+**Tool: glob**
+
+---
+
+## Assistant
 
 **Tool: read**
 
@@ -438,9 +737,21 @@ Perfecto. Voy a leer dónde están definidos los intervalos de decisión económ
 
 ## Assistant
 
-Voy a abrir `AIPersonality.js` para darte los tiempos exactos por dificultad y luego convertirlos en tabla para `x1/x10/x100/x1000/x5000`.
+**Tool: read**
 
 **Tool: read**
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+**Tool: bash**
 
 ---
 
@@ -452,43 +763,113 @@ Voy a abrir `AIPersonality.js` para darte los tiempos exactos por dificultad y l
 
 ## Assistant
 
-Perfecto. Aquí va **preciso y en tablas** según el código actual.
-
-## Base actual (código)
-
-- Intervalo económico base: `5000 ms` (`src/features/game/ai/AIPersonality.js:3`)
-- Intervalo militar base: `3600000 ms` (`src/features/game/ai/AIPersonality.js:4`)
-- Militar final: `clamp(baseMilitaryInterval / gameSpeed, 30000, 300000)` (`src/features/game/ai/AIController.js:240`)
-- Disparo económico: `now - lastEconomic >= decisionInterval` (`src/features/game/ai/AIController.js:1167`)
-- Disparo militar: `now - lastMilitary >= militaryDecisionInterval` (`src/features/game/ai/AIController.js:1251`)
-- Loop del worker cada `500 ms` (granularidad real): `src/features/game/state/GameWorker.js:36`, `src/features/game/state/GameWorker.js:639`
+**Tool: read**
 
 ---
 
-## Fórmulas usadas para la tabla
+## Assistant
 
-- **Econ real** = `5 s` (fijo)
-- **Econ tiempo de juego** = `5 s * gameSpeed`
-- **Militar real** = `clamp(3600 s / gameSpeed, 30 s, 300 s)`
-- **Militar tiempo de juego** = `Militar real * gameSpeed`
+**Tool: bash**
 
 ---
 
-## Tiempos de decisión por velocidad
+## Assistant
 
-| Velocidad | Econ (real) | Econ (tiempo juego) | Militar (real final) | Militar (tiempo juego) |
-|---|---:|---:|---:|---:|
-| x1 | 00:00:05 | 00:00:05 | 00:05:00 | 00:05:00 |
-| x10 | 00:00:05 | 00:00:50 | 00:05:00 | 00:50:00 |
-| x100 | 00:00:05 | 00:08:20 | 00:00:36 | 01:00:00 |
-| x1000 | 00:00:05 | 01:23:20 | 00:00:30 | 08:20:00 |
-| x5000 | 00:00:05 | 06:56:40 | 00:00:30 | 41:40:00 |
+**Tool: bash**
 
 ---
 
-## Nota importante
+## Assistant
 
-- Estos tiempos son **objetivo mínimo**; como el loop corre cada `500 ms`, la ejecución real puede llegar con pequeño retraso (hasta ~0.5s extra en tiempo real).
+**Tool: apply_patch**
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+**Tool: bash**
+
+---
+
+## Assistant
+
+I continued and pushed the next step forward: I finished the reuse cleanup in the German subgoal path and then validated the unblock flow end-to-end.
+
+- I removed one remaining hardcoded recoverable-reason check and switched it to the shared helper in `src/features/game/ai/controller/german-phase-engine.js:1225` (`isRecoverableBlockReason(result.reason)`), so nested prerequisite resolution follows the same reusable rule set from `phase-engine-common`.
+- This keeps the anti-block behavior aligned with the Egyptian engine and avoids drifting reason lists between engines.
+
+Validation I ran after that:
+
+- `npm run ai:validate:egyptian-phase-engine` ✅ (6/6)
+- `npm run ai:harness:tribus:detallado` ✅ (report generated)
+- Custom dual-engine regression simulation ✅:
+  - recruitment returns `RESEARCH_REQUIRED`
+  - engine creates/executes research subgoal
+  - recruitment resumes after research in both Egyptian and German flows
+
+If you want, next I can add that dual-engine regression scenario as a permanent npm validation script so this bug class stays covered.
+
+---
+
+## User
+
+resume los cambios en español y se claro
+
+---
+
+## Assistant
+
+Perfecto. Resumen claro de lo que quedó:
+
+- Se unificó la lógica reutilizable de bloqueos/subgoals en `src/features/game/ai/controller/phase-engine-common.js`:
+  - razones recuperables,
+  - ejecución priorizada de steps,
+  - clon de step,
+  - tipo de cola por step,
+  - resolución automática de prerequisitos (build/research/expansión).
+
+- En `src/features/game/ai/controller/egyptian-phase-engine.js` se implementó el flujo completo anti-bloqueo:
+  - detecta bloqueos recuperables (`RESEARCH_REQUIRED`, `PREREQUISITES_NOT_MET`, etc.),
+  - crea/refresca `activeSubGoal`,
+  - reintenta resolver prerequisitos por ciclo,
+  - limpia subgoal al resolver o al cambiar de fase.
+
+- En `src/features/game/ai/controller/german-phase-engine.js` se refactorizó para usar la capa común (menos lógica duplicada).
+  - Ajuste final de esta última iteración: se eliminó una condición hardcodeada que quedaba y ahora también usa el helper común para decidir si un bloqueo es recuperable.
+
+- En `src/features/game/ai/AIController.js` se pasa `gameSpeed` al motor egipcio para que los reintentos de subgoal escalen bien con velocidad de juego.
+
+- Validación ejecutada:
+  - `npm run ai:validate:egyptian-phase-engine` ✅ (6/6),
+  - `npm run ai:harness:tribus:detallado` ✅,
+  - prueba de regresión adicional (alemanes + egipcios): ante `RESEARCH_REQUIRED`, se activa subgoal, se investiga y luego se retoma reclutamiento ✅.
+
+---
+
+## User
+
+alemanes + egipcios? donde sale alemanes? solo hay tributos como Galos, Germanos, oamnos, Hunos h Egipcios. responde nada mas.
+
+---
+
+## Assistant
+
+Tienes razón: en este proyecto corresponde **Germanos**, no “alemanes”.  
+Fue un sinónimo mal usado en el texto; la
 
 ---
 

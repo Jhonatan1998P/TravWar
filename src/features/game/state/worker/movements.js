@@ -90,7 +90,8 @@ function processCombatMovement({
             gameState.unreadCounts[report.ownerId] += 1;
         }
 
-        if (report.ownerId === 'player') {
+        const perspectiveOwnerId = gameState.villages.find(v => v.id === gameState.activeVillageId)?.ownerId || 'player';
+        if (report.ownerId === perspectiveOwnerId) {
             postMessage({ type: 'notify:battle_report', payload: { report, state: gameState } });
         }
 

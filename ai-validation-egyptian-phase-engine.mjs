@@ -117,6 +117,26 @@ class MockActionExecutor {
             return { success: true, reason: 'MOCK_SUCCESS' };
         }
 
+        if (this.mode === 'construction_block_then_recruit_success') {
+            if (step?.type === 'building' || step?.type === 'resource_fields_level') {
+                return {
+                    success: false,
+                    reason: 'PREREQUISITES_NOT_MET',
+                    details: { required: { academy: 5 } },
+                };
+            }
+
+            if (step?.type === 'units') {
+                return {
+                    success: true,
+                    reason: 'MOCK_RECRUITMENT_SUCCESS',
+                    unitId: 'ash_warden_egypt',
+                    count: 5,
+                    timePerUnit: 60000,
+                };
+            }
+        }
+
         return { success: false, reason: 'NO_CANDIDATE_FOUND' };
     }
 
@@ -291,6 +311,38 @@ runCheck('F5 amenaza media filtra construcciones de expansion temprana', () => {
     const firstStep = executor.planSteps[0];
     assert(firstStep?.type === 'building', 'fase 5 con amenaza media debe iniciar con paso de construccion');
     assert(firstStep?.buildingType !== 'embassy' && firstStep?.buildingType !== 'palace', 'amenaza media debe omitir rush de embassy/palace');
+});
+
+runCheck('F3 bloqueo de construccion recuperable crea subgoal aunque reclute', () => {
+    const village = createVillage({
+        fieldLevel: 6,
+        buildingLevels: {
+            cityWall: 7,
+            academy: 3,
+            smithy: 3,
+            stable: 0,
+        },
+    });
+    const gameState = createGameState(village);
+    const phaseState = createDefaultEgyptianPhaseState();
+    phaseState.activePhaseId = EGYPTIAN_PHASE_IDS.phase3;
+
+    const executor = new MockActionExecutor('construction_block_then_recruit_success');
+    runCycle({
+        village,
+        gameState,
+        phaseState,
+        executor,
+        threatContext: {
+            threatLevel: 'low',
+            shouldPauseEconomicConstruction: false,
+            shouldBoostEmergencyRecruitment: false,
+        },
+    });
+
+    assert(Boolean(phaseState.activeSubGoal), 'debe crear subgoal cuando construccion se bloquea por prerequisitos');
+    assert(phaseState.activeSubGoal.reason === 'PREREQUISITES_NOT_MET', 'el subgoal debe preservar la razon recuperable');
+    assert(phaseState.activeSubGoal.resolverStep?.buildingType === 'academy', 'el subgoal debe resolver prerequisito de construccion detectado');
 });
 
 runCheck('F5 amenaza alta bloquea ejecucion de expansion', () => {
