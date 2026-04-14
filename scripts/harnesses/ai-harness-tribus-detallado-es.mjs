@@ -1,23 +1,23 @@
-import { gameData } from './src/features/game/core/GameData.js';
+import { gameData } from '../../src/features/game/core/GameData.js';
 import fs from 'node:fs';
 import path from 'node:path';
-import { RESOURCE_FIELD_BUILDING_TYPES } from './src/features/game/core/data/constants.js';
+import { RESOURCE_FIELD_BUILDING_TYPES } from '../../src/features/game/core/data/constants.js';
 import {
     createDefaultGermanPhaseState,
     GERMAN_PHASE_IDS,
     runGermanEconomicPhaseCycle,
-} from './src/features/game/ai/controller/german-phase-engine.js';
+} from '../../src/features/game/ai/controller/german-phase-engine.js';
 import {
     createDefaultEgyptianPhaseState,
     EGYPTIAN_PHASE_IDS,
     runEgyptianEconomicPhaseCycle,
-} from './src/features/game/ai/controller/egyptian-phase-engine.js';
+} from '../../src/features/game/ai/controller/egyptian-phase-engine.js';
 import {
     evaluateThreatAndChooseResponse,
     handleAttackReact,
     handleEspionageReact,
     processDodgeTasks,
-} from './src/features/game/ai/controller/reactive.js';
+} from '../../src/features/game/ai/controller/reactive.js';
 
 const SPEED_SCENARIOS = Object.freeze([
     { seed: 'seed_x1', gameSpeed: 1 },

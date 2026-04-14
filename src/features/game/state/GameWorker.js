@@ -17,12 +17,13 @@ import { processMovements as processMovementsStep } from './worker/movements.js'
 import { simulateOfflineProgress as simulateOfflineProgressStep } from './worker/offline.js';
 import {
     addResourceIncomeToVillage,
-    BUDGET_REBALANCE_INTERVAL_GAME_MS,
-    BUDGET_REBALANCE_INTERVAL_GAME_MINUTES,
     initializeAIVillageBudget,
     rebalanceAIVillageBudgets,
 } from './worker/budget.js';
-import { isUnderBeginnerProtectionByPopulation } from '../core/data/constants.js';
+import {
+    BUDGET_RATIO_REBALANCE_INTERVAL_MS,
+    isUnderBeginnerProtectionByPopulation,
+} from '../core/data/constants.js';
 
 registerWorkerDiagnostics(self);
 
@@ -145,29 +146,25 @@ let mainLoopInterval = null;
 let sessionId = null;
 let aiControllers = [];
 let villageProcessors = [];
-let budgetRebalanceAccumulatorGameMs = 0;
+let budgetRebalanceAccumulatorMs = 0;
 
-function getElapsedGameMsFromRealMs(elapsedRealMs) {
-    const speed = Math.max(gameConfig?.gameSpeed || 1, 1);
-    return Math.max(0, elapsedRealMs) * speed;
-}
+function maybeRebalanceAIBudgetsByElapsedMs(elapsedMs, reason = 'online') {
+    if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) return;
+    if (!Number.isFinite(BUDGET_RATIO_REBALANCE_INTERVAL_MS) || BUDGET_RATIO_REBALANCE_INTERVAL_MS <= 0) return;
 
-function maybeRebalanceAIBudgetsByElapsedGameMs(elapsedGameMs, reason = 'online') {
-    if (!Number.isFinite(elapsedGameMs) || elapsedGameMs <= 0) return;
-    if (!Number.isFinite(BUDGET_REBALANCE_INTERVAL_GAME_MS) || BUDGET_REBALANCE_INTERVAL_GAME_MS <= 0) return;
-
-    budgetRebalanceAccumulatorGameMs += elapsedGameMs;
-    const intervalsDue = Math.floor(budgetRebalanceAccumulatorGameMs / BUDGET_REBALANCE_INTERVAL_GAME_MS);
+    budgetRebalanceAccumulatorMs += elapsedMs;
+    const intervalsDue = Math.floor(budgetRebalanceAccumulatorMs / BUDGET_RATIO_REBALANCE_INTERVAL_MS);
     if (intervalsDue <= 0) return;
 
-    budgetRebalanceAccumulatorGameMs -= intervalsDue * BUDGET_REBALANCE_INTERVAL_GAME_MS;
+    budgetRebalanceAccumulatorMs -= intervalsDue * BUDGET_RATIO_REBALANCE_INTERVAL_MS;
     const rebalancedVillages = rebalanceAIVillageBudgets(gameState?.villages || []);
     if (rebalancedVillages <= 0) return;
 
+    const intervalMinutes = BUDGET_RATIO_REBALANCE_INTERVAL_MS / (60 * 1000);
     _log(
         'info',
         'Rebalance Budget',
-        `Rebalance eco/mil aplicado (${reason}): ${rebalancedVillages} aldeas IA, intervalos=${intervalsDue}, cada ${BUDGET_REBALANCE_INTERVAL_GAME_MINUTES}m de juego.`,
+        `Rebalance eco/mil aplicado (${reason}): ${rebalancedVillages} aldeas IA, intervalos=${intervalsDue}, cada ${intervalMinutes}m reales (fijo).`,
     );
 }
 
@@ -237,7 +234,7 @@ function mainLoop() {
         processMovements(currentTime);
         processOasisRegeneration(currentTime);
         updatePlayerProtectionStatus();
-        maybeRebalanceAIBudgetsByElapsedGameMs(getElapsedGameMsFromRealMs(elapsedRealMs), 'online');
+        maybeRebalanceAIBudgetsByElapsedMs(elapsedRealMs, 'online');
 
         aiControllers.forEach(controller => {
             controller.makeDecision(gameState);
@@ -624,7 +621,7 @@ self.onmessage = function(event) {
 
         aiControllers = [];
         villageProcessors = [];
-        budgetRebalanceAccumulatorGameMs = 0;
+        budgetRebalanceAccumulatorMs = 0;
         
         const personalityName = 'Pesadilla';
         const personality = AIPersonality[personalityName];
@@ -647,7 +644,7 @@ self.onmessage = function(event) {
         const savedLastTick = payload.savedState?.lastTick || now;
         if (now > savedLastTick) {
             simulateOfflineProgress(savedLastTick, now);
-            maybeRebalanceAIBudgetsByElapsedGameMs(getElapsedGameMsFromRealMs(now - savedLastTick), 'offline');
+            maybeRebalanceAIBudgetsByElapsedMs(now - savedLastTick, 'offline');
         }
         lastTick = now;
         

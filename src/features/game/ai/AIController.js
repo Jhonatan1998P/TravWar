@@ -5,6 +5,7 @@ import AIActionExecutor from './AIActionExecutor.js';
 import StrategicAI from './StrategicAI.js';
 import { AI_CONTROLLER_CONSTANTS } from './config/AIConstants.js';
 import { gameData } from '../core/GameData.js';
+import { resolvePhaseEngineRolloutFlags } from '../core/data/constants.js';
 import { applyDevelopmentBudgetMode } from './controller/economic.js';
 import { executeCommands } from './controller/commands.js';
 import { handleAttackReact, handleEspionageReact, processDodgeTasks, processReinforcementRecalls } from './controller/reactive.js';
@@ -260,6 +261,7 @@ class AIController {
     _constructionEmergencyLockByVillage = new Map();
     _commandWindowByVillage = new Map();
     _lastKnownGameState = null;
+    _phaseEngineRollout = resolvePhaseEngineRolloutFlags(null);
 
     constructor(ownerId, personality, race, archetype, sendCommandCallback, gameConfig, difficulty = 'Pesadilla') {
         this._ownerId = ownerId;
@@ -270,6 +272,7 @@ class AIController {
         this._sendCommandRaw = sendCommandCallback;
         this._sendCommand = this._dispatchCommand.bind(this);
         this._gameConfig = gameConfig;
+        this._phaseEngineRollout = resolvePhaseEngineRolloutFlags(this._gameConfig);
 
         this._strategicAI = new StrategicAI();
 
@@ -278,9 +281,11 @@ class AIController {
         this._militaryDecisionInterval = getMilitaryDecisionIntervalMs(gameSpeed);
         
         this._actionExecutor = new AIActionExecutor(this);
-        this._goalManager = (this._race === 'germans' || this._race === 'egyptians')
-            ? null
-            : new AIGoalManager(this, this._actionExecutor);
+        const isPhaseRace = this._race === 'germans' || this._race === 'egyptians';
+        const phaseEngineEnabled = this._isPhaseEngineEnabledForRace(this._race);
+        this._goalManager = (!isPhaseRace || !phaseEngineEnabled)
+            ? new AIGoalManager(this, this._actionExecutor)
+            : null;
     }
 
     getDecisionLog() {
@@ -300,7 +305,7 @@ class AIController {
             `=== AI Decision Log: ${this._ownerId} ===`,
             `Race: ${this._race} | Archetype: ${this._archetype}`,
             `Personality: ${this._difficulty}`,
-            `Macro engine: ${this._race === 'germans' || this._race === 'egyptians' ? 'PhaseEngine (sin GoalManager)' : 'GoalManager legacy'}`,
+            `Macro engine: ${this._getMacroEngineLabel()}`,
             `Villages managed: ${villageCount}`,
             `Active economic goals: ${totalEconGoals}`,
             `Active military goals: ${totalMilGoals}`,
@@ -362,6 +367,23 @@ class AIController {
     getActionExecutor() { return this._actionExecutor; }
     getGoalManager() { return this._goalManager; }
 
+    _isPhaseEngineEnabledForRace(race = this._race) {
+        if (race === 'germans') return this._phaseEngineRollout.germans !== false;
+        if (race === 'egyptians') return this._phaseEngineRollout.egyptians !== false;
+        return false;
+    }
+
+    _getMacroEngineLabel() {
+        const isPhaseRace = this._race === 'germans' || this._race === 'egyptians';
+        if (!isPhaseRace) {
+            return 'GoalManager legacy';
+        }
+
+        return this._isPhaseEngineEnabledForRace(this._race)
+            ? 'PhaseEngine (rollout activo)'
+            : 'GoalManager legacy (rollout desactivado)';
+    }
+
     handleGameNotification(notification, gameState) {
         this._lastKnownGameState = gameState;
 
@@ -370,6 +392,10 @@ class AIController {
         }
 
         if (notification.type !== 'recruitment:finished') {
+            return;
+        }
+
+        if (!this._isPhaseEngineEnabledForRace(this._race)) {
             return;
         }
 
@@ -531,6 +557,7 @@ class AIController {
             reactionCooldownByMovement: Array.from(this._reactionCooldownByMovement.entries()),
             counterattackCooldownByVillage: Array.from(this._counterattackCooldownByVillage.entries()),
             constructionEmergencyLockByVillage: Array.from(this._constructionEmergencyLockByVillage.entries()),
+            phaseEngineRollout: { ...this._phaseEngineRollout },
         };
     }
 
@@ -1239,7 +1266,7 @@ class AIController {
                 }
 
                 myVillages.forEach((village, index) => {
-                    if (this._race === 'germans') {
+                    if (this._race === 'germans' && this._isPhaseEngineEnabledForRace('germans')) {
                         const phaseState = this._ensureGermanPhaseState(village.id);
                         const result = runGermanEconomicPhaseCycle({
                             village,
@@ -1267,7 +1294,7 @@ class AIController {
                         return;
                     }
 
-                    if (this._race === 'egyptians') {
+                    if (this._race === 'egyptians' && this._isPhaseEngineEnabledForRace('egyptians')) {
                         const phaseState = this._ensureEgyptianPhaseState(village.id);
                         const result = runEgyptianEconomicPhaseCycle({
                             village,

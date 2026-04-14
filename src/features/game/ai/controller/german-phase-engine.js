@@ -5,9 +5,21 @@ import { countCombatTroopsInVillages } from '../utils/AITroopUtils.js';
 import {
     buildPrerequisiteResolverStepFromBlock,
     clonePhaseStep,
+    createOrRefreshPhaseSubGoal,
+    getCompletedTrainingCycles,
+    getPhaseStepSignature,
+    getQueuedTrainingMs,
+    handleCommonPhaseActionResult,
+    isPhaseQueueAvailable,
+    isPhaseResearchStepCompleted,
     getPhaseStepQueueType,
     isRecoverablePhaseBlockReason,
+    normalizePhaseSubGoalKind,
+    PHASE_SUBGOAL_CONFIG,
+    PHASE_SUBGOAL_KIND,
+    processPhaseActiveSubGoal,
     runPriorityStepList,
+    TRAINING_CYCLE_MS,
 } from './phase-engine-common.js';
 
 export const GERMAN_PHASE_IDS = Object.freeze({
@@ -186,8 +198,8 @@ const PHASE_FIVE_PRIORITY = Object.freeze({
 });
 
 const PHASE_SUBGOAL = Object.freeze({
+    ...PHASE_SUBGOAL_CONFIG,
     baseRetryMs: 45_000,
-    minRetryMs: 2_000,
     maxHistory: 24,
     logThrottleMs: 15_000,
     maxAttemptsBeforeReset: 16,
@@ -199,8 +211,6 @@ const RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG = Object.freeze({
     phase4: 3,
     phase5: 3,
 });
-
-const TRAINING_CYCLE_MS = 3 * 60 * 1000;
 
 const PHASE_CYCLE_TARGETS_BY_DIFFICULTY = Object.freeze({
     Normal: {
@@ -226,12 +236,7 @@ const PHASE_CYCLE_TARGETS_BY_DIFFICULTY = Object.freeze({
     },
 });
 
-const SUBGOAL_KIND = Object.freeze({
-    buildPrerequisite: 'build_prerequisite',
-    researchPrerequisite: 'research_prerequisite',
-    waitQueue: 'wait_queue',
-    waitResources: 'wait_resources',
-});
+const SUBGOAL_KIND = PHASE_SUBGOAL_KIND;
 
 const MILITARY_CONSTRUCTION_TYPES = new Set([
     'rallyPoint',
@@ -325,7 +330,7 @@ function getPhaseBucketForUnitId(village, phaseKey, unitId) {
 export function recordGermanPhaseRecruitmentProgress({ phaseState, phaseKey, village, unitId, count, timePerUnit }) {
     const progress = getCycleProgressByPhase(phaseState, phaseKey);
     const bucket = getPhaseBucketForUnitId(village, phaseKey, unitId);
-    const completedMs = Math.max(0, Math.floor((count || 0) * (timePerUnit || 0)));
+    const completedMs = getQueuedTrainingMs(count, timePerUnit);
 
     if (completedMs <= 0) return;
 
@@ -336,7 +341,7 @@ export function recordGermanPhaseRecruitmentProgress({ phaseState, phaseKey, vil
 }
 
 function msToCycles(ms) {
-    return Math.floor(Math.max(0, ms || 0) / TRAINING_CYCLE_MS);
+    return getCompletedTrainingCycles(ms, TRAINING_CYCLE_MS);
 }
 
 function getCycleProgressByPhase(phaseState, phaseKey) {
@@ -735,34 +740,7 @@ function cloneStep(step) {
 }
 
 function getStepSignature(step) {
-    if (!step) return 'step:none';
-
-    if (step.type === 'building') {
-        return `building:${step.buildingType || 'unknown'}:${step.level || 0}`;
-    }
-
-    if (step.type === 'resource_fields_level') {
-        return `resource_fields:${step.level || 0}`;
-    }
-
-    if (step.type === 'units') {
-        return `units:${step.unitType || 'unknown'}:${step.count ?? 'n/a'}`;
-    }
-
-    if (step.type === 'research') {
-        return `research:${step.unitType || step.unitId || 'unknown'}`;
-    }
-
-    if (step.type === 'upgrade') {
-        return `upgrade:${step.unitType || 'unknown'}:${step.level || 0}`;
-    }
-
-    return `${step.type || 'unknown'}:generic`;
-}
-
-function getRetryIntervalMs(gameSpeed) {
-    const normalizedSpeed = Math.max(gameSpeed || 1, 1);
-    return Math.max(PHASE_SUBGOAL.minRetryMs, Math.floor(PHASE_SUBGOAL.baseRetryMs / normalizedSpeed));
+    return getPhaseStepSignature(step);
 }
 
 function isRecoverableBlockReason(reason) {
@@ -902,19 +880,7 @@ function getQueueTypeForStep(step) {
 }
 
 function isQueueAvailable(village, queueType) {
-    if (queueType === 'construction') {
-        return (village.constructionQueue?.length || 0) < (village.maxConstructionSlots || 1);
-    }
-    if (queueType === 'research') {
-        return (village.research?.queue?.length || 0) === 0;
-    }
-    if (queueType === 'smithy') {
-        return (village.smithy?.queue?.length || 0) === 0;
-    }
-    if (queueType === 'recruitment') {
-        return true;
-    }
-    return true;
+    return isPhaseQueueAvailable(village, queueType);
 }
 
 function isBuildingStepCompleted(village, step) {
@@ -932,10 +898,7 @@ function isBuildingStepCompleted(village, step) {
 }
 
 function isResearchStepCompleted(village, step) {
-    if (!step) return true;
-    const unitId = step.unitId || step.unitType;
-    if (!unitId) return false;
-    return village.research?.completed?.includes(unitId);
+    return isPhaseResearchStepCompleted(village, step);
 }
 
 function getResourcePoolForKind(village, kind) {
@@ -1039,71 +1002,24 @@ function createOrRefreshSubGoal({
     gameSpeed,
     log,
 }) {
-    if (!blockedResult || !isRecoverableBlockReason(blockedResult.reason)) {
-        return false;
-    }
-
-    const now = Date.now();
-    const retryMs = getRetryIntervalMs(gameSpeed);
-    const resolverStep = buildPrerequisiteSubGoalStep(village, blockedResult);
-    const queueType = getQueueTypeForStep(blockedResult.step);
-    const priorityClass = getBlockedStepPriorityClass(phaseId, blockedResult.step);
-
-    let kind;
-    if (blockedResult.reason === 'QUEUE_FULL') {
-        kind = SUBGOAL_KIND.waitQueue;
-    } else if (resolverStep) {
-        kind = resolverStep.type === 'research'
-            ? SUBGOAL_KIND.researchPrerequisite
-            : SUBGOAL_KIND.buildPrerequisite;
-    } else if (blockedResult.reason === 'INSUFFICIENT_RESOURCES') {
-        kind = SUBGOAL_KIND.waitResources;
-    } else {
-        kind = SUBGOAL_KIND.waitResources;
-    }
-
-    const signature = `${phaseId}|${kind}|${blockedResult.reason}|${getStepSignature(blockedResult.step)}|${getStepSignature(resolverStep)}`;
-    const existing = phaseState.activeSubGoal;
-    if (existing?.signature === signature && existing.phaseId === phaseId) {
-        existing.updatedAt = now;
-        existing.priorityClass = priorityClass;
-        if (existing.kind === SUBGOAL_KIND.waitResources || existing.kind === SUBGOAL_KIND.waitQueue) {
-            existing.nextAttemptAt = now + retryMs;
-        }
-        return true;
-    }
-
-    phaseState.activeSubGoal = {
-        id: `sg_${now}_${Math.random().toString(36).slice(2, 7)}`,
-        signature,
-        kind,
+    return createOrRefreshPhaseSubGoal({
+        phaseState,
         phaseId,
+        blockedResult,
         source,
-        reason: blockedResult.reason,
-        priorityClass,
-        createdAt: now,
-        updatedAt: now,
-        nextAttemptAt: now,
-        attempts: 0,
-        lastLogAt: 0,
-        blockedStep: cloneStep(blockedResult.step),
-        resolverStep,
-        queueType,
-        latestDetails: blockedResult.details || null,
-    };
-
-    const resolverText = resolverStep
-        ? `resolver=${getStepSignature(resolverStep)}`
-        : `espera=${kind}`;
-    log(
-        'warn',
         village,
-        'Macro SubGoal',
-        `Bloqueo detectado (${blockedResult.reason}) en ${source}. Activando subgoal ${kind} (${resolverText}).`,
-        null,
-        'economic',
-    );
-    return true;
+        gameSpeed,
+        log,
+        config: PHASE_SUBGOAL,
+        subGoalKind: SUBGOAL_KIND,
+        cloneStep,
+        getStepSignature,
+        getQueueTypeForStep,
+        isRecoverableBlockReason: isRecoverableBlockReason,
+        buildResolverStep: buildPrerequisiteSubGoalStep,
+        getBlockedStepPriorityClass,
+        idPrefix: 'sg',
+    });
 }
 
 function processActiveSubGoal({
@@ -1114,157 +1030,26 @@ function processActiveSubGoal({
     gameSpeed,
     log,
 }) {
-    const subGoal = phaseState.activeSubGoal;
-    if (!subGoal) {
-        return { handled: false };
-    }
-
-    const now = Date.now();
-    if (subGoal.phaseId !== phaseState.activePhaseId) {
-        clearActiveSubGoal(
-            phaseState,
-            now,
-            village,
-            log,
-            'Subgoal descartado por cambio de fase.',
-            'phase_changed',
-        );
-        return { handled: false };
-    }
-
-    if (subGoal.kind === SUBGOAL_KIND.waitQueue) {
-        const queueFree = isQueueAvailable(village, subGoal.queueType);
-        if (queueFree) {
-            clearActiveSubGoal(
-                phaseState,
-                now,
-                village,
-                log,
-                `Subgoal de cola resuelto (${subGoal.queueType}).`,
-            );
-            return { handled: false };
-        }
-
-        subGoal.nextAttemptAt = now + getRetryIntervalMs(gameSpeed);
-        return { handled: true };
-    }
-
-    if (subGoal.kind === SUBGOAL_KIND.waitResources) {
-        const hasResources = hasEstimatedResourcesForStep(village, subGoal.blockedStep);
-        if (hasResources) {
-            clearActiveSubGoal(
-                phaseState,
-                now,
-                village,
-                log,
-                'Subgoal de ahorro resuelto: recursos disponibles para reintentar.',
-            );
-            return { handled: false };
-        }
-
-        if (now < subGoal.nextAttemptAt) {
-            return { handled: true };
-        }
-
-        subGoal.nextAttemptAt = now + getRetryIntervalMs(gameSpeed);
-        if (now - (subGoal.lastLogAt || 0) >= PHASE_SUBGOAL.logThrottleMs) {
-            subGoal.lastLogAt = now;
-            log(
-                'info',
-                village,
-                'Macro SubGoal',
-                `Esperando recursos para ${getStepSignature(subGoal.blockedStep)}.`,
-                null,
-                'economic',
-            );
-        }
-        return { handled: true };
-    }
-
-    const resolverStep = subGoal.resolverStep;
-    const completed = subGoal.kind === SUBGOAL_KIND.researchPrerequisite
-        ? isResearchStepCompleted(village, resolverStep)
-        : isBuildingStepCompleted(village, resolverStep);
-
-    if (completed) {
-        clearActiveSubGoal(
-            phaseState,
-            now,
-            village,
-            log,
-            `Subgoal resuelto: ${getStepSignature(resolverStep)}.`,
-        );
-        return { handled: false };
-    }
-
-    if (now < subGoal.nextAttemptAt) {
-        return { handled: true };
-    }
-
-    const result = actionExecutor.executePlanStep(village, resolverStep, gameState, { scope: 'per_village' });
-    subGoal.attempts = (subGoal.attempts || 0) + 1;
-    subGoal.updatedAt = now;
-    subGoal.nextAttemptAt = now + getRetryIntervalMs(gameSpeed);
-
-    if (result.success || result.reason === 'QUEUE_FULL') {
-        if (result.reason === 'QUEUE_FULL') {
-            subGoal.kind = SUBGOAL_KIND.waitQueue;
-            subGoal.queueType = getQueueTypeForStep(resolverStep);
-            subGoal.reason = 'QUEUE_FULL';
-            subGoal.blockedStep = cloneStep(resolverStep);
-            subGoal.resolverStep = null;
-        }
-        return { handled: true };
-    }
-
-    if (result.reason === 'INSUFFICIENT_RESOURCES') {
-        subGoal.kind = SUBGOAL_KIND.waitResources;
-        subGoal.reason = 'INSUFFICIENT_RESOURCES';
-        subGoal.blockedStep = cloneStep(resolverStep);
-        subGoal.resolverStep = null;
-        return { handled: true };
-    }
-
-    if (isRecoverableBlockReason(result.reason)) {
-        const nestedResolver = buildPrerequisiteSubGoalStep(village, {
-            ...result,
-            step: resolverStep,
-        });
-        if (nestedResolver) {
-            subGoal.resolverStep = nestedResolver;
-            subGoal.kind = nestedResolver.type === 'research'
-                ? SUBGOAL_KIND.researchPrerequisite
-                : SUBGOAL_KIND.buildPrerequisite;
-            subGoal.reason = result.reason;
-            return { handled: true };
-        }
-    }
-
-    if (subGoal.attempts >= PHASE_SUBGOAL.maxAttemptsBeforeReset) {
-        clearActiveSubGoal(
-            phaseState,
-            now,
-            village,
-            log,
-            `Subgoal reiniciado tras ${subGoal.attempts} intentos sin resolver.`,
-            'max_attempts_reached',
-        );
-        return { handled: false };
-    }
-
-    if (now - (subGoal.lastLogAt || 0) >= PHASE_SUBGOAL.logThrottleMs) {
-        subGoal.lastLogAt = now;
-        log(
-            'warn',
-            village,
-            'Macro SubGoal',
-            `Subgoal ${subGoal.kind} sigue bloqueado. Ultimo rechazo: ${result.reason || 'UNKNOWN'}.`,
-            result.details || null,
-            'economic',
-        );
-    }
-
-    return { handled: true };
+    return processPhaseActiveSubGoal({
+        phaseState,
+        village,
+        gameState,
+        actionExecutor,
+        gameSpeed,
+        log,
+        config: PHASE_SUBGOAL,
+        subGoalKind: SUBGOAL_KIND,
+        cloneStep,
+        getStepSignature,
+        getQueueTypeForStep,
+        isQueueAvailable,
+        isResearchStepCompleted,
+        isBuildingStepCompleted,
+        buildResolverStep: buildPrerequisiteSubGoalStep,
+        isRecoverableBlockReason: isRecoverableBlockReason,
+        waitResourcesMode: 'hold_until_resources',
+        hasResourcesForBlockedStep: hasEstimatedResourcesForStep,
+    });
 }
 
 function sameRatio(currentRatio, targetRatio) {
@@ -2138,43 +1923,20 @@ function handlePhaseActionResult({
     log,
     onSuccess,
 }) {
-    if (!result) return { terminal: false };
-
-    if (result.success) {
-        if (typeof onSuccess === 'function') {
-            onSuccess(result);
-        }
-        return { terminal: true };
-    }
-
-    if (result.reason === 'QUEUE_FULL') {
-        createOrRefreshSubGoal({
-            phaseState,
-            phaseId,
-            blockedResult: result,
-            source,
-            village,
-            gameSpeed,
-            log,
-        });
-        return { terminal: true };
-    }
-
-    const subGoalCreated = createOrRefreshSubGoal({
+    return handleCommonPhaseActionResult({
+        result,
         phaseState,
         phaseId,
-        blockedResult: result,
         source,
         village,
         gameSpeed,
-        log,
+        onSuccess,
+        queueFullPriority: true,
+        createOrRefreshSubGoal: payload => createOrRefreshSubGoal({
+            ...payload,
+            log,
+        }),
     });
-
-    if (subGoalCreated) {
-        return { terminal: true };
-    }
-
-    return { terminal: false };
 }
 
 function registerRecruitmentCommitFromAction({ result, phaseState, phaseId, village, difficulty, log }) {
@@ -2359,6 +2121,142 @@ function transitionToDone(phaseState, now, exit, log, village) {
     );
 }
 
+const GERMAN_LEGACY_PHASE_ID_MAP = Object.freeze({
+    german_phase_2_pending: GERMAN_PHASE_IDS.phase2,
+    german_phase_3_pending: GERMAN_PHASE_IDS.phase3,
+    german_phase_4_pending: GERMAN_PHASE_IDS.phase4,
+    german_phase_5_pending: GERMAN_PHASE_IDS.phase5,
+    german_phase_done: GERMAN_PHASE_IDS.phaseDone,
+    german_phase_template_done: GERMAN_PHASE_IDS.phaseDone,
+});
+
+const GERMAN_CYCLE_BUCKET_ALIAS = Object.freeze({
+    defensiveInfantry: 'defensiveInfantryMs',
+    offensiveInfantry: 'offensiveInfantryMs',
+    offensiveCavalry: 'offensiveCavalryMs',
+    scout: 'scoutMs',
+    ram: 'ramMs',
+    catapult: 'catapultMs',
+    expansion: 'expansionMs',
+});
+
+function normalizeGermanPhaseId(rawPhaseId, fallbackPhaseId) {
+    const normalized = GERMAN_LEGACY_PHASE_ID_MAP[rawPhaseId] || rawPhaseId;
+    if (Object.values(GERMAN_PHASE_IDS).includes(normalized)) {
+        return normalized;
+    }
+    return fallbackPhaseId;
+}
+
+function normalizeGermanTransition(record) {
+    if (!record || typeof record !== 'object') return null;
+
+    const from = normalizeGermanPhaseId(
+        record.from || record.fromPhase || record.phaseFrom,
+        null,
+    );
+    const to = normalizeGermanPhaseId(
+        record.to || record.toPhase || record.phaseTo,
+        null,
+    );
+    if (!from || !to) return null;
+
+    return {
+        from,
+        to,
+        reason: record.reason || record.cause || 'UNKNOWN',
+        at: Number.isFinite(record.at) ? record.at : Number.isFinite(record.timestamp) ? record.timestamp : Date.now(),
+        status: record.status || 'phase_transition',
+    };
+}
+
+function normalizeGermanTransitions(rawTransitions) {
+    if (!Array.isArray(rawTransitions)) return [];
+    return rawTransitions
+        .map(normalizeGermanTransition)
+        .filter(Boolean);
+}
+
+function normalizeGermanCycleProgressEntry(rawEntry) {
+    const normalized = createEmptyCycleProgress();
+    if (!rawEntry || typeof rawEntry !== 'object') {
+        return normalized;
+    }
+
+    for (const key of Object.keys(normalized)) {
+        normalized[key] = Math.max(0, Number(rawEntry[key]) || 0);
+    }
+
+    const legacyTotalCycles = Number(rawEntry.total);
+    if (Number.isFinite(legacyTotalCycles) && legacyTotalCycles > 0 && normalized.totalMs <= 0) {
+        normalized.totalMs = Math.floor(legacyTotalCycles * TRAINING_CYCLE_MS);
+    }
+
+    for (const [legacyKey, bucketKey] of Object.entries(GERMAN_CYCLE_BUCKET_ALIAS)) {
+        const value = Number(rawEntry[legacyKey]);
+        if (Number.isFinite(value) && value > 0 && normalized[bucketKey] <= 0) {
+            normalized[bucketKey] = Math.floor(value * TRAINING_CYCLE_MS);
+        }
+    }
+
+    if (normalized.totalMs <= 0) {
+        const bucketMs = Object.entries(normalized)
+            .filter(([key]) => key !== 'totalMs')
+            .reduce((sum, [, value]) => sum + (Number(value) || 0), 0);
+        normalized.totalMs = Math.max(0, bucketMs);
+    }
+
+    return normalized;
+}
+
+function normalizeGermanPhaseCycleProgress(rawProgress) {
+    const source = rawProgress && typeof rawProgress === 'object' ? rawProgress : {};
+    const aliases = {
+        phase2: ['phase2', 'phase_2'],
+        phase3: ['phase3', 'phase_3'],
+        phase4: ['phase4', 'phase_4'],
+        phase5: ['phase5', 'phase_5'],
+    };
+
+    return {
+        phase2: normalizeGermanCycleProgressEntry(source[aliases.phase2.find(key => key in source)]),
+        phase3: normalizeGermanCycleProgressEntry(source[aliases.phase3.find(key => key in source)]),
+        phase4: normalizeGermanCycleProgressEntry(source[aliases.phase4.find(key => key in source)]),
+        phase5: normalizeGermanCycleProgressEntry(source[aliases.phase5.find(key => key in source)]),
+    };
+}
+
+function normalizeGermanSubGoalRecord(rawSubGoal, fallbackPhaseId) {
+    if (!rawSubGoal || typeof rawSubGoal !== 'object') return null;
+
+    const blockedStep = cloneStep(rawSubGoal.blockedStep || rawSubGoal.step || null);
+    const resolverStep = cloneStep(rawSubGoal.resolverStep || rawSubGoal.resolver || null);
+    const kind = normalizePhaseSubGoalKind(rawSubGoal.kind || rawSubGoal.type, SUBGOAL_KIND);
+    const phaseId = normalizeGermanPhaseId(rawSubGoal.phaseId, fallbackPhaseId);
+    const reason = rawSubGoal.reason || rawSubGoal.blockReason || 'UNKNOWN';
+    const queueType = rawSubGoal.queueType || getQueueTypeForStep(blockedStep || resolverStep);
+    const createdAt = Number.isFinite(rawSubGoal.createdAt) ? rawSubGoal.createdAt : Date.now();
+
+    return {
+        id: rawSubGoal.id || `sg_${createdAt}_${Math.random().toString(36).slice(2, 7)}`,
+        signature: rawSubGoal.signature || `${phaseId}|${kind}|${reason}|${getStepSignature(blockedStep)}|${getStepSignature(resolverStep)}`,
+        kind,
+        phaseId,
+        source: rawSubGoal.source || 'hydrated',
+        reason,
+        priorityClass: rawSubGoal.priorityClass || 'general',
+        createdAt,
+        updatedAt: Number.isFinite(rawSubGoal.updatedAt) ? rawSubGoal.updatedAt : createdAt,
+        nextAttemptAt: Number.isFinite(rawSubGoal.nextAttemptAt) ? rawSubGoal.nextAttemptAt : createdAt,
+        attempts: Math.max(0, Math.floor(Number(rawSubGoal.attempts) || 0)),
+        lastLogAt: Number.isFinite(rawSubGoal.lastLogAt) ? rawSubGoal.lastLogAt : 0,
+        blockedStep,
+        resolverStep,
+        queueType,
+        latestDetails: rawSubGoal.latestDetails || rawSubGoal.details || null,
+    };
+}
+
 export function createDefaultGermanPhaseState(now = Date.now()) {
     return {
         activePhaseId: GERMAN_PHASE_IDS.phase1,
@@ -2396,15 +2294,14 @@ export function hydrateGermanPhaseState(rawState = null, now = Date.now()) {
     const fallback = createDefaultGermanPhaseState(now);
     if (!rawState || typeof rawState !== 'object') return fallback;
 
-    const normalizedPhaseId = rawState.activePhaseId === 'german_phase_2_pending'
-        ? GERMAN_PHASE_IDS.phase2
-        : rawState.activePhaseId === 'german_phase_3_pending'
-            ? GERMAN_PHASE_IDS.phase3
-            : rawState.activePhaseId === 'german_phase_4_pending'
-                ? GERMAN_PHASE_IDS.phase4
-                : rawState.activePhaseId === 'german_phase_5_pending'
-                    ? GERMAN_PHASE_IDS.phase5
-        : (rawState.activePhaseId || fallback.activePhaseId);
+    const normalizedPhaseId = normalizeGermanPhaseId(rawState.activePhaseId, fallback.activePhaseId);
+    const normalizedCycleProgress = normalizeGermanPhaseCycleProgress(rawState.phaseCycleProgress);
+    const normalizedActiveSubGoal = normalizeGermanSubGoalRecord(rawState.activeSubGoal, normalizedPhaseId);
+    const normalizedSubGoalHistory = Array.isArray(rawState.subGoalHistory)
+        ? rawState.subGoalHistory
+            .map(entry => normalizeGermanSubGoalRecord(entry, normalizedPhaseId))
+            .filter(Boolean)
+        : [];
 
     return {
         activePhaseId: normalizedPhaseId,
@@ -2413,40 +2310,47 @@ export function hydrateGermanPhaseState(rawState = null, now = Date.now()) {
         lastIdleLogAt: Number.isFinite(rawState.lastIdleLogAt) ? rawState.lastIdleLogAt : 0,
         lastConstructionReserveLogAt: Number.isFinite(rawState.lastConstructionReserveLogAt) ? rawState.lastConstructionReserveLogAt : 0,
         lastThreatOverrideLogAt: Number.isFinite(rawState.lastThreatOverrideLogAt) ? rawState.lastThreatOverrideLogAt : 0,
-        transitions: Array.isArray(rawState.transitions) ? rawState.transitions : [],
+        transitions: normalizeGermanTransitions(rawState.transitions),
         phase1CompletedAt: Number.isFinite(rawState.phase1CompletedAt) ? rawState.phase1CompletedAt : null,
         phase2StartedAt: Number.isFinite(rawState.phase2StartedAt) ? rawState.phase2StartedAt : null,
         phase3StartedAt: Number.isFinite(rawState.phase3StartedAt) ? rawState.phase3StartedAt : null,
         phase4StartedAt: Number.isFinite(rawState.phase4StartedAt) ? rawState.phase4StartedAt : null,
         phase5StartedAt: Number.isFinite(rawState.phase5StartedAt) ? rawState.phase5StartedAt : null,
-        phase2MilitaryQueueSamples: Number.isFinite(rawState.phase2MilitaryQueueSamples) ? rawState.phase2MilitaryQueueSamples : 0,
-        phase2MilitaryQueueActiveSamples: Number.isFinite(rawState.phase2MilitaryQueueActiveSamples) ? rawState.phase2MilitaryQueueActiveSamples : 0,
-        phase4MilitaryQueueSamples: Number.isFinite(rawState.phase4MilitaryQueueSamples) ? rawState.phase4MilitaryQueueSamples : 0,
-        phase4MilitaryQueueActiveSamples: Number.isFinite(rawState.phase4MilitaryQueueActiveSamples) ? rawState.phase4MilitaryQueueActiveSamples : 0,
+        phase2MilitaryQueueSamples: Number.isFinite(rawState.phase2MilitaryQueueSamples)
+            ? rawState.phase2MilitaryQueueSamples
+            : Number.isFinite(rawState.phase2QueueSamples)
+                ? rawState.phase2QueueSamples
+                : 0,
+        phase2MilitaryQueueActiveSamples: Number.isFinite(rawState.phase2MilitaryQueueActiveSamples)
+            ? rawState.phase2MilitaryQueueActiveSamples
+            : Number.isFinite(rawState.phase2QueueActiveSamples)
+                ? rawState.phase2QueueActiveSamples
+                : 0,
+        phase4MilitaryQueueSamples: Number.isFinite(rawState.phase4MilitaryQueueSamples)
+            ? rawState.phase4MilitaryQueueSamples
+            : Number.isFinite(rawState.phase4QueueSamples)
+                ? rawState.phase4QueueSamples
+                : 0,
+        phase4MilitaryQueueActiveSamples: Number.isFinite(rawState.phase4MilitaryQueueActiveSamples)
+            ? rawState.phase4MilitaryQueueActiveSamples
+            : Number.isFinite(rawState.phase4QueueActiveSamples)
+                ? rawState.phase4QueueActiveSamples
+                : 0,
         phase4ConsecutiveActiveSamples: Number.isFinite(rawState.phase4ConsecutiveActiveSamples) ? rawState.phase4ConsecutiveActiveSamples : 0,
-        phase5MilitaryQueueSamples: Number.isFinite(rawState.phase5MilitaryQueueSamples) ? rawState.phase5MilitaryQueueSamples : 0,
-        phase5MilitaryQueueActiveSamples: Number.isFinite(rawState.phase5MilitaryQueueActiveSamples) ? rawState.phase5MilitaryQueueActiveSamples : 0,
+        phase5MilitaryQueueSamples: Number.isFinite(rawState.phase5MilitaryQueueSamples)
+            ? rawState.phase5MilitaryQueueSamples
+            : Number.isFinite(rawState.phase5QueueSamples)
+                ? rawState.phase5QueueSamples
+                : 0,
+        phase5MilitaryQueueActiveSamples: Number.isFinite(rawState.phase5MilitaryQueueActiveSamples)
+            ? rawState.phase5MilitaryQueueActiveSamples
+            : Number.isFinite(rawState.phase5QueueActiveSamples)
+                ? rawState.phase5QueueActiveSamples
+                : 0,
         phase5ConsecutiveActiveSamples: Number.isFinite(rawState.phase5ConsecutiveActiveSamples) ? rawState.phase5ConsecutiveActiveSamples : 0,
-        phaseCycleProgress: {
-            phase2: {
-                ...createEmptyCycleProgress(),
-                ...(rawState.phaseCycleProgress?.phase2 || {}),
-            },
-            phase3: {
-                ...createEmptyCycleProgress(),
-                ...(rawState.phaseCycleProgress?.phase3 || {}),
-            },
-            phase4: {
-                ...createEmptyCycleProgress(),
-                ...(rawState.phaseCycleProgress?.phase4 || {}),
-            },
-            phase5: {
-                ...createEmptyCycleProgress(),
-                ...(rawState.phaseCycleProgress?.phase5 || {}),
-            },
-        },
-        activeSubGoal: rawState.activeSubGoal && typeof rawState.activeSubGoal === 'object' ? rawState.activeSubGoal : null,
-        subGoalHistory: Array.isArray(rawState.subGoalHistory) ? rawState.subGoalHistory : [],
+        phaseCycleProgress: normalizedCycleProgress,
+        activeSubGoal: normalizedActiveSubGoal,
+        subGoalHistory: normalizedSubGoalHistory,
     };
 }
 
@@ -2454,6 +2358,7 @@ export function serializeGermanPhaseStates(stateByVillageMap) {
     const serialized = {};
     for (const [villageId, state] of stateByVillageMap.entries()) {
         serialized[villageId] = {
+            schemaVersion: 2,
             activePhaseId: state.activePhaseId,
             startedAt: state.startedAt,
             lastEvaluationAt: state.lastEvaluationAt,

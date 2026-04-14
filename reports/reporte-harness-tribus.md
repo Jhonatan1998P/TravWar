@@ -1,6 +1,6 @@
 # 📊 Reporte Harness IA Tribus (Markdown)
 
-- 🗓️ Generado: 2026-04-13T21:05:42.341Z
+- 🗓️ Generado: 2026-04-14T11:40:36.144Z
 - 🧪 Cobertura: macro por fases + eventos tácticos (espionaje, raid, ataques, asedio, conquista, contraataques, expansión).
 - ⚙️ Velocidades/semillas: `x1`, `x100`, `x1000`.
 - 🧠 Tribus evaluadas: `Egipcios`, `Germanos`.

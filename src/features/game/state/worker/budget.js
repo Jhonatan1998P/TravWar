@@ -1,7 +1,9 @@
+import { BUDGET_RATIO_REBALANCE_INTERVAL_MS } from '../../core/data/constants.js';
+
 const RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
 const DEFAULT_RATIO = Object.freeze({ econ: 0.5, mil: 0.5 });
-export const BUDGET_REBALANCE_INTERVAL_GAME_MINUTES = 10;
-export const BUDGET_REBALANCE_INTERVAL_GAME_MS = BUDGET_REBALANCE_INTERVAL_GAME_MINUTES * 60 * 1000;
+export const BUDGET_REBALANCE_INTERVAL_GAME_MS = BUDGET_RATIO_REBALANCE_INTERVAL_MS;
+export const BUDGET_REBALANCE_INTERVAL_GAME_MINUTES = BUDGET_REBALANCE_INTERVAL_GAME_MS / (60 * 1000);
 
 function getNormalizedRatio(budgetRatio) {
     const rawEcon = Number.isFinite(budgetRatio?.econ) ? Math.max(0, budgetRatio.econ) : DEFAULT_RATIO.econ;

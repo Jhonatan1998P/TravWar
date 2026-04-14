@@ -9,6 +9,468 @@ export const PHASE_RECOVERABLE_BLOCK_REASONS = new Set([
     'EXPANSION_SLOTS_FULL',
 ]);
 
+export const TRAINING_CYCLE_MS = 3 * 60 * 1000;
+
+export const PHASE_SUBGOAL_KIND = Object.freeze({
+    buildPrerequisite: 'build_prerequisite',
+    researchPrerequisite: 'research_prerequisite',
+    waitQueue: 'wait_queue',
+    waitResources: 'wait_resources',
+});
+
+export const PHASE_SUBGOAL_CONFIG = Object.freeze({
+    baseRetryMs: 30_000,
+    minRetryMs: 2_000,
+    logThrottleMs: 20_000,
+    maxAttemptsBeforeReset: 8,
+    maxHistory: 40,
+});
+
+const SUBGOAL_KIND_ALIASES = Object.freeze({
+    build: PHASE_SUBGOAL_KIND.buildPrerequisite,
+    build_prereq: PHASE_SUBGOAL_KIND.buildPrerequisite,
+    research: PHASE_SUBGOAL_KIND.researchPrerequisite,
+    research_prereq: PHASE_SUBGOAL_KIND.researchPrerequisite,
+    queue: PHASE_SUBGOAL_KIND.waitQueue,
+    wait_queue: PHASE_SUBGOAL_KIND.waitQueue,
+    resources: PHASE_SUBGOAL_KIND.waitResources,
+    wait_resources: PHASE_SUBGOAL_KIND.waitResources,
+});
+
+export function getCompletedTrainingCycles(ms, cycleMs = TRAINING_CYCLE_MS) {
+    return Math.floor(Math.max(0, Number(ms) || 0) / Math.max(1, Number(cycleMs) || TRAINING_CYCLE_MS));
+}
+
+export function getQueuedTrainingMs(count, timePerUnit) {
+    if (!Number.isFinite(count) || count <= 0) return 0;
+    if (!Number.isFinite(timePerUnit) || timePerUnit <= 0) return 0;
+    return Math.max(0, Math.floor(count * timePerUnit));
+}
+
+export function getSubGoalRetryIntervalMs(gameSpeed, config = PHASE_SUBGOAL_CONFIG) {
+    const normalizedSpeed = Math.max(Number(gameSpeed) || 1, 1);
+    return Math.max(config.minRetryMs, Math.floor(config.baseRetryMs / normalizedSpeed));
+}
+
+export function getPhaseStepSignature(step) {
+    if (!step) return 'step:none';
+    if (step.type === 'building') return `building:${step.buildingType || 'unknown'}:${step.level || 0}`;
+    if (step.type === 'resource_fields_level') return `resource_fields:${step.level || 0}`;
+    if (step.type === 'units') return `units:${step.unitType || 'unknown'}:${step.count ?? 'n/a'}`;
+    if (step.type === 'research') return `research:${step.unitType || step.unitId || 'unknown'}`;
+    if (step.type === 'upgrade') return `upgrade:${step.unitType || 'unknown'}:${step.level || 0}`;
+    return `${step.type || 'unknown'}:generic`;
+}
+
+export function isPhaseQueueAvailable(village, queueType) {
+    if (queueType === 'construction') {
+        return (village.constructionQueue?.length || 0) < (village.maxConstructionSlots || 1);
+    }
+    if (queueType === 'research') {
+        return (village.research?.queue?.length || 0) === 0;
+    }
+    if (queueType === 'smithy') {
+        return (village.smithy?.queue?.length || 0) === 0;
+    }
+    if (queueType === 'recruitment') {
+        return true;
+    }
+    return true;
+}
+
+export function isPhaseResearchStepCompleted(village, step) {
+    if (!step) return true;
+    const unitId = step.unitId || step.unitType;
+    if (!unitId) return false;
+    return village.research?.completed?.includes(unitId);
+}
+
+export function normalizePhaseSubGoalKind(kind, subGoalKind = PHASE_SUBGOAL_KIND) {
+    if (kind && Object.values(subGoalKind).includes(kind)) {
+        return kind;
+    }
+
+    if (!kind) return subGoalKind.waitResources;
+
+    return SUBGOAL_KIND_ALIASES[kind] || subGoalKind.waitResources;
+}
+
+export function createOrRefreshPhaseSubGoal({
+    phaseState,
+    phaseId,
+    blockedResult,
+    source,
+    village,
+    gameSpeed,
+    log,
+    config = PHASE_SUBGOAL_CONFIG,
+    subGoalKind = PHASE_SUBGOAL_KIND,
+    cloneStep = clonePhaseStep,
+    getStepSignature = getPhaseStepSignature,
+    getQueueTypeForStep = getPhaseStepQueueType,
+    isRecoverableBlockReason = isRecoverablePhaseBlockReason,
+    buildResolverStep = null,
+    getBlockedStepPriorityClass = null,
+    idPrefix = 'sg',
+}) {
+    if (!blockedResult || !isRecoverableBlockReason(blockedResult.reason)) {
+        return false;
+    }
+
+    const now = Date.now();
+    const retryMs = getSubGoalRetryIntervalMs(gameSpeed, config);
+    const resolverStep = typeof buildResolverStep === 'function'
+        ? buildResolverStep(village, blockedResult)
+        : null;
+    const queueType = getQueueTypeForStep(blockedResult.step);
+    const priorityClass = typeof getBlockedStepPriorityClass === 'function'
+        ? (getBlockedStepPriorityClass(phaseId, blockedResult.step) || 'general')
+        : undefined;
+
+    let kind;
+    if (blockedResult.reason === 'QUEUE_FULL') {
+        kind = subGoalKind.waitQueue;
+    } else if (resolverStep) {
+        kind = resolverStep.type === 'research'
+            ? subGoalKind.researchPrerequisite
+            : subGoalKind.buildPrerequisite;
+    } else if (blockedResult.reason === 'INSUFFICIENT_RESOURCES') {
+        kind = subGoalKind.waitResources;
+    } else {
+        kind = subGoalKind.waitResources;
+    }
+
+    const signature = `${phaseId}|${kind}|${blockedResult.reason}|${getStepSignature(blockedResult.step)}|${getStepSignature(resolverStep)}`;
+    const existing = phaseState.activeSubGoal;
+    if (existing?.signature === signature && existing.phaseId === phaseId) {
+        existing.updatedAt = now;
+        if (priorityClass) {
+            existing.priorityClass = priorityClass;
+        }
+        if (existing.kind === subGoalKind.waitResources || existing.kind === subGoalKind.waitQueue) {
+            existing.nextAttemptAt = now + retryMs;
+        }
+        return true;
+    }
+
+    phaseState.activeSubGoal = {
+        id: `${idPrefix}_${now}_${Math.random().toString(36).slice(2, 7)}`,
+        signature,
+        kind,
+        phaseId,
+        source,
+        reason: blockedResult.reason,
+        createdAt: now,
+        updatedAt: now,
+        nextAttemptAt: now,
+        attempts: 0,
+        lastLogAt: 0,
+        blockedStep: cloneStep(blockedResult.step),
+        resolverStep,
+        queueType,
+        latestDetails: blockedResult.details || null,
+        ...(priorityClass ? { priorityClass } : {}),
+    };
+
+    const resolverText = resolverStep
+        ? `resolver=${getStepSignature(resolverStep)}`
+        : `espera=${kind}`;
+    if (typeof log === 'function') {
+        log(
+            'warn',
+            village,
+            'Macro SubGoal',
+            `Bloqueo detectado (${blockedResult.reason}) en ${source}. Activando subgoal ${kind} (${resolverText}).`,
+            null,
+            'economic',
+        );
+    }
+
+    return true;
+}
+
+export function processPhaseActiveSubGoal({
+    phaseState,
+    village,
+    gameState,
+    actionExecutor,
+    gameSpeed,
+    log,
+    config = PHASE_SUBGOAL_CONFIG,
+    subGoalKind = PHASE_SUBGOAL_KIND,
+    cloneStep = clonePhaseStep,
+    getStepSignature = getPhaseStepSignature,
+    getQueueTypeForStep = getPhaseStepQueueType,
+    isQueueAvailable = isPhaseQueueAvailable,
+    isResearchStepCompleted = isPhaseResearchStepCompleted,
+    isBuildingStepCompleted,
+    buildResolverStep,
+    isRecoverableBlockReason = isRecoverablePhaseBlockReason,
+    waitResourcesMode = 'hold_until_resources',
+    hasResourcesForBlockedStep = null,
+}) {
+    const subGoal = phaseState.activeSubGoal;
+    if (!subGoal) {
+        return { handled: false };
+    }
+
+    const now = Date.now();
+    if (subGoal.phaseId !== phaseState.activePhaseId) {
+        clearPhaseActiveSubGoal({
+            phaseState,
+            now,
+            village,
+            log,
+            message: 'Subgoal descartado por cambio de fase.',
+            status: 'phase_changed',
+            config,
+        });
+        return { handled: false };
+    }
+
+    if (subGoal.kind === subGoalKind.waitQueue) {
+        const queueFree = isQueueAvailable(village, subGoal.queueType);
+        if (queueFree) {
+            clearPhaseActiveSubGoal({
+                phaseState,
+                now,
+                village,
+                log,
+                message: `Subgoal de cola resuelto (${subGoal.queueType}).`,
+                config,
+            });
+            return { handled: false };
+        }
+
+        subGoal.nextAttemptAt = now + getSubGoalRetryIntervalMs(gameSpeed, config);
+        return { handled: true };
+    }
+
+    if (subGoal.kind === subGoalKind.waitResources) {
+        if (waitResourcesMode === 'retry_after_interval') {
+            if (now < subGoal.nextAttemptAt) {
+                return { handled: true };
+            }
+
+            clearPhaseActiveSubGoal({
+                phaseState,
+                now,
+                village,
+                log,
+                message: 'Reintentando objetivo bloqueado por recursos.',
+                status: 'retry_after_wait_resources',
+                config,
+            });
+            return { handled: false };
+        }
+
+        const hasResources = typeof hasResourcesForBlockedStep === 'function'
+            ? hasResourcesForBlockedStep(village, subGoal.blockedStep)
+            : false;
+        if (hasResources) {
+            clearPhaseActiveSubGoal({
+                phaseState,
+                now,
+                village,
+                log,
+                message: 'Subgoal de ahorro resuelto: recursos disponibles para reintentar.',
+                config,
+            });
+            return { handled: false };
+        }
+
+        if (now < subGoal.nextAttemptAt) {
+            return { handled: true };
+        }
+
+        subGoal.nextAttemptAt = now + getSubGoalRetryIntervalMs(gameSpeed, config);
+        if (now - (subGoal.lastLogAt || 0) >= config.logThrottleMs) {
+            subGoal.lastLogAt = now;
+            log(
+                'info',
+                village,
+                'Macro SubGoal',
+                `Esperando recursos para ${getStepSignature(subGoal.blockedStep)}.`,
+                null,
+                'economic',
+            );
+        }
+        return { handled: true };
+    }
+
+    const resolverStep = subGoal.resolverStep;
+    const completed = subGoal.kind === subGoalKind.researchPrerequisite
+        ? isResearchStepCompleted(village, resolverStep)
+        : isBuildingStepCompleted(village, resolverStep);
+
+    if (completed) {
+        clearPhaseActiveSubGoal({
+            phaseState,
+            now,
+            village,
+            log,
+            message: `Subgoal resuelto: ${getStepSignature(resolverStep)}.`,
+            config,
+        });
+        return { handled: false };
+    }
+
+    if (now < subGoal.nextAttemptAt) {
+        return { handled: true };
+    }
+
+    const result = actionExecutor.executePlanStep(village, resolverStep, gameState, { scope: 'per_village' });
+    subGoal.attempts = (subGoal.attempts || 0) + 1;
+    subGoal.updatedAt = now;
+    subGoal.nextAttemptAt = now + getSubGoalRetryIntervalMs(gameSpeed, config);
+
+    if (result.success || result.reason === 'QUEUE_FULL') {
+        if (result.reason === 'QUEUE_FULL') {
+            subGoal.kind = subGoalKind.waitQueue;
+            subGoal.queueType = getQueueTypeForStep(resolverStep);
+            subGoal.reason = 'QUEUE_FULL';
+            subGoal.blockedStep = cloneStep(resolverStep);
+            subGoal.resolverStep = null;
+        }
+        return { handled: true };
+    }
+
+    if (result.reason === 'INSUFFICIENT_RESOURCES') {
+        subGoal.kind = subGoalKind.waitResources;
+        subGoal.reason = 'INSUFFICIENT_RESOURCES';
+        subGoal.blockedStep = cloneStep(resolverStep);
+        subGoal.resolverStep = null;
+        return { handled: true };
+    }
+
+    if (isRecoverableBlockReason(result.reason)) {
+        const nestedResolver = typeof buildResolverStep === 'function'
+            ? buildResolverStep(village, {
+                ...result,
+                step: resolverStep,
+            })
+            : null;
+        if (nestedResolver) {
+            subGoal.resolverStep = nestedResolver;
+            subGoal.kind = nestedResolver.type === 'research'
+                ? subGoalKind.researchPrerequisite
+                : subGoalKind.buildPrerequisite;
+            subGoal.reason = result.reason;
+            return { handled: true };
+        }
+    }
+
+    if (subGoal.attempts >= config.maxAttemptsBeforeReset) {
+        clearPhaseActiveSubGoal({
+            phaseState,
+            now,
+            village,
+            log,
+            message: `Subgoal reiniciado tras ${subGoal.attempts} intentos sin resolver.`,
+            status: 'max_attempts_reached',
+            config,
+        });
+        return { handled: false };
+    }
+
+    if (now - (subGoal.lastLogAt || 0) >= config.logThrottleMs) {
+        subGoal.lastLogAt = now;
+        log(
+            'warn',
+            village,
+            'Macro SubGoal',
+            `Subgoal ${subGoal.kind} sigue bloqueado. Ultimo rechazo: ${result.reason || 'UNKNOWN'}.`,
+            result.details || null,
+            'economic',
+        );
+    }
+
+    return { handled: true };
+}
+
+export function pushPhaseSubGoalHistory(phaseState, record, config = PHASE_SUBGOAL_CONFIG) {
+    phaseState.subGoalHistory = Array.isArray(phaseState.subGoalHistory) ? phaseState.subGoalHistory : [];
+    phaseState.subGoalHistory.push(record);
+    if (phaseState.subGoalHistory.length > config.maxHistory) {
+        phaseState.subGoalHistory.shift();
+    }
+}
+
+export function clearPhaseActiveSubGoal({
+    phaseState,
+    now,
+    village,
+    log,
+    message = null,
+    status = 'resolved',
+    config = PHASE_SUBGOAL_CONFIG,
+}) {
+    const activeSubGoal = phaseState.activeSubGoal;
+    if (!activeSubGoal) return;
+
+    pushPhaseSubGoalHistory(phaseState, {
+        ...activeSubGoal,
+        clearedAt: now,
+        status,
+    }, config);
+
+    if (message) {
+        log('success', village, 'Macro SubGoal', message, null, 'economic');
+    }
+
+    phaseState.activeSubGoal = null;
+}
+
+export function handleCommonPhaseActionResult({
+    result,
+    phaseState,
+    phaseId,
+    source,
+    village,
+    gameSpeed,
+    onSuccess,
+    createOrRefreshSubGoal,
+    queueFullPriority = false,
+}) {
+    if (!result) return { terminal: false };
+
+    if (result.success) {
+        if (typeof onSuccess === 'function') {
+            onSuccess(result);
+        }
+        return { terminal: true };
+    }
+
+    if (queueFullPriority && result.reason === 'QUEUE_FULL' && typeof createOrRefreshSubGoal === 'function') {
+        createOrRefreshSubGoal({
+            phaseState,
+            phaseId,
+            blockedResult: result,
+            source,
+            village,
+            gameSpeed,
+        });
+        return { terminal: true };
+    }
+
+    if (typeof createOrRefreshSubGoal !== 'function') {
+        return { terminal: false };
+    }
+
+    const subGoalCreated = createOrRefreshSubGoal({
+        phaseState,
+        phaseId,
+        blockedResult: result,
+        source,
+        village,
+        gameSpeed,
+    });
+
+    return {
+        terminal: Boolean(subGoalCreated),
+    };
+}
+
 export function getDifficultyTemplate(templateByDifficulty, difficulty, fallbackKey = 'Pesadilla') {
     if (!templateByDifficulty || typeof templateByDifficulty !== 'object') return null;
     return templateByDifficulty[difficulty] || templateByDifficulty[fallbackKey] || null;

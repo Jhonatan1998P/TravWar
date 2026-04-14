@@ -1,11 +1,19 @@
 import { getRaceTroops } from '../../core/data/lookups.js';
-import { rebalanceVillageBudgetToRatio, BUDGET_REBALANCE_INTERVAL_GAME_MS } from '../../state/worker/budget.js';
+import { BUDGET_RATIO_REBALANCE_INTERVAL_MS } from '../../core/data/constants.js';
+import { rebalanceVillageBudgetToRatio } from '../../state/worker/budget.js';
 import { resolveUnitIdForRace } from '../utils/AIUnitUtils.js';
 import {
     buildPrerequisiteResolverStepFromBlock,
     clonePhaseStep,
     createPhaseTransition,
     getAverageResourceFieldLevel,
+    getCompletedTrainingCycles,
+    getPhaseStepSignature,
+    createOrRefreshPhaseSubGoal,
+    isPhaseQueueAvailable,
+    isPhaseResearchStepCompleted,
+    getQueuedTrainingMs,
+    handleCommonPhaseActionResult,
     getBuildingTypeLevel,
     getDifficultyTemplate,
     getEffectiveBuildingTypeLevel,
@@ -13,7 +21,12 @@ import {
     getQueueUptime,
     getUnitCountInVillageAndQueue,
     isRecoverablePhaseBlockReason,
+    normalizePhaseSubGoalKind,
+    PHASE_SUBGOAL_CONFIG,
+    PHASE_SUBGOAL_KIND,
+    processPhaseActiveSubGoal,
     runPriorityStepList,
+    TRAINING_CYCLE_MS,
 } from './phase-engine-common.js';
 
 export const EGYPTIAN_PHASE_IDS = Object.freeze({
@@ -103,8 +116,6 @@ const RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG = Object.freeze({
     phase6: 5,
 });
 
-const TRAINING_CYCLE_MS = 3 * 60 * 1000;
-
 const PHASE_CYCLE_TARGETS_BY_DIFFICULTY = Object.freeze({
     Normal: {
         phase1: { total: 12 },
@@ -186,20 +197,8 @@ const THREAT_LEVEL_BOOST = Object.freeze({
 const PHASE_IDLE_LOG_MS = 20_000;
 const EXPANSION_CHECK_MS = 25_000;
 
-const SUBGOAL_KIND = Object.freeze({
-    buildPrerequisite: 'build_prerequisite',
-    researchPrerequisite: 'research_prerequisite',
-    waitQueue: 'wait_queue',
-    waitResources: 'wait_resources',
-});
-
-const PHASE_SUBGOAL = Object.freeze({
-    baseRetryMs: 30_000,
-    minRetryMs: 2_000,
-    logThrottleMs: 20_000,
-    maxAttemptsBeforeReset: 8,
-    maxHistory: 40,
-});
+const SUBGOAL_KIND = PHASE_SUBGOAL_KIND;
+const PHASE_SUBGOAL = PHASE_SUBGOAL_CONFIG;
 
 const getBuildingLevel = getBuildingTypeLevel;
 const getEffectiveBuildingLevel = getEffectiveBuildingTypeLevel;
@@ -207,7 +206,21 @@ const getUnitCount = getUnitCountInVillageAndQueue;
 
 function createEmptyCycleProgress() {
     return {
-        total: 0,
+        totalMs: 0,
+    };
+}
+
+function normalizeCycleProgress(progress) {
+    const safeProgress = progress && typeof progress === 'object' ? progress : {};
+    const legacyTotalCycles = Number.isFinite(safeProgress.total)
+        ? Math.max(0, Number(safeProgress.total))
+        : 0;
+    const totalMs = Number.isFinite(safeProgress.totalMs)
+        ? Math.max(0, Number(safeProgress.totalMs))
+        : Math.floor(legacyTotalCycles * TRAINING_CYCLE_MS);
+
+    return {
+        totalMs,
     };
 }
 
@@ -231,9 +244,10 @@ function getCycleProgressByPhase(phaseState, phaseKey) {
         phaseState.phaseCycleProgress = {};
     }
 
-    if (!phaseState.phaseCycleProgress[phaseKey]) {
-        phaseState.phaseCycleProgress[phaseKey] = createEmptyCycleProgress();
-    }
+    const rawProgress = phaseState.phaseCycleProgress[phaseKey];
+    phaseState.phaseCycleProgress[phaseKey] = rawProgress
+        ? normalizeCycleProgress(rawProgress)
+        : createEmptyCycleProgress();
 
     return phaseState.phaseCycleProgress[phaseKey];
 }
@@ -241,7 +255,7 @@ function getCycleProgressByPhase(phaseState, phaseKey) {
 function getCycleProgressSnapshot(phaseState, phaseKey) {
     const raw = getCycleProgressByPhase(phaseState, phaseKey);
     return {
-        total: Math.max(0, Number(raw.total) || 0),
+        total: getCompletedTrainingCycles(raw.totalMs, TRAINING_CYCLE_MS),
     };
 }
 
@@ -262,9 +276,9 @@ function recordEgyptianPhaseRecruitmentProgress({ phaseState, phaseKey, count, t
     if (!Number.isFinite(timePerUnit) || timePerUnit <= 0) return;
 
     const progress = getCycleProgressByPhase(phaseState, phaseKey);
-    const trainedMs = Math.max(0, count * timePerUnit);
-    const cycles = Math.max(1, Math.ceil(trainedMs / TRAINING_CYCLE_MS));
-    progress.total = Math.max(0, Number(progress.total) || 0) + cycles;
+    const trainedMs = getQueuedTrainingMs(count, timePerUnit);
+    if (trainedMs <= 0) return;
+    progress.totalMs = Math.max(0, Number(progress.totalMs) || 0) + trainedMs;
 }
 
 function registerRecruitmentCommitFromAction({ result, phaseState, phaseId, village, difficulty, log }) {
@@ -308,35 +322,24 @@ function attachDeferredRecoverableBlock(successResult, blockedResult) {
     };
 }
 
-function getRetryIntervalMs(gameSpeed) {
-    const normalizedSpeed = Math.max(gameSpeed || 1, 1);
-    return Math.max(PHASE_SUBGOAL.minRetryMs, Math.floor(PHASE_SUBGOAL.baseRetryMs / normalizedSpeed));
+function mergeConstructionAndRecruitmentResult(construction, recruitment) {
+    if (recruitment?.success) {
+        return attachDeferredRecoverableBlock(recruitment, construction);
+    }
+
+    if (construction && isRecoverablePhaseBlockReason(construction.reason)) {
+        return construction;
+    }
+
+    return recruitment;
 }
 
 function getStepSignature(step) {
-    if (!step) return 'step:none';
-    if (step.type === 'building') return `building:${step.buildingType || 'unknown'}:${step.level || 0}`;
-    if (step.type === 'resource_fields_level') return `resource_fields:${step.level || 0}`;
-    if (step.type === 'units') return `units:${step.unitType || 'unknown'}:${step.count ?? 'n/a'}`;
-    if (step.type === 'research') return `research:${step.unitType || step.unitId || 'unknown'}`;
-    if (step.type === 'upgrade') return `upgrade:${step.unitType || 'unknown'}:${step.level || 0}`;
-    return `${step.type || 'unknown'}:generic`;
+    return getPhaseStepSignature(step);
 }
 
 function isQueueAvailable(village, queueType) {
-    if (queueType === 'construction') {
-        return (village.constructionQueue?.length || 0) < (village.maxConstructionSlots || 1);
-    }
-    if (queueType === 'research') {
-        return (village.research?.queue?.length || 0) === 0;
-    }
-    if (queueType === 'smithy') {
-        return (village.smithy?.queue?.length || 0) === 0;
-    }
-    if (queueType === 'recruitment') {
-        return true;
-    }
-    return true;
+    return isPhaseQueueAvailable(village, queueType);
 }
 
 function isBuildingStepCompleted(village, step) {
@@ -354,10 +357,7 @@ function isBuildingStepCompleted(village, step) {
 }
 
 function isResearchStepCompleted(village, step) {
-    if (!step) return true;
-    const unitId = step.unitId || step.unitType;
-    if (!unitId) return false;
-    return village.research?.completed?.includes(unitId);
+    return isPhaseResearchStepCompleted(village, step);
 }
 
 function pushSubGoalHistory(phaseState, record) {
@@ -394,72 +394,27 @@ function createOrRefreshSubGoal({
     gameSpeed,
     log,
 }) {
-    if (!blockedResult || !isRecoverablePhaseBlockReason(blockedResult.reason)) {
-        return false;
-    }
-
-    const now = Date.now();
-    const retryMs = getRetryIntervalMs(gameSpeed);
-    const resolverStep = buildPrerequisiteResolverStepFromBlock({
-        village,
-        blockedResult,
-        getEffectiveBuildingLevel,
-    });
-    const queueType = getPhaseStepQueueType(blockedResult.step);
-
-    let kind;
-    if (blockedResult.reason === 'QUEUE_FULL') {
-        kind = SUBGOAL_KIND.waitQueue;
-    } else if (resolverStep) {
-        kind = resolverStep.type === 'research'
-            ? SUBGOAL_KIND.researchPrerequisite
-            : SUBGOAL_KIND.buildPrerequisite;
-    } else if (blockedResult.reason === 'INSUFFICIENT_RESOURCES') {
-        kind = SUBGOAL_KIND.waitResources;
-    } else {
-        kind = SUBGOAL_KIND.waitResources;
-    }
-
-    const signature = `${phaseId}|${kind}|${blockedResult.reason}|${getStepSignature(blockedResult.step)}|${getStepSignature(resolverStep)}`;
-    const existing = phaseState.activeSubGoal;
-    if (existing?.signature === signature && existing.phaseId === phaseId) {
-        existing.updatedAt = now;
-        if (existing.kind === SUBGOAL_KIND.waitResources || existing.kind === SUBGOAL_KIND.waitQueue) {
-            existing.nextAttemptAt = now + retryMs;
-        }
-        return true;
-    }
-
-    phaseState.activeSubGoal = {
-        id: `eg_sg_${now}_${Math.random().toString(36).slice(2, 7)}`,
-        signature,
-        kind,
+    return createOrRefreshPhaseSubGoal({
+        phaseState,
         phaseId,
+        blockedResult,
         source,
-        reason: blockedResult.reason,
-        createdAt: now,
-        updatedAt: now,
-        nextAttemptAt: now,
-        attempts: 0,
-        lastLogAt: 0,
-        blockedStep: clonePhaseStep(blockedResult.step),
-        resolverStep,
-        queueType,
-        latestDetails: blockedResult.details || null,
-    };
-
-    const resolverText = resolverStep
-        ? `resolver=${getStepSignature(resolverStep)}`
-        : `espera=${kind}`;
-    log(
-        'warn',
         village,
-        'Macro SubGoal',
-        `Bloqueo detectado (${blockedResult.reason}) en ${source}. Activando subgoal ${kind} (${resolverText}).`,
-        null,
-        'economic',
-    );
-    return true;
+        gameSpeed,
+        log,
+        config: PHASE_SUBGOAL,
+        subGoalKind: SUBGOAL_KIND,
+        cloneStep: clonePhaseStep,
+        getStepSignature,
+        getQueueTypeForStep: getPhaseStepQueueType,
+        isRecoverableBlockReason: isRecoverablePhaseBlockReason,
+        buildResolverStep: (targetVillage, result) => buildPrerequisiteResolverStepFromBlock({
+            village: targetVillage,
+            blockedResult: result,
+            getEffectiveBuildingLevel,
+        }),
+        idPrefix: 'eg_sg',
+    });
 }
 
 function processActiveSubGoal({
@@ -470,145 +425,29 @@ function processActiveSubGoal({
     gameSpeed,
     log,
 }) {
-    const subGoal = phaseState.activeSubGoal;
-    if (!subGoal) {
-        return { handled: false };
-    }
-
-    const now = Date.now();
-    if (subGoal.phaseId !== phaseState.activePhaseId) {
-        clearActiveSubGoal(
-            phaseState,
-            now,
-            village,
-            log,
-            'Subgoal descartado por cambio de fase.',
-            'phase_changed',
-        );
-        return { handled: false };
-    }
-
-    if (subGoal.kind === SUBGOAL_KIND.waitQueue) {
-        const queueFree = isQueueAvailable(village, subGoal.queueType);
-        if (queueFree) {
-            clearActiveSubGoal(
-                phaseState,
-                now,
-                village,
-                log,
-                `Subgoal de cola resuelto (${subGoal.queueType}).`,
-            );
-            return { handled: false };
-        }
-
-        subGoal.nextAttemptAt = now + getRetryIntervalMs(gameSpeed);
-        return { handled: true };
-    }
-
-    if (subGoal.kind === SUBGOAL_KIND.waitResources) {
-        if (now < subGoal.nextAttemptAt) {
-            return { handled: true };
-        }
-
-        clearActiveSubGoal(
-            phaseState,
-            now,
-            village,
-            log,
-            'Reintentando objetivo bloqueado por recursos.',
-            'retry_after_wait_resources',
-        );
-        return { handled: false };
-    }
-
-    const resolverStep = subGoal.resolverStep;
-    const completed = subGoal.kind === SUBGOAL_KIND.researchPrerequisite
-        ? isResearchStepCompleted(village, resolverStep)
-        : isBuildingStepCompleted(village, resolverStep);
-
-    if (completed) {
-        clearActiveSubGoal(
-            phaseState,
-            now,
-            village,
-            log,
-            `Subgoal resuelto: ${getStepSignature(resolverStep)}.`,
-        );
-        return { handled: false };
-    }
-
-    if (now < subGoal.nextAttemptAt) {
-        return { handled: true };
-    }
-
-    const result = actionExecutor.executePlanStep(village, resolverStep, gameState, { scope: 'per_village' });
-    subGoal.attempts = (subGoal.attempts || 0) + 1;
-    subGoal.updatedAt = now;
-    subGoal.nextAttemptAt = now + getRetryIntervalMs(gameSpeed);
-
-    if (result.success || result.reason === 'QUEUE_FULL') {
-        if (result.reason === 'QUEUE_FULL') {
-            subGoal.kind = SUBGOAL_KIND.waitQueue;
-            subGoal.queueType = getPhaseStepQueueType(resolverStep);
-            subGoal.reason = 'QUEUE_FULL';
-            subGoal.blockedStep = clonePhaseStep(resolverStep);
-            subGoal.resolverStep = null;
-        }
-        return { handled: true };
-    }
-
-    if (result.reason === 'INSUFFICIENT_RESOURCES') {
-        subGoal.kind = SUBGOAL_KIND.waitResources;
-        subGoal.reason = 'INSUFFICIENT_RESOURCES';
-        subGoal.blockedStep = clonePhaseStep(resolverStep);
-        subGoal.resolverStep = null;
-        return { handled: true };
-    }
-
-    if (isRecoverablePhaseBlockReason(result.reason)) {
-        const nestedResolver = buildPrerequisiteResolverStepFromBlock({
-            village,
-            blockedResult: {
-                ...result,
-                step: resolverStep,
-            },
+    return processPhaseActiveSubGoal({
+        phaseState,
+        village,
+        gameState,
+        actionExecutor,
+        gameSpeed,
+        log,
+        config: PHASE_SUBGOAL,
+        subGoalKind: SUBGOAL_KIND,
+        cloneStep: clonePhaseStep,
+        getStepSignature,
+        getQueueTypeForStep: getPhaseStepQueueType,
+        isQueueAvailable,
+        isResearchStepCompleted,
+        isBuildingStepCompleted,
+        isRecoverableBlockReason: isRecoverablePhaseBlockReason,
+        buildResolverStep: (targetVillage, blockedResult) => buildPrerequisiteResolverStepFromBlock({
+            village: targetVillage,
+            blockedResult,
             getEffectiveBuildingLevel,
-        });
-        if (nestedResolver) {
-            subGoal.resolverStep = nestedResolver;
-            subGoal.kind = nestedResolver.type === 'research'
-                ? SUBGOAL_KIND.researchPrerequisite
-                : SUBGOAL_KIND.buildPrerequisite;
-            subGoal.reason = result.reason;
-            return { handled: true };
-        }
-    }
-
-    if (subGoal.attempts >= PHASE_SUBGOAL.maxAttemptsBeforeReset) {
-        clearActiveSubGoal(
-            phaseState,
-            now,
-            village,
-            log,
-            `Subgoal reiniciado tras ${subGoal.attempts} intentos sin resolver.`,
-            'max_attempts_reached',
-        );
-        return { handled: false };
-    }
-
-    if (now - (subGoal.lastLogAt || 0) >= PHASE_SUBGOAL.logThrottleMs) {
-        subGoal.lastLogAt = now;
-        log(
-            'warn',
-            village,
-            'Macro SubGoal',
-            `Subgoal ${subGoal.kind} sigue bloqueado. Ultimo rechazo: ${result.reason || 'UNKNOWN'}.`,
-            result.details || null,
-            'economic',
-        );
-    }
-
-    return { handled: true };
+        }),
+        waitResourcesMode: 'retry_after_interval',
+    });
 }
 
 function handlePhaseActionResult({
@@ -621,30 +460,19 @@ function handlePhaseActionResult({
     log,
     onSuccess,
 }) {
-    if (!result) return { terminal: false };
-
-    if (result.success) {
-        if (typeof onSuccess === 'function') {
-            onSuccess(result);
-        }
-        return { terminal: true };
-    }
-
-    const subGoalCreated = createOrRefreshSubGoal({
+    return handleCommonPhaseActionResult({
+        result,
         phaseState,
         phaseId,
-        blockedResult: result,
         source,
         village,
         gameSpeed,
-        log,
+        onSuccess,
+        createOrRefreshSubGoal: payload => createOrRefreshSubGoal({
+            ...payload,
+            log,
+        }),
     });
-
-    if (subGoalCreated) {
-        return { terminal: true };
-    }
-
-    return { terminal: false };
 }
 
 function getResolvedUnitId(village, unitType) {
@@ -721,7 +549,7 @@ function applyPhaseRatio({ village, difficulty, phaseId, threatContext, phaseSta
     const ratio = { econ: 1 - mil, mil };
 
     const rebalanceDue = !Number.isFinite(phaseState.lastBudgetRebalanceAt)
-        || (now - phaseState.lastBudgetRebalanceAt) >= BUDGET_REBALANCE_INTERVAL_GAME_MS;
+        || (now - phaseState.lastBudgetRebalanceAt) >= BUDGET_RATIO_REBALANCE_INTERVAL_MS;
     if (!rebalanceDue) return;
 
     rebalanceVillageBudgetToRatio(village, ratio);
@@ -1068,9 +896,7 @@ function runPhaseOne({ village, gameState, actionExecutor, threatContext, constr
         ],
     });
 
-    return recruitment.success
-        ? attachDeferredRecoverableBlock(recruitment, construction)
-        : recruitment;
+    return mergeConstructionAndRecruitmentResult(construction, recruitment);
 }
 
 function runPhaseTwo({ village, gameState, actionExecutor, threatContext, constructionFilter, recruitmentFilter }) {
@@ -1101,8 +927,9 @@ function runPhaseTwo({ village, gameState, actionExecutor, threatContext, constr
             { type: 'units', unitType: 'scout', count: 8 },
         ],
     });
-    if (recruitment.success) {
-        return attachDeferredRecoverableBlock(recruitment, construction);
+    const mergedRecruitment = mergeConstructionAndRecruitmentResult(construction, recruitment);
+    if (mergedRecruitment.success) {
+        return mergedRecruitment;
     }
 
     if (isHighThreat(threatContext)) {
@@ -1115,7 +942,7 @@ function runPhaseTwo({ village, gameState, actionExecutor, threatContext, constr
         });
     }
 
-    return recruitment;
+    return mergeConstructionAndRecruitmentResult(construction, recruitment);
 }
 
 function runPhaseThree({ village, gameState, actionExecutor, constructionFilter, recruitmentFilter }) {
@@ -1150,9 +977,7 @@ function runPhaseThree({ village, gameState, actionExecutor, constructionFilter,
         ],
     });
 
-    return recruitment.success
-        ? attachDeferredRecoverableBlock(recruitment, construction)
-        : recruitment;
+    return mergeConstructionAndRecruitmentResult(construction, recruitment);
 }
 
 function runPhaseFour({ village, gameState, actionExecutor, constructionFilter, recruitmentFilter }) {
@@ -1187,9 +1012,7 @@ function runPhaseFour({ village, gameState, actionExecutor, constructionFilter, 
         ],
     });
 
-    return recruitment.success
-        ? attachDeferredRecoverableBlock(recruitment, construction)
-        : recruitment;
+    return mergeConstructionAndRecruitmentResult(construction, recruitment);
 }
 
 function shouldEnableContextualOffense({ phaseState, threatContext, gameState, village }) {
@@ -1291,8 +1114,9 @@ function runPhaseFive({
         shouldAttemptStep: recruitmentFilter,
         options: recruitmentOptions,
     });
-    if (recruitment.success) {
-        return attachDeferredRecoverableBlock(recruitment, construction);
+    const mergedRecruitment = mergeConstructionAndRecruitmentResult(construction, recruitment);
+    if (mergedRecruitment.success) {
+        return mergedRecruitment;
     }
 
     if ((now - phaseState.lastSafeExpansionCheckAt) >= EXPANSION_CHECK_MS) {
@@ -1313,7 +1137,9 @@ function runPhaseFive({
         phaseState.lastSafeExpansionCheckAt = now;
     }
 
-    return { success: false, reason: 'NO_ACTION' };
+    return isRecoverablePhaseBlockReason(mergedRecruitment?.reason)
+        ? mergedRecruitment
+        : { success: false, reason: 'NO_ACTION' };
 }
 
 function runPhaseSix({ village, gameState, actionExecutor, phaseState, now, threatContext, constructionFilter, recruitmentFilter }) {
@@ -1344,8 +1170,9 @@ function runPhaseSix({ village, gameState, actionExecutor, phaseState, now, thre
             { type: 'units', unitType: 'catapult', count: Infinity, queueTargetMinutes: 2 },
         ],
     });
-    if (recruitment.success) {
-        return attachDeferredRecoverableBlock(recruitment, construction);
+    const mergedRecruitment = mergeConstructionAndRecruitmentResult(construction, recruitment);
+    if (mergedRecruitment.success) {
+        return mergedRecruitment;
     }
 
     if ((now - phaseState.lastSafeExpansionCheckAt) >= EXPANSION_CHECK_MS) {
@@ -1366,7 +1193,125 @@ function runPhaseSix({ village, gameState, actionExecutor, phaseState, now, thre
         phaseState.lastSafeExpansionCheckAt = now;
     }
 
-    return { success: false, reason: 'NO_ACTION' };
+    return isRecoverablePhaseBlockReason(mergedRecruitment?.reason)
+        ? mergedRecruitment
+        : { success: false, reason: 'NO_ACTION' };
+}
+
+const EGYPTIAN_LEGACY_PHASE_ID_MAP = Object.freeze({
+    egyptian_phase_1_pending: EGYPTIAN_PHASE_IDS.phase1,
+    egyptian_phase_2_pending: EGYPTIAN_PHASE_IDS.phase2,
+    egyptian_phase_3_pending: EGYPTIAN_PHASE_IDS.phase3,
+    egyptian_phase_4_pending: EGYPTIAN_PHASE_IDS.phase4,
+    egyptian_phase_5_pending: EGYPTIAN_PHASE_IDS.phase5,
+    egyptian_phase_6_pending: EGYPTIAN_PHASE_IDS.phase6,
+    egyptian_phase_done: EGYPTIAN_PHASE_IDS.phaseDone,
+    egyptian_phase_template_done: EGYPTIAN_PHASE_IDS.phaseDone,
+});
+
+function normalizeEgyptianPhaseId(rawPhaseId, fallbackPhaseId) {
+    const normalized = EGYPTIAN_LEGACY_PHASE_ID_MAP[rawPhaseId] || rawPhaseId;
+    if (Object.values(EGYPTIAN_PHASE_IDS).includes(normalized)) {
+        return normalized;
+    }
+    return fallbackPhaseId;
+}
+
+function normalizeEgyptianTransition(record) {
+    if (!record || typeof record !== 'object') return null;
+
+    const from = normalizeEgyptianPhaseId(
+        record.from || record.fromPhase || record.phaseFrom,
+        null,
+    );
+    const to = normalizeEgyptianPhaseId(
+        record.to || record.toPhase || record.phaseTo,
+        null,
+    );
+    if (!from || !to) return null;
+
+    return {
+        from,
+        to,
+        reason: record.reason || record.cause || 'UNKNOWN',
+        at: Number.isFinite(record.at) ? record.at : Number.isFinite(record.timestamp) ? record.timestamp : Date.now(),
+        status: record.status || 'phase_transition',
+    };
+}
+
+function normalizeEgyptianTransitions(rawTransitions) {
+    if (!Array.isArray(rawTransitions)) return [];
+    return rawTransitions
+        .map(normalizeEgyptianTransition)
+        .filter(Boolean);
+}
+
+function normalizeEgyptianPhaseCycleProgress(rawProgress) {
+    const source = rawProgress && typeof rawProgress === 'object' ? rawProgress : {};
+    const aliases = {
+        phase1: ['phase1', 'phase_1'],
+        phase2: ['phase2', 'phase_2'],
+        phase3: ['phase3', 'phase_3'],
+        phase4: ['phase4', 'phase_4'],
+        phase5: ['phase5', 'phase_5'],
+        phase6: ['phase6', 'phase_6'],
+    };
+
+    const normalized = {};
+    for (const phaseKey of Object.keys(aliases)) {
+        const sourceEntry = source[aliases[phaseKey].find(key => key in source)];
+        normalized[phaseKey] = normalizeCycleProgress(sourceEntry);
+    }
+    return normalized;
+}
+
+function normalizeEgyptianSubGoalRecord(rawSubGoal, fallbackPhaseId) {
+    if (!rawSubGoal || typeof rawSubGoal !== 'object') return null;
+
+    const blockedStep = clonePhaseStep(rawSubGoal.blockedStep || rawSubGoal.step || null);
+    const resolverStep = clonePhaseStep(rawSubGoal.resolverStep || rawSubGoal.resolver || null);
+    const kind = normalizePhaseSubGoalKind(rawSubGoal.kind || rawSubGoal.type, SUBGOAL_KIND);
+    const phaseId = normalizeEgyptianPhaseId(rawSubGoal.phaseId, fallbackPhaseId);
+    const reason = rawSubGoal.reason || rawSubGoal.blockReason || 'UNKNOWN';
+    const queueType = rawSubGoal.queueType || getPhaseStepQueueType(blockedStep || resolverStep);
+    const createdAt = Number.isFinite(rawSubGoal.createdAt) ? rawSubGoal.createdAt : Date.now();
+
+    return {
+        id: rawSubGoal.id || `eg_sg_${createdAt}_${Math.random().toString(36).slice(2, 7)}`,
+        signature: rawSubGoal.signature || `${phaseId}|${kind}|${reason}|${getStepSignature(blockedStep)}|${getStepSignature(resolverStep)}`,
+        kind,
+        phaseId,
+        source: rawSubGoal.source || 'hydrated',
+        reason,
+        createdAt,
+        updatedAt: Number.isFinite(rawSubGoal.updatedAt) ? rawSubGoal.updatedAt : createdAt,
+        nextAttemptAt: Number.isFinite(rawSubGoal.nextAttemptAt) ? rawSubGoal.nextAttemptAt : createdAt,
+        attempts: Math.max(0, Math.floor(Number(rawSubGoal.attempts) || 0)),
+        lastLogAt: Number.isFinite(rawSubGoal.lastLogAt) ? rawSubGoal.lastLogAt : 0,
+        blockedStep,
+        resolverStep,
+        queueType,
+        latestDetails: rawSubGoal.latestDetails || rawSubGoal.details || null,
+    };
+}
+
+function normalizeStoragePressureHistory(rawHistory) {
+    if (!Array.isArray(rawHistory)) return [];
+    return rawHistory
+        .map(entry => {
+            if (Number.isFinite(entry)) {
+                return { at: Date.now(), value: Math.max(0, Number(entry)) };
+            }
+            if (!entry || typeof entry !== 'object') return null;
+            const value = Number(entry.value);
+            if (!Number.isFinite(value)) return null;
+            return {
+                at: Number.isFinite(entry.at) ? entry.at : Date.now(),
+                value: Math.max(0, value),
+            };
+        })
+        .filter(Boolean)
+        .slice(-20);
 }
 
 export function createDefaultEgyptianPhaseState(now = Date.now()) {
@@ -1403,34 +1348,77 @@ export function hydrateEgyptianPhaseState(rawState = null, now = Date.now()) {
     const fallback = createDefaultEgyptianPhaseState(now);
     if (!rawState || typeof rawState !== 'object') return fallback;
 
+    const normalizedPhaseId = normalizeEgyptianPhaseId(rawState.activePhaseId, fallback.activePhaseId);
+    const normalizedCycleProgress = normalizeEgyptianPhaseCycleProgress(rawState.phaseCycleProgress);
+    const normalizedActiveSubGoal = normalizeEgyptianSubGoalRecord(rawState.activeSubGoal, normalizedPhaseId);
+    const normalizedSubGoalHistory = Array.isArray(rawState.subGoalHistory)
+        ? rawState.subGoalHistory
+            .map(entry => normalizeEgyptianSubGoalRecord(entry, normalizedPhaseId))
+            .filter(Boolean)
+        : [];
+
     return {
-        activePhaseId: rawState.activePhaseId || fallback.activePhaseId,
+        activePhaseId: normalizedPhaseId,
         startedAt: Number.isFinite(rawState.startedAt) ? rawState.startedAt : fallback.startedAt,
         lastEvaluationAt: Number.isFinite(rawState.lastEvaluationAt) ? rawState.lastEvaluationAt : fallback.lastEvaluationAt,
-        transitions: Array.isArray(rawState.transitions) ? rawState.transitions : [],
-        phase2MilitaryQueueSamples: Number.isFinite(rawState.phase2MilitaryQueueSamples) ? rawState.phase2MilitaryQueueSamples : 0,
-        phase2MilitaryQueueActiveSamples: Number.isFinite(rawState.phase2MilitaryQueueActiveSamples) ? rawState.phase2MilitaryQueueActiveSamples : 0,
-        phase3DefensiveQueueSamples: Number.isFinite(rawState.phase3DefensiveQueueSamples) ? rawState.phase3DefensiveQueueSamples : 0,
-        phase3DefensiveQueueActiveSamples: Number.isFinite(rawState.phase3DefensiveQueueActiveSamples) ? rawState.phase3DefensiveQueueActiveSamples : 0,
-        phaseCycleProgress: rawState.phaseCycleProgress && typeof rawState.phaseCycleProgress === 'object'
-            ? rawState.phaseCycleProgress
-            : {},
-        activeSubGoal: rawState.activeSubGoal && typeof rawState.activeSubGoal === 'object' ? rawState.activeSubGoal : null,
-        subGoalHistory: Array.isArray(rawState.subGoalHistory) ? rawState.subGoalHistory : [],
+        transitions: normalizeEgyptianTransitions(rawState.transitions),
+        phase2MilitaryQueueSamples: Number.isFinite(rawState.phase2MilitaryQueueSamples)
+            ? rawState.phase2MilitaryQueueSamples
+            : Number.isFinite(rawState.phase2QueueSamples)
+                ? rawState.phase2QueueSamples
+                : 0,
+        phase2MilitaryQueueActiveSamples: Number.isFinite(rawState.phase2MilitaryQueueActiveSamples)
+            ? rawState.phase2MilitaryQueueActiveSamples
+            : Number.isFinite(rawState.phase2QueueActiveSamples)
+                ? rawState.phase2QueueActiveSamples
+                : 0,
+        phase3DefensiveQueueSamples: Number.isFinite(rawState.phase3DefensiveQueueSamples)
+            ? rawState.phase3DefensiveQueueSamples
+            : Number.isFinite(rawState.phase3QueueSamples)
+                ? rawState.phase3QueueSamples
+                : 0,
+        phase3DefensiveQueueActiveSamples: Number.isFinite(rawState.phase3DefensiveQueueActiveSamples)
+            ? rawState.phase3DefensiveQueueActiveSamples
+            : Number.isFinite(rawState.phase3QueueActiveSamples)
+                ? rawState.phase3QueueActiveSamples
+                : 0,
+        phaseCycleProgress: normalizedCycleProgress,
+        activeSubGoal: normalizedActiveSubGoal,
+        subGoalHistory: normalizedSubGoalHistory,
         lastThreatOverrideLogAt: Number.isFinite(rawState.lastThreatOverrideLogAt) ? rawState.lastThreatOverrideLogAt : 0,
         lastIdleLogAt: Number.isFinite(rawState.lastIdleLogAt) ? rawState.lastIdleLogAt : 0,
         lastConstructionReserveLogAt: Number.isFinite(rawState.lastConstructionReserveLogAt) ? rawState.lastConstructionReserveLogAt : 0,
-        expansionReadinessScore: Number.isFinite(rawState.expansionReadinessScore) ? rawState.expansionReadinessScore : 0,
-        defenseReadinessScore: Number.isFinite(rawState.defenseReadinessScore) ? rawState.defenseReadinessScore : 0,
-        storagePressureHistory: Array.isArray(rawState.storagePressureHistory) ? rawState.storagePressureHistory : [],
+        expansionReadinessScore: Number.isFinite(rawState.expansionReadinessScore)
+            ? rawState.expansionReadinessScore
+            : Number.isFinite(rawState.expansionScore)
+                ? rawState.expansionScore
+                : 0,
+        defenseReadinessScore: Number.isFinite(rawState.defenseReadinessScore)
+            ? rawState.defenseReadinessScore
+            : Number.isFinite(rawState.defenseScore)
+                ? rawState.defenseScore
+                : 0,
+        storagePressureHistory: normalizeStoragePressureHistory(rawState.storagePressureHistory || rawState.storagePressureSamples),
         lastSafeExpansionCheckAt: Number.isFinite(rawState.lastSafeExpansionCheckAt) ? rawState.lastSafeExpansionCheckAt : 0,
         lastBudgetRebalanceAt: Number.isFinite(rawState.lastBudgetRebalanceAt) ? rawState.lastBudgetRebalanceAt : 0,
-        kpiThreatInterruptedCycles: Number.isFinite(rawState.kpiThreatInterruptedCycles) ? rawState.kpiThreatInterruptedCycles : 0,
-        kpiStoragePressureCriticalSamples: Number.isFinite(rawState.kpiStoragePressureCriticalSamples) ? rawState.kpiStoragePressureCriticalSamples : 0,
+        kpiThreatInterruptedCycles: Number.isFinite(rawState.kpiThreatInterruptedCycles)
+            ? rawState.kpiThreatInterruptedCycles
+            : Number.isFinite(rawState.kpiThreatCycles)
+                ? rawState.kpiThreatCycles
+                : 0,
+        kpiStoragePressureCriticalSamples: Number.isFinite(rawState.kpiStoragePressureCriticalSamples)
+            ? rawState.kpiStoragePressureCriticalSamples
+            : Number.isFinite(rawState.kpiStorageCritical)
+                ? rawState.kpiStorageCritical
+                : 0,
         kpiExpansionAttempts: Number.isFinite(rawState.kpiExpansionAttempts) ? rawState.kpiExpansionAttempts : 0,
         kpiExpansionLaunches: Number.isFinite(rawState.kpiExpansionLaunches) ? rawState.kpiExpansionLaunches : 0,
         kpiExpansionBlockedByThreat: Number.isFinite(rawState.kpiExpansionBlockedByThreat) ? rawState.kpiExpansionBlockedByThreat : 0,
-        kpiEmergencyRecruitmentCycles: Number.isFinite(rawState.kpiEmergencyRecruitmentCycles) ? rawState.kpiEmergencyRecruitmentCycles : 0,
+        kpiEmergencyRecruitmentCycles: Number.isFinite(rawState.kpiEmergencyRecruitmentCycles)
+            ? rawState.kpiEmergencyRecruitmentCycles
+            : Number.isFinite(rawState.kpiEmergencyCycles)
+                ? rawState.kpiEmergencyCycles
+                : 0,
     };
 }
 
@@ -1438,6 +1426,7 @@ export function serializeEgyptianPhaseStates(stateByVillageMap) {
     const serialized = {};
     for (const [villageId, state] of stateByVillageMap.entries()) {
         serialized[villageId] = {
+            schemaVersion: 2,
             activePhaseId: state.activePhaseId,
             startedAt: state.startedAt,
             lastEvaluationAt: state.lastEvaluationAt,

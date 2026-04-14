@@ -1,8 +1,9 @@
 import {
     createDefaultEgyptianPhaseState,
     EGYPTIAN_PHASE_IDS,
+    getEgyptianPhaseCycleStatus,
     runEgyptianEconomicPhaseCycle,
-} from './src/features/game/ai/controller/egyptian-phase-engine.js';
+} from '../../src/features/game/ai/controller/egyptian-phase-engine.js';
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);
@@ -133,6 +134,22 @@ class MockActionExecutor {
                     unitId: 'ash_warden_egypt',
                     count: 5,
                     timePerUnit: 60000,
+                };
+            }
+        }
+
+        if (this.mode === 'construction_fail_then_recruit_partial_success') {
+            if (step?.type === 'building' || step?.type === 'resource_fields_level') {
+                return { success: false, reason: 'NO_CANDIDATE_FOUND' };
+            }
+
+            if (step?.type === 'units') {
+                return {
+                    success: true,
+                    reason: 'MOCK_RECRUITMENT_PARTIAL_SUCCESS',
+                    unitId: 'ash_warden_egypt',
+                    count: 1,
+                    timePerUnit: 10000,
                 };
             }
         }
@@ -343,6 +360,37 @@ runCheck('F3 bloqueo de construccion recuperable crea subgoal aunque reclute', (
     assert(Boolean(phaseState.activeSubGoal), 'debe crear subgoal cuando construccion se bloquea por prerequisitos');
     assert(phaseState.activeSubGoal.reason === 'PREREQUISITES_NOT_MET', 'el subgoal debe preservar la razon recuperable');
     assert(phaseState.activeSubGoal.resolverStep?.buildingType === 'academy', 'el subgoal debe resolver prerequisito de construccion detectado');
+});
+
+runCheck('Ciclos solo cuentan bloques completos de 3 minutos', () => {
+    const village = createVillage({
+        fieldLevel: 6,
+        buildingLevels: {
+            cityWall: 7,
+            academy: 3,
+            smithy: 3,
+            stable: 0,
+        },
+    });
+    const gameState = createGameState(village);
+    const phaseState = createDefaultEgyptianPhaseState();
+    phaseState.activePhaseId = EGYPTIAN_PHASE_IDS.phase3;
+
+    const executor = new MockActionExecutor('construction_fail_then_recruit_partial_success');
+    runCycle({
+        village,
+        gameState,
+        phaseState,
+        executor,
+        threatContext: {
+            threatLevel: 'low',
+            shouldPauseEconomicConstruction: false,
+            shouldBoostEmergencyRecruitment: false,
+        },
+    });
+
+    const cycleStatus = getEgyptianPhaseCycleStatus(phaseState, 'Pesadilla', 'phase3');
+    assert(cycleStatus.completed === 0, 'un encolado de 10s no debe contar como ciclo completo de 3m');
 });
 
 runCheck('F5 amenaza alta bloquea ejecucion de expansion', () => {

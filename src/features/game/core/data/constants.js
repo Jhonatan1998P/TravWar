@@ -21,6 +21,34 @@ export const STORAGE_BUILDING_BY_RESOURCE = Object.freeze({
 
 export const BEGINNER_PROTECTION_POPULATION_THRESHOLD = 200;
 
+export const BUDGET_RATIO_REBALANCE_INTERVAL_MS = 600000;
+
+export const AI_PHASE_ENGINE_ROLLOUT_DEFAULTS = Object.freeze({
+    germans: true,
+    egyptians: true,
+});
+
+export function resolvePhaseEngineRolloutFlags(gameConfig = null) {
+    const defaults = { ...AI_PHASE_ENGINE_ROLLOUT_DEFAULTS };
+    const source = gameConfig?.aiPhaseEngineRollout || gameConfig?.featureFlags?.aiPhaseEngineRollout || null;
+    if (!source || typeof source !== 'object') return defaults;
+
+    const resolved = {
+        germans: source.all === false ? false : defaults.germans,
+        egyptians: source.all === false ? false : defaults.egyptians,
+    };
+
+    if (typeof source.germans === 'boolean') {
+        resolved.germans = source.germans;
+    }
+
+    if (typeof source.egyptians === 'boolean') {
+        resolved.egyptians = source.egyptians;
+    }
+
+    return resolved;
+}
+
 export const OASIS_SPEED_MULTIPLIER_STEP = 50;
 export const OASIS_BEAST_SCALING_MIN = 1;
 export const OASIS_BEAST_SCALING_MAX = 100;
