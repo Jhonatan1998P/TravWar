@@ -305,14 +305,16 @@ export function manageRecruitmentForGoal({
     const queueTargetMs = queueTargetMinutes * 60 * 1000;
     let unitsNeededByQueue = 0;
     let queueCoverageMs = 0;
-    let singleUnitTimeMs = 0;
+    const singleUnitTimeMs = getSingleUnitTrainingTimeMs(village, trainingBuilding, unitData, gameSpeed);
+    const cycleBatchCount = step.countMode === 'cycle_batch'
+        ? Math.max(1, Math.floor(step.cycleCount || 1))
+        : 0;
     const isOpenEndedTarget = step.countMode === 'queue_cycles'
         || step.count === Infinity
         || !Number.isFinite(step.count);
 
     if (queueTargetMs > 0) {
         queueCoverageMs = getQueueCoverageMs(village, trainingBuilding.id);
-        singleUnitTimeMs = getSingleUnitTrainingTimeMs(village, trainingBuilding, unitData, gameSpeed);
 
         if (singleUnitTimeMs > 0 && queueCoverageMs < queueTargetMs) {
             unitsNeededByQueue = Math.ceil((queueTargetMs - queueCoverageMs) / singleUnitTimeMs);
@@ -333,9 +335,16 @@ export function manageRecruitmentForGoal({
     const unitsNeededByTarget = Number.isFinite(targetAmount)
         ? (targetAmount - unitsOwned)
         : Number.POSITIVE_INFINITY;
-    const unitsNeeded = queueTargetMs > 0
+    let unitsNeeded = queueTargetMs > 0
         ? (isOpenEndedTarget ? unitsNeededByQueue : Math.max(unitsNeededByQueue, unitsNeededByTarget))
         : unitsNeededByTarget;
+
+    if (cycleBatchCount > 0) {
+        if (!Number.isFinite(singleUnitTimeMs) || singleUnitTimeMs <= 0) {
+            return { success: false, reason: 'INVALID_UNIT_DATA' };
+        }
+        unitsNeeded = Math.max(1, Math.ceil((cycleBatchCount * RECRUITMENT_CYCLE_MS) / singleUnitTimeMs));
+    }
 
     if (unitsNeeded <= 0) return { success: true };
 
@@ -357,6 +366,13 @@ export function manageRecruitmentForGoal({
     });
 
     let batchSize = batchPlan.batchSize;
+
+    if (cycleBatchCount > 0) {
+        if (effectiveAffordableTotal < unitsNeeded) {
+            return { success: false, reason: 'INSUFFICIENT_RESOURCES' };
+        }
+        batchSize = unitsNeeded;
+    }
 
     if (queueTargetMs > 0 && unitsNeededByQueue > 0) {
         batchSize = Math.min(unitsNeededByQueue, effectiveAffordableTotal);

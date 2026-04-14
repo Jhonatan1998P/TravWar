@@ -5,10 +5,14 @@ import { countCombatTroopsInVillages } from '../utils/AITroopUtils.js';
 import {
     buildPrerequisiteResolverStepFromBlock,
     clonePhaseStep,
+    createSharedPhaseOneCycleTargets,
+    evaluateSharedPhaseOneInfrastructure,
     createOrRefreshPhaseSubGoal,
     getCompletedTrainingCycles,
     getPhaseStepSignature,
+    getRoundRobinPhaseSteps,
     getQueuedTrainingMs,
+    getSharedPhaseOneConstructionSteps,
     handleCommonPhaseActionResult,
     isPhaseQueueAvailable,
     isPhaseResearchStepCompleted,
@@ -18,7 +22,10 @@ import {
     PHASE_SUBGOAL_CONFIG,
     PHASE_SUBGOAL_KIND,
     processPhaseActiveSubGoal,
+    pickPhaseLaneResult,
+    runPhaseLaneMatrix,
     runPriorityStepList,
+    SHARED_PHASE_ONE_INFRASTRUCTURE_TARGETS,
     TRAINING_CYCLE_MS,
 } from './phase-engine-common.js';
 
@@ -124,22 +131,13 @@ const PHASE_TEMPLATE_BY_DIFFICULTY = Object.freeze({
     },
 });
 
-const PHASE_ONE_EXIT_CONDITIONS = Object.freeze({
-    minAverageResourceFieldLevel: 4,
-    minWarehouseLevel: 5,
-    minGranaryLevel: 5,
-});
+const PHASE_ONE_EXIT_CONDITIONS = SHARED_PHASE_ONE_INFRASTRUCTURE_TARGETS;
 
 const PHASE_ONE_PRIORITY = Object.freeze({
     mainBuildingTargetLevel: 5,
     emergencyDefenseTargetTroops: 40,
     defenseLookaheadMs: 180_000,
     minIdleLogIntervalMs: 20_000,
-});
-
-const PHASE_TWO_EXIT = Object.freeze({
-    militaryQueueUptimeTarget: 0.4,
-    minSamples: 8,
 });
 
 const PHASE_TWO_PRIORITY = Object.freeze({
@@ -160,12 +158,6 @@ const PHASE_THREE_PRIORITY = Object.freeze({
     minIdleLogIntervalMs: 20_000,
 });
 
-const PHASE_FOUR_EXIT = Object.freeze({
-    militaryQueueUptimeTarget: 0.6,
-    minSamples: 12,
-    minConsecutiveActiveSamples: 3,
-});
-
 const PHASE_FOUR_PRIORITY = Object.freeze({
     rallyPointTargetLevel: 5,
     stableTargetLevel: 5,
@@ -175,12 +167,6 @@ const PHASE_FOUR_PRIORITY = Object.freeze({
     resourceFieldsTargetLevel: 8,
     storagePressureThreshold: 0.92,
     minIdleLogIntervalMs: 20_000,
-});
-
-const PHASE_FIVE_EXIT = Object.freeze({
-    dominanceQueueUptimeTarget: 0.7,
-    minSamples: 14,
-    minConsecutiveActiveSamples: 4,
 });
 
 const PHASE_FIVE_PRIORITY = Object.freeze({
@@ -205,34 +191,30 @@ const PHASE_SUBGOAL = Object.freeze({
     maxAttemptsBeforeReset: 16,
 });
 
-const RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG = Object.freeze({
-    phase2: 3,
-    phase3: 3,
-    phase4: 3,
-    phase5: 3,
-});
-
 const PHASE_CYCLE_TARGETS_BY_DIFFICULTY = Object.freeze({
     Normal: {
+        phase1: createSharedPhaseOneCycleTargets('offensiveInfantry', 10, 3),
         phase1Emergency: { defensiveInfantry: 3, total: 3 },
-        phase2: { total: 20, offensiveInfantry: 14 },
-        phase3: { total: 34, offensiveInfantry: 26, scout: 4 },
-        phase4: { total: 48, offensiveInfantry: 28, offensiveCavalry: 14, scout: 3 },
-        phase5: { total: 90, offensiveInfantry: 30, offensiveCavalry: 22, ram: 14, catapult: 10, scout: 4, expansion: 6 },
+        phase2: { total: 5, offensiveInfantry: 3, scout: 2 },
+        phase3: { total: 5, offensiveInfantry: 3, scout: 2 },
+        phase4: { total: 5, offensiveInfantry: 2, offensiveCavalry: 2, scout: 1 },
+        phase5: { total: 8, offensiveInfantry: 3, offensiveCavalry: 2, ram: 1, catapult: 1, scout: 1, expansion: 2 },
     },
     Dificil: {
+        phase1: createSharedPhaseOneCycleTargets('offensiveInfantry', 10, 3),
         phase1Emergency: { defensiveInfantry: 4, total: 4 },
-        phase2: { total: 24, offensiveInfantry: 17 },
-        phase3: { total: 42, offensiveInfantry: 32, scout: 5 },
-        phase4: { total: 62, offensiveInfantry: 36, offensiveCavalry: 18, scout: 4 },
-        phase5: { total: 122, offensiveInfantry: 40, offensiveCavalry: 30, ram: 20, catapult: 14, scout: 5, expansion: 8 },
+        phase2: { total: 5, offensiveInfantry: 3, scout: 2 },
+        phase3: { total: 5, offensiveInfantry: 3, scout: 2 },
+        phase4: { total: 5, offensiveInfantry: 2, offensiveCavalry: 2, scout: 1 },
+        phase5: { total: 8, offensiveInfantry: 3, offensiveCavalry: 2, ram: 1, catapult: 1, scout: 1, expansion: 2 },
     },
     Pesadilla: {
+        phase1: createSharedPhaseOneCycleTargets('offensiveInfantry', 10, 3),
         phase1Emergency: { defensiveInfantry: 5, total: 5 },
-        phase2: { total: 30, offensiveInfantry: 21 },
-        phase3: { total: 52, offensiveInfantry: 40, scout: 6 },
-        phase4: { total: 80, offensiveInfantry: 46, offensiveCavalry: 24, scout: 5 },
-        phase5: { total: 164, offensiveInfantry: 52, offensiveCavalry: 40, ram: 28, catapult: 20, scout: 7, expansion: 10 },
+        phase2: { total: 5, offensiveInfantry: 3, scout: 2 },
+        phase3: { total: 5, offensiveInfantry: 3, scout: 2 },
+        phase4: { total: 5, offensiveInfantry: 2, offensiveCavalry: 2, scout: 1 },
+        phase5: { total: 8, offensiveInfantry: 3, offensiveCavalry: 2, ram: 1, catapult: 1, scout: 1, expansion: 2 },
     },
 });
 
@@ -301,6 +283,12 @@ function createEmptyCycleProgress() {
 function getPhaseBucketForUnitId(village, phaseKey, unitId) {
     const unit = getRaceTroops(village.race || 'germans').find(candidate => candidate.id === unitId);
     if (!unit) return null;
+
+    if (phaseKey === 'phase1') {
+        if (unit.type === 'infantry' && unit.role === 'offensive') return 'offensiveInfantryMs';
+        if (unit.role === 'scout') return 'scoutMs';
+        return null;
+    }
 
     if (phaseKey === 'phase2' || phaseKey === 'phase3') {
         if (unit.type === 'infantry' && unit.role === 'offensive') return 'offensiveInfantryMs';
@@ -373,7 +361,11 @@ function getCycleProgressSnapshot(phaseState, phaseKey) {
 function evaluateCycleTargets(phaseState, difficulty, phaseKey) {
     const snapshot = getCycleProgressSnapshot(phaseState, phaseKey);
     const targets = getCycleTargetForPhase(difficulty, phaseKey);
-    const ready = (snapshot.total || 0) >= (targets.total || 0);
+    const ready = Object.entries(targets).every(([bucket, required]) => {
+        if (!Number.isFinite(required) || required <= 0) return true;
+        if (bucket === 'expansion') return true;
+        return (snapshot[bucket] || 0) >= required;
+    });
     return { ready, cycles: snapshot, targets };
 }
 
@@ -488,40 +480,21 @@ function getResourceFieldStats(village) {
     };
 }
 
-function evaluatePhaseOneExit(village) {
-    const fieldStats = getResourceFieldStats(village);
-    const warehouseLevel = getEffectiveBuildingTypeLevel(village, 'warehouse');
-    const granaryLevel = getEffectiveBuildingTypeLevel(village, 'granary');
-
-    const ready = fieldStats.average >= PHASE_ONE_EXIT_CONDITIONS.minAverageResourceFieldLevel
-        && warehouseLevel >= PHASE_ONE_EXIT_CONDITIONS.minWarehouseLevel
-        && granaryLevel >= PHASE_ONE_EXIT_CONDITIONS.minGranaryLevel;
+function evaluatePhaseOneExit(village, phaseState, difficulty) {
+    const infraGate = evaluateSharedPhaseOneInfrastructure({
+        village,
+        getAverageResourceFieldLevel: candidateVillage => getResourceFieldStats(candidateVillage).average,
+        getEffectiveBuildingLevel: getEffectiveBuildingTypeLevel,
+        targets: PHASE_ONE_EXIT_CONDITIONS,
+    });
+    const cycleGate = evaluateCycleTargets(phaseState, difficulty, 'phase1');
 
     return {
-        ready,
-        fieldAverage: fieldStats.average,
-        warehouseLevel,
-        granaryLevel,
+        ready: infraGate.ready && cycleGate.ready,
+        details: infraGate.details,
+        cycles: cycleGate.cycles,
+        cycleTargets: cycleGate.targets,
     };
-}
-
-function getQueueUptime(samples, active) {
-    const normalizedSamples = Math.max(samples || 0, 0);
-    const normalizedActive = Math.max(active || 0, 0);
-    if (normalizedSamples <= 0) return 0;
-    return normalizedActive / normalizedSamples;
-}
-
-function getPhaseTwoQueueUptime(phaseState) {
-    const samples = Math.max(phaseState.phase2MilitaryQueueSamples || 0, 0);
-    const active = Math.max(phaseState.phase2MilitaryQueueActiveSamples || 0, 0);
-    return getQueueUptime(samples, active);
-}
-
-function getPhaseFourQueueUptime(phaseState) {
-    const samples = Math.max(phaseState.phase4MilitaryQueueSamples || 0, 0);
-    const active = Math.max(phaseState.phase4MilitaryQueueActiveSamples || 0, 0);
-    return getQueueUptime(samples, active);
 }
 
 function evaluatePhaseTwoExit(village, phaseState, difficulty) {
@@ -753,14 +726,34 @@ function runStepList({
     noActionReason,
     shouldAttemptStep = null,
     stopOnRecoverableBlock = false,
+    phaseState = null,
+    phaseId = null,
+    laneId = null,
 }) {
-    return runPriorityStepList({
+    const orderedSteps = getRoundRobinPhaseSteps({
+        phaseState,
+        phaseId,
+        laneId,
         steps,
+    });
+
+    return runPriorityStepList({
+        steps: orderedSteps,
         executeStep,
         noActionReason,
         shouldAttemptStep,
         stopOnRecoverableBlock,
     });
+}
+
+function createCycleMicroRecruitmentStep(unitType, extra = {}) {
+    return {
+        type: 'units',
+        unitType,
+        countMode: 'cycle_batch',
+        cycleCount: 1,
+        ...extra,
+    };
 }
 
 function isMilitaryConstructionStep(step) {
@@ -919,8 +912,30 @@ function getResourcePoolForKind(village, kind) {
     };
 }
 
-function hasEstimatedResourcesForStep(village, step) {
+function getResourcePoolForStep(village, step) {
+    if (step?.type === 'units' || step?.type === 'proportional_units') {
+        return getResourcePoolForKind(village, 'mil');
+    }
+
+    return getResourcePoolForKind(village, 'econ');
+}
+
+function hasResourcesForNeededCost(pool, neededCost) {
+    if (!neededCost || typeof neededCost !== 'object') return false;
+    return Object.entries(neededCost).every(([resource, required]) => {
+        if (!Number.isFinite(required) || required <= 0) return true;
+        return (pool?.[resource] || 0) >= required;
+    });
+}
+
+function hasEstimatedResourcesForStep(village, step, subGoal = null) {
     if (!step) return true;
+
+    const blockedNeededCost = subGoal?.latestDetails?.needed;
+    if (blockedNeededCost && typeof blockedNeededCost === 'object') {
+        const pool = getResourcePoolForStep(village, step);
+        return hasResourcesForNeededCost(pool, blockedNeededCost);
+    }
 
     if (step.type === 'building' || step.type === 'resource_fields_level') {
         const estimated = getStepCostEstimate(village, step);
@@ -930,8 +945,20 @@ function hasEstimatedResourcesForStep(village, step) {
         return total >= estimated;
     }
 
-    if (step.type === 'units' || step.type === 'research' || step.type === 'upgrade') {
-        const pool = getResourcePoolForKind(village, 'mil');
+    if (step.type === 'units' || step.type === 'research' || step.type === 'upgrade' || step.type === 'proportional_units') {
+        const pool = getResourcePoolForStep(village, step);
+        const unitIdentifier = step.unitId || step.unitType;
+        const unitData = getRaceTroops(village.race || 'germans').find(unit => unit.id === unitIdentifier);
+        if (unitData?.cost) {
+            const requestedCount = step.type === 'units' && Number.isFinite(step.count) && step.count > 0
+                ? Math.floor(step.count)
+                : 1;
+            const estimatedCost = Object.fromEntries(
+                Object.entries(unitData.cost).map(([resource, amount]) => [resource, (amount || 0) * requestedCount]),
+            );
+            return hasResourcesForNeededCost(pool, estimatedCost);
+        }
+
         const total = Object.values(pool).reduce((sum, value) => sum + (value || 0), 0);
         return total > 0;
     }
@@ -1335,16 +1362,14 @@ function attemptRecruitmentStep({ village, gameState, step, actionExecutor }) {
     return actionExecutor.executePlanStep(village, step, gameState, { scope: 'per_village' });
 }
 
-function tryPhaseOnePriorityConstruction({ village, gameState, actionExecutor, shouldAttemptConstructionStep = null }) {
-    const prioritySteps = [
-        { type: 'resource_fields_level', level: PHASE_ONE_EXIT_CONDITIONS.minAverageResourceFieldLevel },
-        { type: 'building', buildingType: 'warehouse', level: PHASE_ONE_EXIT_CONDITIONS.minWarehouseLevel },
-        { type: 'building', buildingType: 'granary', level: PHASE_ONE_EXIT_CONDITIONS.minGranaryLevel },
-        { type: 'building', buildingType: 'mainBuilding', level: PHASE_ONE_PRIORITY.mainBuildingTargetLevel },
-    ];
+function tryPhaseOnePriorityConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
+    const prioritySteps = getSharedPhaseOneConstructionSteps(PHASE_ONE_EXIT_CONDITIONS);
 
     return runStepList({
         steps: prioritySteps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase1,
+        laneId: 'phase1_priority_construction',
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_PRIORITY_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
@@ -1352,7 +1377,23 @@ function tryPhaseOnePriorityConstruction({ village, gameState, actionExecutor, s
     });
 }
 
-function tryPhaseOneFallbackConstruction({ village, gameState, actionExecutor, shouldAttemptConstructionStep = null }) {
+function tryPhaseOnePriorityRecruitment({ village, gameState, actionExecutor, phaseState }) {
+    const steps = [
+        createCycleMicroRecruitmentStep('offensive_infantry'),
+        createCycleMicroRecruitmentStep('scout'),
+    ];
+
+    return runStepList({
+        steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase1,
+        laneId: 'phase1_priority_recruitment',
+        executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
+        noActionReason: 'NO_PRIORITY_RECRUITMENT',
+    });
+}
+
+function tryPhaseOneFallbackConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
     const resourceStats = getResourceFieldStats(village);
     const fallbackSteps = [
         { type: 'resource_fields_level', level: Math.max(1, resourceStats.min + 1) },
@@ -1365,6 +1406,9 @@ function tryPhaseOneFallbackConstruction({ village, gameState, actionExecutor, s
 
     return runStepList({
         steps: fallbackSteps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase1,
+        laneId: 'phase1_fallback_construction',
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_FALLBACK_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
@@ -1372,7 +1416,7 @@ function tryPhaseOneFallbackConstruction({ village, gameState, actionExecutor, s
     });
 }
 
-function tryPhaseTwoPriorityConstruction({ village, gameState, actionExecutor, shouldAttemptConstructionStep = null }) {
+function tryPhaseTwoPriorityConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
     const prioritySteps = [
         { type: 'building', buildingType: 'rallyPoint', level: 1 },
         { type: 'building', buildingType: 'barracks', level: 1 },
@@ -1384,6 +1428,9 @@ function tryPhaseTwoPriorityConstruction({ village, gameState, actionExecutor, s
 
     return runStepList({
         steps: prioritySteps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase2,
+        laneId: 'phase2_priority_construction',
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_PRIORITY_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
@@ -1391,7 +1438,7 @@ function tryPhaseTwoPriorityConstruction({ village, gameState, actionExecutor, s
     });
 }
 
-function tryPhaseTwoFallbackConstruction({ village, gameState, actionExecutor, shouldAttemptConstructionStep = null }) {
+function tryPhaseTwoFallbackConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
     const resourceStats = getResourceFieldStats(village);
     const fallbackSteps = [
         { type: 'resource_fields_level', level: Math.max(PHASE_TWO_PRIORITY.resourceFieldsTargetLevel, resourceStats.min + 1) },
@@ -1404,6 +1451,9 @@ function tryPhaseTwoFallbackConstruction({ village, gameState, actionExecutor, s
 
     return runStepList({
         steps: fallbackSteps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase2,
+        laneId: 'phase2_fallback_construction',
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_FALLBACK_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
@@ -1411,7 +1461,7 @@ function tryPhaseTwoFallbackConstruction({ village, gameState, actionExecutor, s
     });
 }
 
-function tryPhaseThreePriorityConstruction({ village, gameState, actionExecutor, shouldAttemptConstructionStep = null }) {
+function tryPhaseThreePriorityConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
     const prioritySteps = [
         { type: 'resource_fields_level', level: PHASE_THREE_PRIORITY.resourceFieldsTargetLevel },
         { type: 'building', buildingType: 'smithy', level: PHASE_THREE_PRIORITY.smithyTargetLevel },
@@ -1422,6 +1472,9 @@ function tryPhaseThreePriorityConstruction({ village, gameState, actionExecutor,
 
     return runStepList({
         steps: prioritySteps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase3,
+        laneId: 'phase3_priority_construction',
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_PRIORITY_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
@@ -1429,7 +1482,7 @@ function tryPhaseThreePriorityConstruction({ village, gameState, actionExecutor,
     });
 }
 
-function tryPhaseThreeFallbackConstruction({ village, gameState, actionExecutor, shouldAttemptConstructionStep = null }) {
+function tryPhaseThreeFallbackConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
     const resourceStats = getResourceFieldStats(village);
     const fallbackSteps = [
         { type: 'resource_fields_level', level: Math.max(PHASE_THREE_PRIORITY.resourceFieldsTargetLevel, resourceStats.min + 1) },
@@ -1442,6 +1495,9 @@ function tryPhaseThreeFallbackConstruction({ village, gameState, actionExecutor,
 
     return runStepList({
         steps: fallbackSteps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase3,
+        laneId: 'phase3_fallback_construction',
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_FALLBACK_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
@@ -1449,7 +1505,7 @@ function tryPhaseThreeFallbackConstruction({ village, gameState, actionExecutor,
     });
 }
 
-function tryPhaseFourPriorityConstruction({ village, gameState, actionExecutor, shouldAttemptConstructionStep = null }) {
+function tryPhaseFourPriorityConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
     const prioritySteps = [
         { type: 'building', buildingType: 'rallyPoint', level: PHASE_FOUR_PRIORITY.rallyPointTargetLevel },
         { type: 'building', buildingType: 'stable', level: 1 },
@@ -1470,6 +1526,9 @@ function tryPhaseFourPriorityConstruction({ village, gameState, actionExecutor, 
 
     return runStepList({
         steps: prioritySteps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase4,
+        laneId: 'phase4_priority_construction',
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_PRIORITY_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
@@ -1477,7 +1536,7 @@ function tryPhaseFourPriorityConstruction({ village, gameState, actionExecutor, 
     });
 }
 
-function tryPhaseFourFallbackConstruction({ village, gameState, actionExecutor, shouldAttemptConstructionStep = null }) {
+function tryPhaseFourFallbackConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
     const resourceStats = getResourceFieldStats(village);
     const fallbackSteps = [
         { type: 'resource_fields_level', level: Math.max(PHASE_FOUR_PRIORITY.resourceFieldsTargetLevel, resourceStats.min + 1) },
@@ -1495,6 +1554,9 @@ function tryPhaseFourFallbackConstruction({ village, gameState, actionExecutor, 
 
     return runStepList({
         steps: fallbackSteps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase4,
+        laneId: 'phase4_fallback_construction',
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_FALLBACK_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
@@ -1502,7 +1564,7 @@ function tryPhaseFourFallbackConstruction({ village, gameState, actionExecutor, 
     });
 }
 
-function tryPhaseFivePriorityConstruction({ village, gameState, actionExecutor, shouldAttemptConstructionStep = null }) {
+function tryPhaseFivePriorityConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
     const prioritySteps = [
         // 1) Academy + edificios de asedio
         { type: 'building', buildingType: 'academy', level: PHASE_FIVE_PRIORITY.academyTargetLevel },
@@ -1532,6 +1594,9 @@ function tryPhaseFivePriorityConstruction({ village, gameState, actionExecutor, 
 
     return runStepList({
         steps: prioritySteps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase5,
+        laneId: 'phase5_priority_construction',
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_PRIORITY_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
@@ -1539,7 +1604,7 @@ function tryPhaseFivePriorityConstruction({ village, gameState, actionExecutor, 
     });
 }
 
-function tryPhaseFiveFallbackConstruction({ village, gameState, actionExecutor, shouldAttemptConstructionStep = null }) {
+function tryPhaseFiveFallbackConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
     const resourceStats = getResourceFieldStats(village);
     const fallbackSteps = [
         { type: 'resource_fields_level', level: Math.max(PHASE_FIVE_PRIORITY.resourceFieldsTargetLevel, resourceStats.min + 1) },
@@ -1559,6 +1624,9 @@ function tryPhaseFiveFallbackConstruction({ village, gameState, actionExecutor, 
 
     return runStepList({
         steps: fallbackSteps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase5,
+        laneId: 'phase5_fallback_construction',
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_FALLBACK_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
@@ -1624,94 +1692,41 @@ function tryPhaseOneEmergencyRecruitment({ village, gameState, actionExecutor, g
     };
 }
 
-function tryPhaseTwoPriorityRecruitment({ village, gameState, actionExecutor }) {
+function tryPhaseTwoPriorityResearch({ village, gameState, actionExecutor, phaseState }) {
     const steps = [];
 
     if (shouldEnqueueResearch(village, actionExecutor, 'scout')) {
         steps.push({ type: 'research', unitType: 'scout' });
     }
 
-    steps.push(
-        {
-            type: 'units',
-            unitType: 'offensive_infantry',
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase2,
-        },
-        {
-            type: 'units',
-            unitType: 'scout',
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase2,
-        },
-    );
-
     return runStepList({
         steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase2,
+        laneId: 'phase2_priority_research',
         executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
-        noActionReason: 'NO_PRIORITY_RECRUITMENT',
+        noActionReason: 'NO_PRIORITY_RESEARCH',
     });
 }
 
-function tryPhaseTwoFallbackRecruitment({ village, gameState, actionExecutor }) {
-    const fallbackStep = {
-        type: 'units',
-        unitType: 'offensive_infantry',
-        countMode: 'queue_cycles',
-        queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase2,
-    };
-
-    const result = attemptRecruitmentStep({ village, gameState, step: fallbackStep, actionExecutor });
-    return {
-        ...result,
-        step: cloneStep(fallbackStep),
-    };
-}
-
-function tryPhaseThreePriorityRecruitment({ village, gameState, actionExecutor }) {
+function tryPhaseThreePriorityResearch({ village, gameState, actionExecutor, phaseState }) {
     const steps = [];
 
     if (shouldEnqueueResearch(village, actionExecutor, 'scout')) {
         steps.push({ type: 'research', unitType: 'scout' });
     }
 
-    steps.push(
-        {
-            type: 'units',
-            unitType: 'scout',
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase3,
-        },
-        {
-            type: 'units',
-            unitType: 'offensive_infantry',
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase3,
-        },
-    );
-
     return runStepList({
         steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase3,
+        laneId: 'phase3_priority_research',
         executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
-        noActionReason: 'NO_PRIORITY_RECRUITMENT',
+        noActionReason: 'NO_PRIORITY_RESEARCH',
     });
 }
 
-function tryPhaseThreeFallbackRecruitment({ village, gameState, actionExecutor }) {
-    const fallbackStep = {
-        type: 'units',
-        unitType: 'offensive_infantry',
-        countMode: 'queue_cycles',
-        queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase3,
-    };
-    const result = attemptRecruitmentStep({ village, gameState, step: fallbackStep, actionExecutor });
-    return {
-        ...result,
-        step: cloneStep(fallbackStep),
-    };
-}
-
-function tryPhaseFourPriorityRecruitment({ village, gameState, actionExecutor }) {
+function tryPhaseFourPriorityResearch({ village, gameState, actionExecutor, phaseState }) {
     const steps = [];
 
     if (shouldEnqueueResearch(village, actionExecutor, 'scout')) {
@@ -1722,43 +1737,133 @@ function tryPhaseFourPriorityRecruitment({ village, gameState, actionExecutor })
         steps.push({ type: 'research', unitType: 'offensive_cavalry' });
     }
 
-    steps.push(
-        {
-            type: 'units',
-            unitType: 'offensive_infantry',
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase4,
-        },
-        {
-            type: 'units',
-            unitType: 'offensive_cavalry',
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase4,
-        },
-        {
-            type: 'units',
-            unitType: 'scout',
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase4,
-        },
-    );
+    return runStepList({
+        steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase4,
+        laneId: 'phase4_priority_research',
+        executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
+        noActionReason: 'NO_PRIORITY_RESEARCH',
+    });
+}
+
+function tryPhaseFivePriorityResearch({ village, gameState, actionExecutor, phaseState }) {
+    const raceTroops = getRaceTroops(village.race || 'germans');
+    const chiefUnitId = raceTroops.find(unit => unit.type === 'chief')?.id || 'chief_german';
+    const preferConquest = shouldPreferConquestExpansion(village);
+    const steps = [];
+
+    if (shouldEnqueueResearch(village, actionExecutor, 'ram')) {
+        steps.push({ type: 'research', unitType: 'ram' });
+    }
+
+    if (shouldEnqueueResearch(village, actionExecutor, 'catapult')) {
+        steps.push({ type: 'research', unitType: 'catapult' });
+    }
+
+    if (shouldEnqueueResearch(village, actionExecutor, 'offensive_cavalry')) {
+        steps.push({ type: 'research', unitType: 'offensive_cavalry' });
+    }
+
+    if (preferConquest && shouldEnqueueResearch(village, actionExecutor, chiefUnitId)) {
+        steps.push({ type: 'research', unitType: chiefUnitId });
+    }
 
     return runStepList({
         steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase5,
+        laneId: 'phase5_priority_research',
+        executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
+        noActionReason: 'NO_PRIORITY_RESEARCH',
+    });
+}
+
+function tryPhaseTwoPriorityRecruitment({ village, gameState, actionExecutor, phaseState }) {
+    const steps = [
+        createCycleMicroRecruitmentStep('offensive_infantry'),
+        createCycleMicroRecruitmentStep('scout'),
+    ];
+
+    return runStepList({
+        steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase2,
+        laneId: 'phase2_priority_recruitment',
         executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_PRIORITY_RECRUITMENT',
     });
 }
 
-function tryPhaseFourFallbackRecruitment({ village, gameState, actionExecutor }) {
+function tryPhaseTwoFallbackRecruitment({ village, gameState, actionExecutor, phaseState }) {
+    const steps = [createCycleMicroRecruitmentStep('offensive_infantry')];
+    return runStepList({
+        steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase2,
+        laneId: 'phase2_fallback_recruitment',
+        executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
+        noActionReason: 'NO_FALLBACK_RECRUITMENT',
+    });
+}
+
+function tryPhaseThreePriorityRecruitment({ village, gameState, actionExecutor, phaseState }) {
     const steps = [
-        { type: 'units', unitType: 'offensive_infantry', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase4 },
-        { type: 'units', unitType: 'offensive_cavalry', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase4 },
-        { type: 'units', unitType: 'scout', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase4 },
+        createCycleMicroRecruitmentStep('scout'),
+        createCycleMicroRecruitmentStep('offensive_infantry'),
     ];
 
     return runStepList({
         steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase3,
+        laneId: 'phase3_priority_recruitment',
+        executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
+        noActionReason: 'NO_PRIORITY_RECRUITMENT',
+    });
+}
+
+function tryPhaseThreeFallbackRecruitment({ village, gameState, actionExecutor, phaseState }) {
+    const steps = [createCycleMicroRecruitmentStep('offensive_infantry')];
+    return runStepList({
+        steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase3,
+        laneId: 'phase3_fallback_recruitment',
+        executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
+        noActionReason: 'NO_FALLBACK_RECRUITMENT',
+    });
+}
+
+function tryPhaseFourPriorityRecruitment({ village, gameState, actionExecutor, phaseState }) {
+    const steps = [
+        createCycleMicroRecruitmentStep('offensive_infantry'),
+        createCycleMicroRecruitmentStep('offensive_cavalry'),
+        createCycleMicroRecruitmentStep('scout'),
+    ];
+
+    return runStepList({
+        steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase4,
+        laneId: 'phase4_priority_recruitment',
+        executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
+        noActionReason: 'NO_PRIORITY_RECRUITMENT',
+    });
+}
+
+function tryPhaseFourFallbackRecruitment({ village, gameState, actionExecutor, phaseState }) {
+    const steps = [
+        createCycleMicroRecruitmentStep('offensive_infantry'),
+        createCycleMicroRecruitmentStep('offensive_cavalry'),
+        createCycleMicroRecruitmentStep('scout'),
+    ];
+
+    return runStepList({
+        steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase4,
+        laneId: 'phase4_fallback_recruitment',
         executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_FALLBACK_RECRUITMENT',
     });
@@ -1783,79 +1888,7 @@ function shouldPreferConquestExpansion(village) {
         && offensiveAndSiegeCount >= 250;
 }
 
-function tryPhaseFivePriorityRecruitment({ village, gameState, actionExecutor }) {
-    const raceTroops = getRaceTroops(village.race || 'germans');
-    const chiefUnitId = raceTroops.find(unit => unit.type === 'chief')?.id || 'chief_german';
-    const preferConquest = shouldPreferConquestExpansion(village);
-    const expansionUnitPriority = preferConquest
-        ? [chiefUnitId, 'settler']
-        : ['settler', chiefUnitId];
-
-    const steps = [];
-
-    if (shouldEnqueueResearch(village, actionExecutor, 'ram')) {
-        steps.push({ type: 'research', unitType: 'ram' });
-    }
-
-    if (shouldEnqueueResearch(village, actionExecutor, 'catapult')) {
-        steps.push({ type: 'research', unitType: 'catapult' });
-    }
-
-    if (shouldEnqueueResearch(village, actionExecutor, 'offensive_cavalry')) {
-        steps.push({ type: 'research', unitType: 'offensive_cavalry' });
-    }
-
-    if (preferConquest && shouldEnqueueResearch(village, actionExecutor, chiefUnitId)) {
-        steps.push({ type: 'research', unitType: chiefUnitId });
-    }
-
-    steps.push(
-        {
-            type: 'units',
-            unitType: 'offensive_infantry',
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5,
-        },
-        {
-            type: 'units',
-            unitType: 'offensive_cavalry',
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5,
-        },
-        {
-            type: 'units',
-            unitType: 'ram',
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5,
-        },
-        {
-            type: 'units',
-            unitType: 'catapult',
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5,
-        },
-        {
-            type: 'units',
-            unitType: 'scout',
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5,
-        },
-        ...expansionUnitPriority.map(unitType => ({
-            type: 'units',
-            unitType,
-            countMode: 'queue_cycles',
-            queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5,
-        })),
-    );
-
-    return runStepList({
-        steps,
-        executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
-        noActionReason: 'NO_PRIORITY_RECRUITMENT',
-    });
-}
-
-function tryPhaseFiveFallbackRecruitment({ village, gameState, actionExecutor }) {
+function tryPhaseFivePriorityRecruitment({ village, gameState, actionExecutor, phaseState }) {
     const raceTroops = getRaceTroops(village.race || 'germans');
     const chiefUnitId = raceTroops.find(unit => unit.type === 'chief')?.id || 'chief_german';
     const preferConquest = shouldPreferConquestExpansion(village);
@@ -1864,16 +1897,48 @@ function tryPhaseFiveFallbackRecruitment({ village, gameState, actionExecutor })
         : ['settler', chiefUnitId];
 
     const steps = [
-        { type: 'units', unitType: 'offensive_infantry', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
-        { type: 'units', unitType: 'offensive_cavalry', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
-        { type: 'units', unitType: 'ram', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
-        { type: 'units', unitType: 'catapult', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
-        { type: 'units', unitType: 'scout', countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 },
-        ...expansionUnitPriority.map(unitType => ({ type: 'units', unitType, countMode: 'queue_cycles', queueTargetMinutes: RECRUITMENT_QUEUE_TARGET_MINUTES_CONFIG.phase5 })),
+        createCycleMicroRecruitmentStep('offensive_infantry'),
+        createCycleMicroRecruitmentStep('offensive_cavalry'),
+        createCycleMicroRecruitmentStep('ram'),
+        createCycleMicroRecruitmentStep('catapult'),
+        createCycleMicroRecruitmentStep('scout'),
+        ...expansionUnitPriority.map(unitType => ({
+            ...createCycleMicroRecruitmentStep(unitType),
+        })),
     ];
 
     return runStepList({
         steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase5,
+        laneId: 'phase5_priority_recruitment',
+        executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
+        noActionReason: 'NO_PRIORITY_RECRUITMENT',
+    });
+}
+
+function tryPhaseFiveFallbackRecruitment({ village, gameState, actionExecutor, phaseState }) {
+    const raceTroops = getRaceTroops(village.race || 'germans');
+    const chiefUnitId = raceTroops.find(unit => unit.type === 'chief')?.id || 'chief_german';
+    const preferConquest = shouldPreferConquestExpansion(village);
+    const expansionUnitPriority = preferConquest
+        ? [chiefUnitId, 'settler']
+        : ['settler', chiefUnitId];
+
+    const steps = [
+        createCycleMicroRecruitmentStep('offensive_infantry'),
+        createCycleMicroRecruitmentStep('offensive_cavalry'),
+        createCycleMicroRecruitmentStep('ram'),
+        createCycleMicroRecruitmentStep('catapult'),
+        createCycleMicroRecruitmentStep('scout'),
+        ...expansionUnitPriority.map(unitType => createCycleMicroRecruitmentStep(unitType)),
+    ];
+
+    return runStepList({
+        steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase5,
+        laneId: 'phase5_fallback_recruitment',
         executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_FALLBACK_RECRUITMENT',
     });
@@ -1923,7 +1988,7 @@ function handlePhaseActionResult({
     log,
     onSuccess,
 }) {
-    return handleCommonPhaseActionResult({
+    const handling = handleCommonPhaseActionResult({
         result,
         phaseState,
         phaseId,
@@ -1936,6 +2001,47 @@ function handlePhaseActionResult({
             ...payload,
             log,
         }),
+    });
+
+    if (
+        result?.reason === 'INSUFFICIENT_RESOURCES'
+        && phaseState.activeSubGoal?.kind === SUBGOAL_KIND.waitResources
+        && village?.budgetRatio
+    ) {
+        rebalanceVillageBudgetToRatio(village, village.budgetRatio);
+    }
+
+    return handling;
+}
+
+function runAndHandlePhaseLaneMatrix({
+    phaseState,
+    phaseId,
+    lanes,
+    village,
+    gameSpeed,
+    log,
+}) {
+    const laneRun = runPhaseLaneMatrix({
+        phaseState,
+        phaseId,
+        laneMatrixId: `${phaseId}_lane_matrix`,
+        lanes,
+    });
+
+    if (!laneRun.handled) {
+        return { terminal: false };
+    }
+
+    return handlePhaseActionResult({
+        result: laneRun.result,
+        phaseState,
+        phaseId,
+        source: laneRun.lane?.source || `${phaseId}_lane_action`,
+        village,
+        gameSpeed,
+        log,
+        onSuccess: laneRun.lane?.onSuccess,
     });
 }
 
@@ -2410,7 +2516,7 @@ export function runGermanEconomicPhaseCycle({
     if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase1) {
         ensurePhaseOneRatio({ village, difficulty, log, phaseState, threatContext, now });
 
-        const exit = evaluatePhaseOneExit(village);
+        const exit = evaluatePhaseOneExit(village, phaseState, difficulty);
         if (exit.ready) {
             phaseState.phase1CompletedAt = now;
             transitionToPhaseTwo(phaseState, now, log, village);
@@ -2438,69 +2544,65 @@ export function runGermanEconomicPhaseCycle({
             return { handled: true, phaseState };
         }
 
-        const priorityConstructionResult = tryPhaseOnePriorityConstruction({
-            village,
-            gameState,
-            actionExecutor,
-            shouldAttemptConstructionStep: phaseOneThreatFilter,
-        });
-        const phaseOnePriorityHandling = handlePhaseActionResult({
-            result: priorityConstructionResult,
+        const phaseOneLaneHandling = runAndHandlePhaseLaneMatrix({
             phaseState,
             phaseId: GERMAN_PHASE_IDS.phase1,
-            source: 'phase1_priority_construction',
             village,
             gameSpeed,
             log,
+            lanes: [
+                {
+                    id: 'construction',
+                    source: 'phase1_lane_construction',
+                    execute: () => pickPhaseLaneResult([
+                        tryPhaseOnePriorityConstruction({
+                            village,
+                            gameState,
+                            actionExecutor,
+                            phaseState,
+                            shouldAttemptConstructionStep: phaseOneThreatFilter,
+                        }),
+                        tryPhaseOneFallbackConstruction({
+                            village,
+                            gameState,
+                            actionExecutor,
+                            phaseState,
+                            shouldAttemptConstructionStep: phaseOneThreatFilter,
+                        }),
+                    ], 'NO_ACTION'),
+                },
+                {
+                    id: 'research',
+                    source: 'phase1_lane_research',
+                    execute: () => ({ success: false, reason: 'NO_ACTION' }),
+                },
+                {
+                    id: 'upgrade',
+                    source: 'phase1_lane_upgrade',
+                    execute: () => ({ success: false, reason: 'NO_ACTION' }),
+                },
+                {
+                    id: 'recruitment',
+                    source: 'phase1_lane_recruitment',
+                    onSuccess: successResult => registerRecruitmentCommitFromAction({
+                        result: successResult,
+                        phaseState,
+                        phaseId: GERMAN_PHASE_IDS.phase1,
+                        village,
+                        difficulty,
+                        log,
+                    }),
+                    execute: () => tryPhaseOnePriorityRecruitment({
+                        village,
+                        gameState,
+                        actionExecutor,
+                        phaseState,
+                    }),
+                },
+            ],
         });
-        if (phaseOnePriorityHandling.terminal) {
-            return { handled: true, phaseState };
-        }
 
-        const fallbackConstructionResult = tryPhaseOneFallbackConstruction({
-            village,
-            gameState,
-            actionExecutor,
-            shouldAttemptConstructionStep: phaseOneThreatFilter,
-        });
-        const phaseOneFallbackHandling = handlePhaseActionResult({
-            result: fallbackConstructionResult,
-            phaseState,
-            phaseId: GERMAN_PHASE_IDS.phase1,
-            source: 'phase1_fallback_construction',
-            village,
-            gameSpeed,
-            log,
-        });
-        if (phaseOneFallbackHandling.terminal) {
-            return { handled: true, phaseState };
-        }
-
-        const emergencyRecruitmentResult = tryPhaseOneEmergencyRecruitment({
-            village,
-            gameState,
-            actionExecutor,
-            gameSpeed,
-            difficulty,
-        });
-        const emergencyHandling = handlePhaseActionResult({
-            result: emergencyRecruitmentResult,
-            phaseState,
-            phaseId: GERMAN_PHASE_IDS.phase1,
-            source: 'phase1_emergency_recruitment',
-            village,
-            gameSpeed,
-            log,
-            onSuccess: successResult => registerRecruitmentCommitFromAction({
-                result: successResult,
-                phaseState,
-                phaseId: GERMAN_PHASE_IDS.phase1,
-                village,
-                difficulty,
-                log,
-            }),
-        });
-        if (emergencyHandling.terminal) {
+        if (phaseOneLaneHandling.terminal) {
             return { handled: true, phaseState };
         }
 
@@ -2594,89 +2696,63 @@ export function runGermanEconomicPhaseCycle({
                 return { handled: true, phaseState };
             }
 
-            const phaseTwoConstructionResult = tryPhaseTwoPriorityConstruction({
-                village,
-                gameState,
-                actionExecutor,
-                shouldAttemptConstructionStep: phaseTwoConstructionFilter,
-            });
-            const phaseTwoConstructionHandling = handlePhaseActionResult({
-                result: phaseTwoConstructionResult,
+            const phaseTwoLaneHandling = runAndHandlePhaseLaneMatrix({
                 phaseState,
                 phaseId: GERMAN_PHASE_IDS.phase2,
-                source: 'phase2_priority_construction',
                 village,
                 gameSpeed,
                 log,
+                lanes: [
+                    {
+                        id: 'construction',
+                        source: 'phase2_lane_construction',
+                        execute: () => pickPhaseLaneResult([
+                            tryPhaseTwoPriorityConstruction({
+                                village,
+                                gameState,
+                                actionExecutor,
+                                phaseState,
+                                shouldAttemptConstructionStep: phaseTwoConstructionFilter,
+                            }),
+                            tryPhaseTwoFallbackConstruction({
+                                village,
+                                gameState,
+                                actionExecutor,
+                                phaseState,
+                                shouldAttemptConstructionStep: phaseTwoConstructionFilter,
+                            }),
+                        ], 'NO_ACTION'),
+                    },
+                    {
+                        id: 'research',
+                        source: 'phase2_lane_research',
+                        execute: () => tryPhaseTwoPriorityResearch({ village, gameState, actionExecutor, phaseState }),
+                    },
+                    {
+                        id: 'upgrade',
+                        source: 'phase2_lane_upgrade',
+                        execute: () => ({ success: false, reason: 'NO_ACTION' }),
+                    },
+                    {
+                        id: 'recruitment',
+                        source: 'phase2_lane_recruitment',
+                        onSuccess: successResult => registerRecruitmentCommitFromAction({
+                            result: successResult,
+                            phaseState,
+                            phaseId: GERMAN_PHASE_IDS.phase2,
+                            village,
+                            difficulty,
+                            log,
+                        }),
+                        execute: () => pickPhaseLaneResult([
+                            tryPhaseTwoPriorityRecruitment({ village, gameState, actionExecutor, phaseState }),
+                            tryPhaseTwoFallbackRecruitment({ village, gameState, actionExecutor, phaseState }),
+                        ], 'NO_ACTION'),
+                    },
+                ],
             });
-            if (phaseTwoConstructionHandling.terminal) {
-                return { handled: true, phaseState };
-            }
 
-            const phaseTwoRecruitmentResult = tryPhaseTwoPriorityRecruitment({
-                village,
-                gameState,
-                actionExecutor,
-            });
-            const phaseTwoRecruitmentHandling = handlePhaseActionResult({
-                result: phaseTwoRecruitmentResult,
-                phaseState,
-                phaseId: GERMAN_PHASE_IDS.phase2,
-                source: 'phase2_priority_recruitment',
-                village,
-                gameSpeed,
-                log,
-                onSuccess: successResult => registerRecruitmentCommitFromAction({
-                    result: successResult,
-                    phaseState,
-                    phaseId: GERMAN_PHASE_IDS.phase2,
-                    village,
-                    difficulty,
-                    log,
-                }),
-            });
-            if (phaseTwoRecruitmentHandling.terminal) {
-                return { handled: true, phaseState };
-            }
-
-            const phaseTwoFallbackConstructionResult = tryPhaseTwoFallbackConstruction({
-                village,
-                gameState,
-                actionExecutor,
-                shouldAttemptConstructionStep: phaseTwoConstructionFilter,
-            });
-            const phaseTwoFallbackConstructionHandling = handlePhaseActionResult({
-                result: phaseTwoFallbackConstructionResult,
-                phaseState,
-                phaseId: GERMAN_PHASE_IDS.phase2,
-                source: 'phase2_fallback_construction',
-                village,
-                gameSpeed,
-                log,
-            });
-            if (phaseTwoFallbackConstructionHandling.terminal) {
-                return { handled: true, phaseState };
-            }
-
-            const phaseTwoFallbackRecruitmentResult = tryPhaseTwoFallbackRecruitment({ village, gameState, actionExecutor });
-            const phaseTwoFallbackRecruitmentHandling = handlePhaseActionResult({
-                result: phaseTwoFallbackRecruitmentResult,
-                phaseState,
-                phaseId: GERMAN_PHASE_IDS.phase2,
-                source: 'phase2_fallback_recruitment',
-                village,
-                gameSpeed,
-                log,
-                onSuccess: successResult => registerRecruitmentCommitFromAction({
-                    result: successResult,
-                    phaseState,
-                    phaseId: GERMAN_PHASE_IDS.phase2,
-                    village,
-                    difficulty,
-                    log,
-                }),
-            });
-            if (phaseTwoFallbackRecruitmentHandling.terminal) {
+            if (phaseTwoLaneHandling.terminal) {
                 return { handled: true, phaseState };
             }
 
@@ -2761,89 +2837,63 @@ export function runGermanEconomicPhaseCycle({
                 return { handled: true, phaseState };
             }
 
-            const phaseThreeConstructionResult = tryPhaseThreePriorityConstruction({
-                village,
-                gameState,
-                actionExecutor,
-                shouldAttemptConstructionStep: phaseThreeConstructionFilter,
-            });
-            const phaseThreeConstructionHandling = handlePhaseActionResult({
-                result: phaseThreeConstructionResult,
+            const phaseThreeLaneHandling = runAndHandlePhaseLaneMatrix({
                 phaseState,
                 phaseId: GERMAN_PHASE_IDS.phase3,
-                source: 'phase3_priority_construction',
                 village,
                 gameSpeed,
                 log,
+                lanes: [
+                    {
+                        id: 'construction',
+                        source: 'phase3_lane_construction',
+                        execute: () => pickPhaseLaneResult([
+                            tryPhaseThreePriorityConstruction({
+                                village,
+                                gameState,
+                                actionExecutor,
+                                phaseState,
+                                shouldAttemptConstructionStep: phaseThreeConstructionFilter,
+                            }),
+                            tryPhaseThreeFallbackConstruction({
+                                village,
+                                gameState,
+                                actionExecutor,
+                                phaseState,
+                                shouldAttemptConstructionStep: phaseThreeConstructionFilter,
+                            }),
+                        ], 'NO_ACTION'),
+                    },
+                    {
+                        id: 'research',
+                        source: 'phase3_lane_research',
+                        execute: () => tryPhaseThreePriorityResearch({ village, gameState, actionExecutor, phaseState }),
+                    },
+                    {
+                        id: 'upgrade',
+                        source: 'phase3_lane_upgrade',
+                        execute: () => ({ success: false, reason: 'NO_ACTION' }),
+                    },
+                    {
+                        id: 'recruitment',
+                        source: 'phase3_lane_recruitment',
+                        onSuccess: successResult => registerRecruitmentCommitFromAction({
+                            result: successResult,
+                            phaseState,
+                            phaseId: GERMAN_PHASE_IDS.phase3,
+                            village,
+                            difficulty,
+                            log,
+                        }),
+                        execute: () => pickPhaseLaneResult([
+                            tryPhaseThreePriorityRecruitment({ village, gameState, actionExecutor, phaseState }),
+                            tryPhaseThreeFallbackRecruitment({ village, gameState, actionExecutor, phaseState }),
+                        ], 'NO_ACTION'),
+                    },
+                ],
             });
-            if (phaseThreeConstructionHandling.terminal) {
-                return { handled: true, phaseState };
-            }
 
-            const phaseThreeRecruitmentResult = tryPhaseThreePriorityRecruitment({
-                village,
-                gameState,
-                actionExecutor,
-            });
-            const phaseThreeRecruitmentHandling = handlePhaseActionResult({
-                result: phaseThreeRecruitmentResult,
-                phaseState,
-                phaseId: GERMAN_PHASE_IDS.phase3,
-                source: 'phase3_priority_recruitment',
-                village,
-                gameSpeed,
-                log,
-                onSuccess: successResult => registerRecruitmentCommitFromAction({
-                    result: successResult,
-                    phaseState,
-                    phaseId: GERMAN_PHASE_IDS.phase3,
-                    village,
-                    difficulty,
-                    log,
-                }),
-            });
-            if (phaseThreeRecruitmentHandling.terminal) {
-                return { handled: true, phaseState };
-            }
-
-            const phaseThreeFallbackConstructionResult = tryPhaseThreeFallbackConstruction({
-                village,
-                gameState,
-                actionExecutor,
-                shouldAttemptConstructionStep: phaseThreeConstructionFilter,
-            });
-            const phaseThreeFallbackConstructionHandling = handlePhaseActionResult({
-                result: phaseThreeFallbackConstructionResult,
-                phaseState,
-                phaseId: GERMAN_PHASE_IDS.phase3,
-                source: 'phase3_fallback_construction',
-                village,
-                gameSpeed,
-                log,
-            });
-            if (phaseThreeFallbackConstructionHandling.terminal) {
-                return { handled: true, phaseState };
-            }
-
-            const phaseThreeFallbackRecruitmentResult = tryPhaseThreeFallbackRecruitment({ village, gameState, actionExecutor });
-            const phaseThreeFallbackRecruitmentHandling = handlePhaseActionResult({
-                result: phaseThreeFallbackRecruitmentResult,
-                phaseState,
-                phaseId: GERMAN_PHASE_IDS.phase3,
-                source: 'phase3_fallback_recruitment',
-                village,
-                gameSpeed,
-                log,
-                onSuccess: successResult => registerRecruitmentCommitFromAction({
-                    result: successResult,
-                    phaseState,
-                    phaseId: GERMAN_PHASE_IDS.phase3,
-                    village,
-                    difficulty,
-                    log,
-                }),
-            });
-            if (phaseThreeFallbackRecruitmentHandling.terminal) {
+            if (phaseThreeLaneHandling.terminal) {
                 return { handled: true, phaseState };
             }
 
@@ -2928,89 +2978,63 @@ export function runGermanEconomicPhaseCycle({
                 return { handled: true, phaseState };
             }
 
-            const phaseFourConstructionResult = tryPhaseFourPriorityConstruction({
-                village,
-                gameState,
-                actionExecutor,
-                shouldAttemptConstructionStep: phaseFourConstructionFilter,
-            });
-            const phaseFourConstructionHandling = handlePhaseActionResult({
-                result: phaseFourConstructionResult,
+            const phaseFourLaneHandling = runAndHandlePhaseLaneMatrix({
                 phaseState,
                 phaseId: GERMAN_PHASE_IDS.phase4,
-                source: 'phase4_priority_construction',
                 village,
                 gameSpeed,
                 log,
+                lanes: [
+                    {
+                        id: 'construction',
+                        source: 'phase4_lane_construction',
+                        execute: () => pickPhaseLaneResult([
+                            tryPhaseFourPriorityConstruction({
+                                village,
+                                gameState,
+                                actionExecutor,
+                                phaseState,
+                                shouldAttemptConstructionStep: phaseFourConstructionFilter,
+                            }),
+                            tryPhaseFourFallbackConstruction({
+                                village,
+                                gameState,
+                                actionExecutor,
+                                phaseState,
+                                shouldAttemptConstructionStep: phaseFourConstructionFilter,
+                            }),
+                        ], 'NO_ACTION'),
+                    },
+                    {
+                        id: 'research',
+                        source: 'phase4_lane_research',
+                        execute: () => tryPhaseFourPriorityResearch({ village, gameState, actionExecutor, phaseState }),
+                    },
+                    {
+                        id: 'upgrade',
+                        source: 'phase4_lane_upgrade',
+                        execute: () => ({ success: false, reason: 'NO_ACTION' }),
+                    },
+                    {
+                        id: 'recruitment',
+                        source: 'phase4_lane_recruitment',
+                        onSuccess: successResult => registerRecruitmentCommitFromAction({
+                            result: successResult,
+                            phaseState,
+                            phaseId: GERMAN_PHASE_IDS.phase4,
+                            village,
+                            difficulty,
+                            log,
+                        }),
+                        execute: () => pickPhaseLaneResult([
+                            tryPhaseFourPriorityRecruitment({ village, gameState, actionExecutor, phaseState }),
+                            tryPhaseFourFallbackRecruitment({ village, gameState, actionExecutor, phaseState }),
+                        ], 'NO_ACTION'),
+                    },
+                ],
             });
-            if (phaseFourConstructionHandling.terminal) {
-                return { handled: true, phaseState };
-            }
 
-            const phaseFourRecruitmentResult = tryPhaseFourPriorityRecruitment({
-                village,
-                gameState,
-                actionExecutor,
-            });
-            const phaseFourRecruitmentHandling = handlePhaseActionResult({
-                result: phaseFourRecruitmentResult,
-                phaseState,
-                phaseId: GERMAN_PHASE_IDS.phase4,
-                source: 'phase4_priority_recruitment',
-                village,
-                gameSpeed,
-                log,
-                onSuccess: successResult => registerRecruitmentCommitFromAction({
-                    result: successResult,
-                    phaseState,
-                    phaseId: GERMAN_PHASE_IDS.phase4,
-                    village,
-                    difficulty,
-                    log,
-                }),
-            });
-            if (phaseFourRecruitmentHandling.terminal) {
-                return { handled: true, phaseState };
-            }
-
-            const phaseFourFallbackConstructionResult = tryPhaseFourFallbackConstruction({
-                village,
-                gameState,
-                actionExecutor,
-                shouldAttemptConstructionStep: phaseFourConstructionFilter,
-            });
-            const phaseFourFallbackConstructionHandling = handlePhaseActionResult({
-                result: phaseFourFallbackConstructionResult,
-                phaseState,
-                phaseId: GERMAN_PHASE_IDS.phase4,
-                source: 'phase4_fallback_construction',
-                village,
-                gameSpeed,
-                log,
-            });
-            if (phaseFourFallbackConstructionHandling.terminal) {
-                return { handled: true, phaseState };
-            }
-
-            const phaseFourFallbackRecruitmentResult = tryPhaseFourFallbackRecruitment({ village, gameState, actionExecutor });
-            const phaseFourFallbackRecruitmentHandling = handlePhaseActionResult({
-                result: phaseFourFallbackRecruitmentResult,
-                phaseState,
-                phaseId: GERMAN_PHASE_IDS.phase4,
-                source: 'phase4_fallback_recruitment',
-                village,
-                gameSpeed,
-                log,
-                onSuccess: successResult => registerRecruitmentCommitFromAction({
-                    result: successResult,
-                    phaseState,
-                    phaseId: GERMAN_PHASE_IDS.phase4,
-                    village,
-                    difficulty,
-                    log,
-                }),
-            });
-            if (phaseFourFallbackRecruitmentHandling.terminal) {
+            if (phaseFourLaneHandling.terminal) {
                 return { handled: true, phaseState };
             }
 
@@ -3098,89 +3122,63 @@ export function runGermanEconomicPhaseCycle({
         return { handled: true, phaseState };
     }
 
-    const phaseFiveConstructionResult = tryPhaseFivePriorityConstruction({
-        village,
-        gameState,
-        actionExecutor,
-        shouldAttemptConstructionStep: phaseFiveConstructionFilter,
-    });
-    const phaseFiveConstructionHandling = handlePhaseActionResult({
-        result: phaseFiveConstructionResult,
+    const phaseFiveLaneHandling = runAndHandlePhaseLaneMatrix({
         phaseState,
         phaseId: GERMAN_PHASE_IDS.phase5,
-        source: 'phase5_priority_construction',
         village,
         gameSpeed,
         log,
+        lanes: [
+            {
+                id: 'construction',
+                source: 'phase5_lane_construction',
+                execute: () => pickPhaseLaneResult([
+                    tryPhaseFivePriorityConstruction({
+                        village,
+                        gameState,
+                        actionExecutor,
+                        phaseState,
+                        shouldAttemptConstructionStep: phaseFiveConstructionFilter,
+                    }),
+                    tryPhaseFiveFallbackConstruction({
+                        village,
+                        gameState,
+                        actionExecutor,
+                        phaseState,
+                        shouldAttemptConstructionStep: phaseFiveConstructionFilter,
+                    }),
+                ], 'NO_ACTION'),
+            },
+            {
+                id: 'research',
+                source: 'phase5_lane_research',
+                execute: () => tryPhaseFivePriorityResearch({ village, gameState, actionExecutor, phaseState }),
+            },
+            {
+                id: 'upgrade',
+                source: 'phase5_lane_upgrade',
+                execute: () => ({ success: false, reason: 'NO_ACTION' }),
+            },
+            {
+                id: 'recruitment',
+                source: 'phase5_lane_recruitment',
+                onSuccess: successResult => registerRecruitmentCommitFromAction({
+                    result: successResult,
+                    phaseState,
+                    phaseId: GERMAN_PHASE_IDS.phase5,
+                    village,
+                    difficulty,
+                    log,
+                }),
+                execute: () => pickPhaseLaneResult([
+                    tryPhaseFivePriorityRecruitment({ village, gameState, actionExecutor, phaseState }),
+                    tryPhaseFiveFallbackRecruitment({ village, gameState, actionExecutor, phaseState }),
+                ], 'NO_ACTION'),
+            },
+        ],
     });
-    if (phaseFiveConstructionHandling.terminal) {
-        return { handled: true, phaseState };
-    }
 
-    const phaseFiveRecruitmentResult = tryPhaseFivePriorityRecruitment({
-        village,
-        gameState,
-        actionExecutor,
-    });
-    const phaseFiveRecruitmentHandling = handlePhaseActionResult({
-        result: phaseFiveRecruitmentResult,
-        phaseState,
-        phaseId: GERMAN_PHASE_IDS.phase5,
-        source: 'phase5_priority_recruitment',
-        village,
-        gameSpeed,
-        log,
-        onSuccess: successResult => registerRecruitmentCommitFromAction({
-            result: successResult,
-            phaseState,
-            phaseId: GERMAN_PHASE_IDS.phase5,
-            village,
-            difficulty,
-            log,
-        }),
-    });
-    if (phaseFiveRecruitmentHandling.terminal) {
-        return { handled: true, phaseState };
-    }
-
-    const phaseFiveFallbackConstructionResult = tryPhaseFiveFallbackConstruction({
-        village,
-        gameState,
-        actionExecutor,
-        shouldAttemptConstructionStep: phaseFiveConstructionFilter,
-    });
-    const phaseFiveFallbackConstructionHandling = handlePhaseActionResult({
-        result: phaseFiveFallbackConstructionResult,
-        phaseState,
-        phaseId: GERMAN_PHASE_IDS.phase5,
-        source: 'phase5_fallback_construction',
-        village,
-        gameSpeed,
-        log,
-    });
-    if (phaseFiveFallbackConstructionHandling.terminal) {
-        return { handled: true, phaseState };
-    }
-
-    const phaseFiveFallbackRecruitmentResult = tryPhaseFiveFallbackRecruitment({ village, gameState, actionExecutor });
-    const phaseFiveFallbackRecruitmentHandling = handlePhaseActionResult({
-        result: phaseFiveFallbackRecruitmentResult,
-        phaseState,
-        phaseId: GERMAN_PHASE_IDS.phase5,
-        source: 'phase5_fallback_recruitment',
-        village,
-        gameSpeed,
-        log,
-        onSuccess: successResult => registerRecruitmentCommitFromAction({
-            result: successResult,
-            phaseState,
-            phaseId: GERMAN_PHASE_IDS.phase5,
-            village,
-            difficulty,
-            log,
-        }),
-    });
-    if (phaseFiveFallbackRecruitmentHandling.terminal) {
+    if (phaseFiveLaneHandling.terminal) {
         return { handled: true, phaseState };
     }
 

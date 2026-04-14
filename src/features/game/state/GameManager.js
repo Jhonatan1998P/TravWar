@@ -1,6 +1,6 @@
 import GameConfig from './GameConfig.js';
 import appStore from '@shared/state/GlobalStore.js';
-import GameWorker from './GameWorker.js?worker&inline';
+import GameWorker from './GameWorker.js?worker';
 import { perfCollector } from '@shared/lib/perf.js';
 
 const STATE_STORAGE_KEY = 'game_state_v2';

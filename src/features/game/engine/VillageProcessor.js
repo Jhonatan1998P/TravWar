@@ -355,8 +355,8 @@ export class VillageProcessor {
         if (!unitData || !unitData.research || unitData.research.time === 0) return { success: false, reason: 'INVALID_UNIT_ID' };
         if (this.#village.research.completed.includes(unitId)) return { success: false, reason: 'ALREADY_RESEARCHED' };
 
-        // GASTO DE RECURSOS: Partición Estricta (Militar)
-        const availableRes = this.#village.budgetRatio ? this.#village.budget.mil : {
+        // GASTO DE RECURSOS: Partición Estricta (Económico)
+        const availableRes = this.#village.budgetRatio ? this.#village.budget.econ : {
             wood: this.#village.resources.wood.current,
             stone: this.#village.resources.stone.current,
             iron: this.#village.resources.iron.current,
@@ -370,7 +370,7 @@ export class VillageProcessor {
         }
         for (const res in unitData.research.cost) {
             if (this.#village.budgetRatio) {
-                this.#village.budget.mil[res] -= unitData.research.cost[res];
+                this.#village.budget.econ[res] -= unitData.research.cost[res];
                 this.#village.resources[res].current = this.#village.budget.econ[res] + this.#village.budget.mil[res];
             } else {
                 this.#village.resources[res].current -= unitData.research.cost[res];
@@ -409,8 +409,8 @@ export class VillageProcessor {
             upgradeCost[res] = Math.floor(unitData.cost[res] * Math.pow(SMITHY_UPGRADE_COST_MULTIPLIER, currentUpgradeLevel + 1));
         }
 
-        // GASTO DE RECURSOS: Partición Estricta (Militar)
-        const availableRes = this.#village.budgetRatio ? this.#village.budget.mil : {
+        // GASTO DE RECURSOS: Partición Estricta (Económico)
+        const availableRes = this.#village.budgetRatio ? this.#village.budget.econ : {
             wood: this.#village.resources.wood.current,
             stone: this.#village.resources.stone.current,
             iron: this.#village.resources.iron.current,
@@ -424,7 +424,7 @@ export class VillageProcessor {
         }
         for (const res in upgradeCost) {
             if (this.#village.budgetRatio) {
-                this.#village.budget.mil[res] -= upgradeCost[res];
+                this.#village.budget.econ[res] -= upgradeCost[res];
                 this.#village.resources[res].current = this.#village.budget.econ[res] + this.#village.budget.mil[res];
             } else {
                 this.#village.resources[res].current -= upgradeCost[res];

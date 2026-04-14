@@ -11,6 +11,93 @@ export const PHASE_RECOVERABLE_BLOCK_REASONS = new Set([
 
 export const TRAINING_CYCLE_MS = 3 * 60 * 1000;
 
+export const SHARED_PHASE_ONE_INFRASTRUCTURE_TARGETS = Object.freeze({
+    resourceFieldsLevel: 4,
+    buildingLevels: Object.freeze({
+        mainBuilding: 5,
+        cityWall: 5,
+        barracks: 5,
+        warehouse: 6,
+        granary: 6,
+        embassy: 3,
+        marketplace: 3,
+        academy: 5,
+        smithy: 3,
+        stable: 3,
+    }),
+});
+
+export function createSharedPhaseOneCycleTargets(primaryInfantryBucket, primaryCycles = 10, scoutCycles = 3) {
+    const key = String(primaryInfantryBucket || '').trim();
+    if (!key) return { total: 0 };
+
+    const infantryTarget = Math.max(0, Math.floor(primaryCycles || 0));
+    const scoutTarget = Math.max(0, Math.floor(scoutCycles || 0));
+
+    return {
+        total: infantryTarget + scoutTarget,
+        [key]: infantryTarget,
+        scout: scoutTarget,
+    };
+}
+
+export function getSharedPhaseOneConstructionSteps(targets = SHARED_PHASE_ONE_INFRASTRUCTURE_TARGETS) {
+    const resourceFieldsLevel = Math.max(0, Number(targets?.resourceFieldsLevel || 0));
+    const buildingLevels = targets?.buildingLevels || {};
+
+    return [
+        { type: 'resource_fields_level', level: resourceFieldsLevel },
+        { type: 'building', buildingType: 'mainBuilding', level: Math.max(0, Number(buildingLevels.mainBuilding || 0)) },
+        { type: 'building', buildingType: 'cityWall', level: Math.max(0, Number(buildingLevels.cityWall || 0)) },
+        { type: 'building', buildingType: 'barracks', level: Math.max(0, Number(buildingLevels.barracks || 0)) },
+        { type: 'building', buildingType: 'warehouse', level: Math.max(0, Number(buildingLevels.warehouse || 0)) },
+        { type: 'building', buildingType: 'granary', level: Math.max(0, Number(buildingLevels.granary || 0)) },
+        { type: 'building', buildingType: 'embassy', level: Math.max(0, Number(buildingLevels.embassy || 0)) },
+        { type: 'building', buildingType: 'marketplace', level: Math.max(0, Number(buildingLevels.marketplace || 0)) },
+        { type: 'building', buildingType: 'academy', level: Math.max(0, Number(buildingLevels.academy || 0)) },
+        { type: 'building', buildingType: 'smithy', level: Math.max(0, Number(buildingLevels.smithy || 0)) },
+        { type: 'building', buildingType: 'stable', level: Math.max(0, Number(buildingLevels.stable || 0)) },
+    ].filter(step => Number.isFinite(step.level) && step.level > 0);
+}
+
+export function evaluateSharedPhaseOneInfrastructure({
+    village,
+    getAverageResourceFieldLevel,
+    getEffectiveBuildingLevel,
+    targets = SHARED_PHASE_ONE_INFRASTRUCTURE_TARGETS,
+}) {
+    const avgFields = Number(getAverageResourceFieldLevel?.(village) || 0);
+    const buildingLevels = targets?.buildingLevels || {};
+
+    const details = {
+        resourceFieldsLevel: avgFields,
+        mainBuilding: Number(getEffectiveBuildingLevel?.(village, 'mainBuilding') || 0),
+        cityWall: Number(getEffectiveBuildingLevel?.(village, 'cityWall') || 0),
+        barracks: Number(getEffectiveBuildingLevel?.(village, 'barracks') || 0),
+        warehouse: Number(getEffectiveBuildingLevel?.(village, 'warehouse') || 0),
+        granary: Number(getEffectiveBuildingLevel?.(village, 'granary') || 0),
+        embassy: Number(getEffectiveBuildingLevel?.(village, 'embassy') || 0),
+        marketplace: Number(getEffectiveBuildingLevel?.(village, 'marketplace') || 0),
+        academy: Number(getEffectiveBuildingLevel?.(village, 'academy') || 0),
+        smithy: Number(getEffectiveBuildingLevel?.(village, 'smithy') || 0),
+        stable: Number(getEffectiveBuildingLevel?.(village, 'stable') || 0),
+    };
+
+    const ready = details.resourceFieldsLevel >= (targets?.resourceFieldsLevel || 0)
+        && details.mainBuilding >= (buildingLevels.mainBuilding || 0)
+        && details.cityWall >= (buildingLevels.cityWall || 0)
+        && details.barracks >= (buildingLevels.barracks || 0)
+        && details.warehouse >= (buildingLevels.warehouse || 0)
+        && details.granary >= (buildingLevels.granary || 0)
+        && details.embassy >= (buildingLevels.embassy || 0)
+        && details.marketplace >= (buildingLevels.marketplace || 0)
+        && details.academy >= (buildingLevels.academy || 0)
+        && details.smithy >= (buildingLevels.smithy || 0)
+        && details.stable >= (buildingLevels.stable || 0);
+
+    return { ready, details, targets };
+}
+
 export const PHASE_SUBGOAL_KIND = Object.freeze({
     buildPrerequisite: 'build_prerequisite',
     researchPrerequisite: 'research_prerequisite',
@@ -137,7 +224,7 @@ export function createOrRefreshPhaseSubGoal({
     } else if (blockedResult.reason === 'INSUFFICIENT_RESOURCES') {
         kind = subGoalKind.waitResources;
     } else {
-        kind = subGoalKind.waitResources;
+        return false;
     }
 
     const signature = `${phaseId}|${kind}|${blockedResult.reason}|${getStepSignature(blockedResult.step)}|${getStepSignature(resolverStep)}`;
@@ -265,7 +352,7 @@ export function processPhaseActiveSubGoal({
         }
 
         const hasResources = typeof hasResourcesForBlockedStep === 'function'
-            ? hasResourcesForBlockedStep(village, subGoal.blockedStep)
+            ? hasResourcesForBlockedStep(village, subGoal.blockedStep, subGoal)
             : false;
         if (hasResources) {
             clearPhaseActiveSubGoal({
@@ -573,6 +660,86 @@ export function runPriorityStepList({
     }
 
     return { success: false, reason: noActionReason };
+}
+
+export function pickPhaseLaneResult(results, noActionReason = 'NO_ACTION') {
+    let firstNonNoAction = null;
+
+    for (const result of results || []) {
+        if (!result) continue;
+
+        if (result.success || result.reason === 'QUEUE_FULL' || isRecoverablePhaseBlockReason(result.reason)) {
+            return result;
+        }
+
+        if (!firstNonNoAction && result.reason && result.reason !== noActionReason) {
+            firstNonNoAction = result;
+        }
+    }
+
+    return firstNonNoAction || { success: false, reason: noActionReason };
+}
+
+export function runPhaseLaneMatrix({
+    phaseState,
+    phaseId,
+    lanes,
+    laneMatrixId = 'lane_matrix',
+    noActionReason = 'NO_ACTION',
+}) {
+    const normalizedLanes = Array.isArray(lanes)
+        ? lanes.filter(lane => lane && typeof lane.execute === 'function')
+        : [];
+
+    if (normalizedLanes.length === 0) {
+        return { handled: false, result: { success: false, reason: noActionReason }, lane: null };
+    }
+
+    const orderedLanes = getRoundRobinPhaseSteps({
+        phaseState,
+        phaseId,
+        laneId: laneMatrixId,
+        steps: normalizedLanes,
+    });
+
+    for (const lane of orderedLanes) {
+        const result = lane.execute() || { success: false, reason: noActionReason };
+        if (result.success || result.reason === 'QUEUE_FULL' || isRecoverablePhaseBlockReason(result.reason)) {
+            return { handled: true, result, lane };
+        }
+    }
+
+    return { handled: false, result: { success: false, reason: noActionReason }, lane: null };
+}
+
+export function getRoundRobinPhaseSteps({
+    phaseState,
+    phaseId,
+    laneId,
+    steps,
+}) {
+    const orderedSteps = Array.isArray(steps) ? steps.filter(Boolean) : [];
+    if (orderedSteps.length <= 1) return orderedSteps;
+
+    if (!phaseState || typeof phaseState !== 'object') return orderedSteps;
+    if (!phaseId || !laneId) return orderedSteps;
+
+    if (!phaseState.roundRobinPointers || typeof phaseState.roundRobinPointers !== 'object') {
+        phaseState.roundRobinPointers = {};
+    }
+
+    const pointerKey = `${phaseId}:${laneId}`;
+    const rawPointer = Number(phaseState.roundRobinPointers[pointerKey] || 0);
+    const normalizedPointer = ((rawPointer % orderedSteps.length) + orderedSteps.length) % orderedSteps.length;
+
+    phaseState.roundRobinPointers[pointerKey] = (normalizedPointer + 1) % orderedSteps.length;
+
+    if (normalizedPointer === 0) return orderedSteps;
+
+    return [
+        ...orderedSteps.slice(normalizedPointer),
+        ...orderedSteps.slice(0, normalizedPointer),
+    ];
 }
 
 export function getPhaseStepQueueType(step) {

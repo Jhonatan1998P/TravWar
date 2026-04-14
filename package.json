@@ -8,13 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "perf:budget": "node scripts/perf/perf-budget.mjs",
-    "build:check": "npm run build && npm run perf:budget",
-    "ai:validate:egyptian-phase-engine": "node --experimental-default-type=module scripts/validation/ai-validation-egyptian-phase-engine.mjs",
-    "ai:validate:phase-state-compat": "node --experimental-default-type=module scripts/validation/ai-validation-phase-state-compat.mjs",
-    "ai:validate:phase-rollout-flags": "node --experimental-default-type=module scripts/validation/ai-validation-phase-rollout-flags.mjs",
-    "ai:validate:phase-contract": "node --experimental-default-type=module scripts/validation/ai-validation-phase-engine-contract.mjs",
-    "ai:harness:tribus:detallado": "node --experimental-default-type=module scripts/harnesses/ai-harness-tribus-detallado-es.mjs",
-    "ai:harness:phase-replay": "node --experimental-default-type=module scripts/harnesses/ai-harness-phase-replay-deterministic.mjs"
+    "build:check": "npm run build && npm run perf:budget"
   },
   "dependencies": {
     "zustand": "^5.0.8"
