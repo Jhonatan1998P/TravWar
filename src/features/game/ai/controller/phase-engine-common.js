@@ -27,6 +27,26 @@ export const SHARED_PHASE_ONE_INFRASTRUCTURE_TARGETS = Object.freeze({
     }),
 });
 
+export const SHARED_PHASE_TWO_INFRASTRUCTURE_TARGETS = Object.freeze({
+    resourceFieldsLevel: 6,
+    buildingLevels: Object.freeze({
+        mainBuilding: 10,
+        palace: 10,
+        embassy: 5,
+        marketplace: 7,
+        barracks: 10,
+        academy: 10,
+        stable: 7,
+        smithy: 7,
+        workshop: 3,
+        rallyPoint: 5,
+        warehouse: 10,
+        granary: 10,
+        grainMill: 3,
+        cityWall: 10,
+    }),
+});
+
 export function createSharedPhaseOneCycleTargets(primaryInfantryBucket, primaryCycles = 10, scoutCycles = 3) {
     const key = String(primaryInfantryBucket || '').trim();
     if (!key) return { total: 0 };
@@ -38,6 +58,29 @@ export function createSharedPhaseOneCycleTargets(primaryInfantryBucket, primaryC
         total: infantryTarget + scoutTarget,
         [key]: infantryTarget,
         scout: scoutTarget,
+    };
+}
+
+export function createSharedPhaseTwoCycleTargets(
+    primaryInfantryBucket,
+    primaryCavalryBucket,
+    infantryCycles = 20,
+    scoutCycles = 5,
+    cavalryCycles = 3,
+) {
+    const infantryKey = String(primaryInfantryBucket || '').trim();
+    const cavalryKey = String(primaryCavalryBucket || '').trim();
+    if (!infantryKey || !cavalryKey) return { total: 0 };
+
+    const infantryTarget = Math.max(0, Math.floor(infantryCycles || 0));
+    const scoutTarget = Math.max(0, Math.floor(scoutCycles || 0));
+    const cavalryTarget = Math.max(0, Math.floor(cavalryCycles || 0));
+
+    return {
+        total: infantryTarget + scoutTarget + cavalryTarget,
+        [infantryKey]: infantryTarget,
+        scout: scoutTarget,
+        [cavalryKey]: cavalryTarget,
     };
 }
 
@@ -57,6 +100,29 @@ export function getSharedPhaseOneConstructionSteps(targets = SHARED_PHASE_ONE_IN
         { type: 'building', buildingType: 'academy', level: Math.max(0, Number(buildingLevels.academy || 0)) },
         { type: 'building', buildingType: 'smithy', level: Math.max(0, Number(buildingLevels.smithy || 0)) },
         { type: 'building', buildingType: 'stable', level: Math.max(0, Number(buildingLevels.stable || 0)) },
+    ].filter(step => Number.isFinite(step.level) && step.level > 0);
+}
+
+export function getSharedPhaseTwoConstructionSteps(targets = SHARED_PHASE_TWO_INFRASTRUCTURE_TARGETS) {
+    const resourceFieldsLevel = Math.max(0, Number(targets?.resourceFieldsLevel || 0));
+    const buildingLevels = targets?.buildingLevels || {};
+
+    return [
+        { type: 'resource_fields_level', level: resourceFieldsLevel },
+        { type: 'building', buildingType: 'mainBuilding', level: Math.max(0, Number(buildingLevels.mainBuilding || 0)) },
+        { type: 'building', buildingType: 'rallyPoint', level: Math.max(0, Number(buildingLevels.rallyPoint || 0)) },
+        { type: 'building', buildingType: 'barracks', level: Math.max(0, Number(buildingLevels.barracks || 0)) },
+        { type: 'building', buildingType: 'academy', level: Math.max(0, Number(buildingLevels.academy || 0)) },
+        { type: 'building', buildingType: 'smithy', level: Math.max(0, Number(buildingLevels.smithy || 0)) },
+        { type: 'building', buildingType: 'stable', level: Math.max(0, Number(buildingLevels.stable || 0)) },
+        { type: 'building', buildingType: 'workshop', level: Math.max(0, Number(buildingLevels.workshop || 0)) },
+        { type: 'building', buildingType: 'embassy', level: Math.max(0, Number(buildingLevels.embassy || 0)) },
+        { type: 'building', buildingType: 'palace', level: Math.max(0, Number(buildingLevels.palace || 0)) },
+        { type: 'building', buildingType: 'marketplace', level: Math.max(0, Number(buildingLevels.marketplace || 0)) },
+        { type: 'building', buildingType: 'warehouse', level: Math.max(0, Number(buildingLevels.warehouse || 0)) },
+        { type: 'building', buildingType: 'granary', level: Math.max(0, Number(buildingLevels.granary || 0)) },
+        { type: 'building', buildingType: 'grainMill', level: Math.max(0, Number(buildingLevels.grainMill || 0)) },
+        { type: 'building', buildingType: 'cityWall', level: Math.max(0, Number(buildingLevels.cityWall || 0)) },
     ].filter(step => Number.isFinite(step.level) && step.level > 0);
 }
 
@@ -94,6 +160,52 @@ export function evaluateSharedPhaseOneInfrastructure({
         && details.academy >= (buildingLevels.academy || 0)
         && details.smithy >= (buildingLevels.smithy || 0)
         && details.stable >= (buildingLevels.stable || 0);
+
+    return { ready, details, targets };
+}
+
+export function evaluateSharedPhaseTwoInfrastructure({
+    village,
+    getAverageResourceFieldLevel,
+    getEffectiveBuildingLevel,
+    targets = SHARED_PHASE_TWO_INFRASTRUCTURE_TARGETS,
+}) {
+    const avgFields = Number(getAverageResourceFieldLevel?.(village) || 0);
+    const buildingLevels = targets?.buildingLevels || {};
+
+    const details = {
+        resourceFieldsLevel: avgFields,
+        mainBuilding: Number(getEffectiveBuildingLevel?.(village, 'mainBuilding') || 0),
+        palace: Number(getEffectiveBuildingLevel?.(village, 'palace') || 0),
+        embassy: Number(getEffectiveBuildingLevel?.(village, 'embassy') || 0),
+        marketplace: Number(getEffectiveBuildingLevel?.(village, 'marketplace') || 0),
+        barracks: Number(getEffectiveBuildingLevel?.(village, 'barracks') || 0),
+        academy: Number(getEffectiveBuildingLevel?.(village, 'academy') || 0),
+        stable: Number(getEffectiveBuildingLevel?.(village, 'stable') || 0),
+        smithy: Number(getEffectiveBuildingLevel?.(village, 'smithy') || 0),
+        workshop: Number(getEffectiveBuildingLevel?.(village, 'workshop') || 0),
+        rallyPoint: Number(getEffectiveBuildingLevel?.(village, 'rallyPoint') || 0),
+        warehouse: Number(getEffectiveBuildingLevel?.(village, 'warehouse') || 0),
+        granary: Number(getEffectiveBuildingLevel?.(village, 'granary') || 0),
+        grainMill: Number(getEffectiveBuildingLevel?.(village, 'grainMill') || 0),
+        cityWall: Number(getEffectiveBuildingLevel?.(village, 'cityWall') || 0),
+    };
+
+    const ready = details.resourceFieldsLevel >= (targets?.resourceFieldsLevel || 0)
+        && details.mainBuilding >= (buildingLevels.mainBuilding || 0)
+        && details.palace >= (buildingLevels.palace || 0)
+        && details.embassy >= (buildingLevels.embassy || 0)
+        && details.marketplace >= (buildingLevels.marketplace || 0)
+        && details.barracks >= (buildingLevels.barracks || 0)
+        && details.academy >= (buildingLevels.academy || 0)
+        && details.stable >= (buildingLevels.stable || 0)
+        && details.smithy >= (buildingLevels.smithy || 0)
+        && details.workshop >= (buildingLevels.workshop || 0)
+        && details.rallyPoint >= (buildingLevels.rallyPoint || 0)
+        && details.warehouse >= (buildingLevels.warehouse || 0)
+        && details.granary >= (buildingLevels.granary || 0)
+        && details.grainMill >= (buildingLevels.grainMill || 0)
+        && details.cityWall >= (buildingLevels.cityWall || 0);
 
     return { ready, details, targets };
 }
@@ -147,6 +259,52 @@ export function getPhaseStepSignature(step) {
     if (step.type === 'research') return `research:${step.unitType || step.unitId || 'unknown'}`;
     if (step.type === 'upgrade') return `upgrade:${step.unitType || 'unknown'}:${step.level || 0}`;
     return `${step.type || 'unknown'}:generic`;
+}
+
+function getResourcePoolSnapshotForStep(village, step) {
+    const fallbackPool = {
+        wood: Number(village?.resources?.wood?.current) || 0,
+        stone: Number(village?.resources?.stone?.current) || 0,
+        iron: Number(village?.resources?.iron?.current) || 0,
+        food: Number(village?.resources?.food?.current) || 0,
+    };
+
+    const isMilitaryBudgetStep = step?.type === 'units' || step?.type === 'proportional_units';
+    const budgetPool = isMilitaryBudgetStep
+        ? (village?.budget?.mil || null)
+        : (village?.budget?.econ || null);
+    const sourcePool = budgetPool || fallbackPool;
+
+    return {
+        wood: Number(sourcePool.wood) || 0,
+        stone: Number(sourcePool.stone) || 0,
+        iron: Number(sourcePool.iron) || 0,
+        food: Number(sourcePool.food) || 0,
+    };
+}
+
+function getMissingResourceMap(needed, available) {
+    if (!needed || typeof needed !== 'object') return null;
+    const resources = ['wood', 'stone', 'iron', 'food'];
+    const missing = {};
+
+    resources.forEach(resource => {
+        const need = Math.max(0, Number(needed[resource]) || 0);
+        const have = Math.max(0, Number(available?.[resource]) || 0);
+        if (need > have) {
+            missing[resource] = Math.ceil(need - have);
+        }
+    });
+
+    return Object.keys(missing).length > 0 ? missing : {};
+}
+
+function formatResourceMap(resources) {
+    if (!resources || typeof resources !== 'object') return null;
+    const parts = ['wood', 'stone', 'iron', 'food']
+        .filter(resource => Number.isFinite(Number(resources[resource])) && Number(resources[resource]) > 0)
+        .map(resource => `${resource}:${Math.floor(Number(resources[resource]))}`);
+    return parts.length > 0 ? parts.join(', ') : null;
 }
 
 export function isPhaseQueueAvailable(village, queueType) {
@@ -231,6 +389,11 @@ export function createOrRefreshPhaseSubGoal({
     const existing = phaseState.activeSubGoal;
     if (existing?.signature === signature && existing.phaseId === phaseId) {
         existing.updatedAt = now;
+        existing.blockedStep = cloneStep(blockedResult.step);
+        existing.resolverStep = resolverStep;
+        existing.reason = blockedResult.reason;
+        existing.latestDetails = blockedResult.details || existing.latestDetails || null;
+        existing.queueType = queueType || existing.queueType;
         if (priorityClass) {
             existing.priorityClass = priorityClass;
         }
@@ -334,6 +497,15 @@ export function processPhaseActiveSubGoal({
     }
 
     if (subGoal.kind === subGoalKind.waitResources) {
+        const neededResources = subGoal?.latestDetails?.needed && typeof subGoal.latestDetails.needed === 'object'
+            ? subGoal.latestDetails.needed
+            : null;
+        const availableResources = getResourcePoolSnapshotForStep(village, subGoal.blockedStep);
+        const missingResources = getMissingResourceMap(neededResources, availableResources);
+        const neededText = formatResourceMap(neededResources);
+        const availableText = formatResourceMap(availableResources);
+        const missingText = formatResourceMap(missingResources);
+
         if (waitResourcesMode === 'retry_after_interval') {
             if (now < subGoal.nextAttemptAt) {
                 return { handled: true };
@@ -355,14 +527,33 @@ export function processPhaseActiveSubGoal({
             ? hasResourcesForBlockedStep(village, subGoal.blockedStep, subGoal)
             : false;
         if (hasResources) {
+            const resolvedMessage = neededText
+                ? `Subgoal de ahorro resuelto: recursos exactos disponibles para ${getStepSignature(subGoal.blockedStep)}.`
+                : 'Subgoal de ahorro resuelto: recursos disponibles para reintentar.';
+
             clearPhaseActiveSubGoal({
                 phaseState,
                 now,
                 village,
                 log,
-                message: 'Subgoal de ahorro resuelto: recursos disponibles para reintentar.',
+                message: resolvedMessage,
                 config,
             });
+
+            if (neededText || availableText) {
+                log(
+                    'info',
+                    village,
+                    'Macro SubGoal',
+                    `WAIT_RESOURCES CHECK -> necesario{${neededText || 'n/a'}} disponible{${availableText || 'n/a'}} faltante{${missingText || '0'}}.`,
+                    {
+                        needed: neededResources,
+                        available: availableResources,
+                        missing: missingResources,
+                    },
+                    'economic',
+                );
+            }
             return { handled: false };
         }
 
@@ -377,8 +568,16 @@ export function processPhaseActiveSubGoal({
                 'info',
                 village,
                 'Macro SubGoal',
-                `Esperando recursos para ${getStepSignature(subGoal.blockedStep)}.`,
-                null,
+                neededText
+                    ? `Esperando recursos para ${getStepSignature(subGoal.blockedStep)}. WAIT_RESOURCES CHECK -> necesario{${neededText}} disponible{${availableText || '0'}} faltante{${missingText || '0'}}.`
+                    : `Esperando recursos para ${getStepSignature(subGoal.blockedStep)}.`,
+                neededText
+                    ? {
+                        needed: neededResources,
+                        available: availableResources,
+                        missing: missingResources,
+                    }
+                    : null,
                 'economic',
             );
         }
@@ -577,6 +776,14 @@ export function getBuildingByType(village, buildingType) {
     return village.buildings.find(building => building.type === buildingType) || null;
 }
 
+export function getEffectiveBuildingLevelById(village, buildingId) {
+    if (!village || !buildingId) return 0;
+    const building = village.buildings.find(candidate => candidate.id === buildingId);
+    if (!building) return 0;
+    const queued = (village.constructionQueue || []).filter(job => job.buildingId === building.id).length;
+    return (building.level || 0) + queued;
+}
+
 export function getBuildingTypeLevel(village, buildingType) {
     const building = getBuildingByType(village, buildingType);
     return building?.level || 0;
@@ -594,6 +801,89 @@ export function getAverageResourceFieldLevel(village) {
     if (fields.length === 0) return 0;
     const total = fields.reduce((sum, field) => sum + (field.level || 0), 0);
     return total / fields.length;
+}
+
+export function getMinEffectiveResourceFieldLevel(village) {
+    const fields = village?.buildings?.filter(building => RESOURCE_FIELD_BUILDING_TYPES.includes(building.type)) || [];
+    if (fields.length === 0) return 0;
+    const effectiveLevels = fields.map(field => getEffectiveBuildingLevelById(village, field.id));
+    return Math.min(...effectiveLevels);
+}
+
+export function prioritizeMainAndFieldsConstructionSteps(steps) {
+    const normalized = Array.isArray(steps) ? steps.filter(Boolean) : [];
+    const main = normalized.filter(step => step.type === 'building' && step.buildingType === 'mainBuilding');
+    const fields = normalized.filter(step => step.type === 'resource_fields_level');
+    const rest = normalized.filter(step => !((step.type === 'building' && step.buildingType === 'mainBuilding') || step.type === 'resource_fields_level'));
+    return [...fields, ...main, ...rest];
+}
+
+export function getConstructionMicroStepsForVillage({
+    village,
+    steps,
+    getEffectiveBuildingLevel = getEffectiveBuildingTypeLevel,
+}) {
+    const normalized = Array.isArray(steps) ? steps.filter(Boolean) : [];
+    const microSteps = [];
+
+    for (const step of normalized) {
+        if (step.type === 'building') {
+            const targetLevel = Math.max(0, Number(step.level || 0));
+            if (targetLevel <= 0) continue;
+            const currentLevel = Math.max(0, Number(getEffectiveBuildingLevel(village, step.buildingType)) || 0);
+            if (currentLevel >= targetLevel) continue;
+            const nextLevel = Math.min(targetLevel, currentLevel + 1);
+
+            microSteps.push({
+                ...step,
+                level: nextLevel,
+                microTrace: {
+                    kind: 'building',
+                    buildingType: step.buildingType,
+                    currentLevel,
+                    nextLevel,
+                    targetLevel,
+                },
+            });
+            continue;
+        }
+
+        if (step.type === 'resource_fields_level') {
+            const targetLevel = Math.max(0, Number(step.level || 0));
+            if (targetLevel <= 0) continue;
+            const minEffectiveLevel = Math.max(0, Number(getMinEffectiveResourceFieldLevel(village)) || 0);
+            if (minEffectiveLevel >= targetLevel) continue;
+            const nextTierLevel = Math.min(targetLevel, minEffectiveLevel + 1);
+
+            microSteps.push({
+                ...step,
+                level: nextTierLevel,
+                microTrace: {
+                    kind: 'resource_fields_tier',
+                    currentMinLevel: minEffectiveLevel,
+                    nextTierLevel,
+                    targetLevel,
+                },
+            });
+            continue;
+        }
+
+        microSteps.push(step);
+    }
+
+    const prioritized = prioritizeMainAndFieldsConstructionSteps(microSteps);
+    const fieldsStep = prioritized.find(step => step.type === 'resource_fields_level');
+
+    if (fieldsStep) {
+        const minEffectiveFieldsLevel = Math.max(0, Number(getMinEffectiveResourceFieldLevel(village)) || 0);
+        const fieldsTargetLevel = Math.max(0, Number(fieldsStep.level || 0));
+
+        if (minEffectiveFieldsLevel < fieldsTargetLevel) {
+            return [{ ...fieldsStep }];
+        }
+    }
+
+    return prioritized;
 }
 
 export function getUnitCountInVillageAndQueue(village, unitId) {

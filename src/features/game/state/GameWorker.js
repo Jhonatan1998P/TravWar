@@ -31,6 +31,7 @@ const LOG_MILITARY_DECISIONS = true;
 const LOG_ECONOMIC_DECISIONS = true;
 const LOG_MILITARY_DETAILS = true;
 const LOG_ECONOMIC_DETAILS = true;
+const ENABLE_WORKER_LOGS = false;
 
 const MAX_REPORTS = 20;
 const MAX_MEMORY_ENTRIES = 200;
@@ -169,6 +170,8 @@ function maybeRebalanceAIBudgetsByElapsedMs(elapsedMs, reason = 'online') {
 }
 
 function _log(level, action, message, details = null, context = {}) {
+    if (!ENABLE_WORKER_LOGS) return;
+
     const economicActions = [
         'Construcción', 'Construcción Fallida', 'Acción en Espera',
         'Cola Libre', 'Ahorro de Recursos', 'Ciclo Económico', 'Nuevo Objetivo economic'

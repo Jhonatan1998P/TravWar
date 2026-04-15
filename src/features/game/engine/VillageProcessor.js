@@ -457,9 +457,6 @@ export class VillageProcessor {
                 building.level = job.targetLevel;
                 if (building.type === 'empty') building.type = job.buildingType;
                 
-                if (this.#village.ownerId.startsWith('ai_')) {
-                    console.log(`[VP] AI ${this.#village.ownerId} completed ${job.buildingType} Level ${job.targetLevel}.`);
-                }
             }
             completedConstructionJobs.push(job);
             needsRecalculation = true;

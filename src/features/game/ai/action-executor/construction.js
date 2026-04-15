@@ -40,6 +40,27 @@ function findConstructionCandidate(village, step) {
     return null;
 }
 
+function formatConstructionMicroTrace(step, buildingName) {
+    const trace = step?.microTrace;
+    if (!trace || typeof trace !== 'object') return '';
+
+    if (trace.kind === 'resource_fields_tier') {
+        const tier = Math.max(0, Number(trace.nextTierLevel) || 0);
+        const target = Math.max(0, Number(trace.targetLevel) || 0);
+        return ` [MicroPaso: campos tier ${tier}/${target}]`;
+    }
+
+    if (trace.kind === 'building') {
+        const currentLevel = Math.max(0, Number(trace.currentLevel) || 0);
+        const nextLevel = Math.max(0, Number(trace.nextLevel) || 0);
+        const targetLevel = Math.max(0, Number(trace.targetLevel) || 0);
+        const label = buildingName || trace.buildingType || 'edificio';
+        return ` [MicroPaso: ${label} ${currentLevel}->${nextLevel}/${targetLevel}]`;
+    }
+
+    return '';
+}
+
 export function manageConstructionForGoal({
     village,
     gameState,
@@ -61,7 +82,19 @@ export function manageConstructionForGoal({
 
     const econBudget = getVillageBudget(village, 'econ');
     if (!canAffordCost(cost, econBudget)) {
-        return { success: false, reason: 'INSUFFICIENT_RESOURCES' };
+        return {
+            success: false,
+            reason: 'INSUFFICIENT_RESOURCES',
+            details: {
+                needed: { ...cost },
+                available: {
+                    wood: Number(econBudget.wood) || 0,
+                    stone: Number(econBudget.stone) || 0,
+                    iron: Number(econBudget.iron) || 0,
+                    food: Number(econBudget.food) || 0,
+                },
+            },
+        };
     }
 
     const buildingName = buildingData.name || 'Campo de Recurso';
@@ -70,7 +103,8 @@ export function manageConstructionForGoal({
         : { success: Boolean(attemptUpgrade(village, candidate.building, candidate.type)) };
 
     if (upgradeResult?.success) {
-        log('success', village, 'Construcción', `Iniciando mejora de ${buildingName} a Nivel ${targetLevel}.`);
+        const microTrace = formatConstructionMicroTrace(step, buildingName);
+        log('success', village, 'Construcción', `Iniciando mejora de ${buildingName} a Nivel ${targetLevel}.${microTrace}`);
         return { success: true };
     }
 

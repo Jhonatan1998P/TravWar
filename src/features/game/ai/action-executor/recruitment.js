@@ -8,6 +8,68 @@ const PHASE_BATCH_CONFIG = {
 };
 const RECRUITMENT_CYCLE_MS = 3 * 60 * 1000;
 const SIEGE_TARGET_RAM_RATIO = 0.7;
+const EXCHANGE_RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
+const RECRUITMENT_EXCHANGE_PROBABILITY_BY_DIFFICULTY = Object.freeze({
+    normal: 0.1,
+    dificil: 0.15,
+    pesadilla: 0.25,
+});
+
+function createEmptyRecruitmentExchangeKpi() {
+    return {
+        attempts: 0,
+        activations: 0,
+        skippedByProbability: 0,
+        skippedNoEfficiencyGain: 0,
+        skippedNoBudget: 0,
+        totalPotentialUnitGain: 0,
+        lastAttemptAt: null,
+        lastActivationAt: null,
+        byUnit: {},
+    };
+}
+
+function getRecruitmentExchangeKpi(village) {
+    if (!village || typeof village !== 'object') {
+        return createEmptyRecruitmentExchangeKpi();
+    }
+
+    if (!village.aiRecruitmentExchangeKpi || typeof village.aiRecruitmentExchangeKpi !== 'object') {
+        village.aiRecruitmentExchangeKpi = createEmptyRecruitmentExchangeKpi();
+    }
+
+    return village.aiRecruitmentExchangeKpi;
+}
+
+function getRecruitmentExchangeUnitKpi(kpi, unitId) {
+    if (!kpi.byUnit || typeof kpi.byUnit !== 'object') {
+        kpi.byUnit = {};
+    }
+
+    if (!kpi.byUnit[unitId]) {
+        kpi.byUnit[unitId] = {
+            attempts: 0,
+            activations: 0,
+            totalPotentialUnitGain: 0,
+        };
+    }
+
+    return kpi.byUnit[unitId];
+}
+
+function getRecruitmentExchangeKpiSnapshot(kpi) {
+    const attempts = Math.max(0, Number(kpi?.attempts) || 0);
+    const activations = Math.max(0, Number(kpi?.activations) || 0);
+    const totalPotentialUnitGain = Math.max(0, Number(kpi?.totalPotentialUnitGain) || 0);
+    const activationRate = attempts > 0 ? (activations / attempts) : 0;
+
+    return {
+        attempts,
+        activations,
+        activationRate,
+        totalPotentialUnitGain,
+    };
+}
 
 function getTotalUnitCountAcrossVillages(villages, unitId) {
     if (!unitId) return 0;
@@ -78,6 +140,144 @@ function resolveRecruitmentUnitId({ step, race, resolveUnitId, scopedVillages })
 
 function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
+}
+
+function normalizeDifficultyKey(difficulty) {
+    return String(difficulty || 'Pesadilla')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+function getRecruitmentExchangeProbability(difficulty) {
+    const key = normalizeDifficultyKey(difficulty);
+    return RECRUITMENT_EXCHANGE_PROBABILITY_BY_DIFFICULTY[key]
+        ?? RECRUITMENT_EXCHANGE_PROBABILITY_BY_DIFFICULTY.pesadilla;
+}
+
+function getBudgetTotalResources(budget) {
+    return EXCHANGE_RESOURCE_KEYS.reduce((sum, resource) => sum + Math.max(0, Number(budget?.[resource]) || 0), 0);
+}
+
+function getUnitTotalCost(cost = {}) {
+    return EXCHANGE_RESOURCE_KEYS.reduce((sum, resource) => sum + Math.max(0, Number(cost?.[resource]) || 0), 0);
+}
+
+function getMaxAffordableCountWithPerfectExchange(unitCost = {}, budget = {}) {
+    const totalCost = getUnitTotalCost(unitCost);
+    if (!Number.isFinite(totalCost) || totalCost <= 0) return 0;
+    return Math.max(0, Math.floor(getBudgetTotalResources(budget) / totalCost));
+}
+
+function syncVillageBudgetToResources(village) {
+    EXCHANGE_RESOURCE_KEYS.forEach(resource => {
+        if (!village?.resources?.[resource]) return;
+        village.resources[resource].current = (village.budget?.econ?.[resource] || 0) + (village.budget?.mil?.[resource] || 0);
+    });
+}
+
+function maybeExchangeMilitaryBudgetForRecruitment({ village, unitData, difficulty, log }) {
+    const now = Date.now();
+    const kpi = getRecruitmentExchangeKpi(village);
+    const unitKpi = getRecruitmentExchangeUnitKpi(kpi, unitData?.id || 'unknown');
+    kpi.attempts += 1;
+    unitKpi.attempts += 1;
+    kpi.lastAttemptAt = now;
+
+    if (!village?.budgetRatio || !village?.budget?.mil || !unitData?.cost) {
+        kpi.skippedNoBudget += 1;
+        return { applied: false, reason: 'NO_AI_BUDGET' };
+    }
+
+    const probability = getRecruitmentExchangeProbability(difficulty);
+    if (probability <= 0 || Math.random() > probability) {
+        kpi.skippedByProbability += 1;
+        return { applied: false, reason: 'PROBABILITY_GATE', probability };
+    }
+
+    const currentBudget = village.budget.mil;
+    const beforeBudgetSnapshot = {
+        wood: Number(currentBudget.wood) || 0,
+        stone: Number(currentBudget.stone) || 0,
+        iron: Number(currentBudget.iron) || 0,
+        food: Number(currentBudget.food) || 0,
+    };
+    const currentMax = getMaxAffordableCount(unitData.cost, currentBudget);
+    const exchangeMax = getMaxAffordableCountWithPerfectExchange(unitData.cost, currentBudget);
+    if (!Number.isFinite(exchangeMax) || exchangeMax <= 0 || exchangeMax <= currentMax) {
+        kpi.skippedNoEfficiencyGain += 1;
+        return {
+            applied: false,
+            reason: 'NO_EFFICIENCY_GAIN',
+            probability,
+            currentMax,
+            exchangeMax,
+        };
+    }
+
+    const redistributedBudget = {
+        wood: 0,
+        stone: 0,
+        iron: 0,
+        food: 0,
+    };
+
+    let allocated = 0;
+    EXCHANGE_RESOURCE_KEYS.forEach(resource => {
+        const perUnitCost = Math.max(0, Number(unitData.cost?.[resource]) || 0);
+        const value = perUnitCost * exchangeMax;
+        redistributedBudget[resource] = value;
+        allocated += value;
+    });
+
+    const totalBudget = getBudgetTotalResources(currentBudget);
+    const remaining = Math.max(0, totalBudget - allocated);
+    const preferredResource = EXCHANGE_RESOURCE_KEYS
+        .slice()
+        .sort((a, b) => (unitData.cost?.[b] || 0) - (unitData.cost?.[a] || 0))[0] || 'wood';
+    redistributedBudget[preferredResource] += remaining;
+
+    EXCHANGE_RESOURCE_KEYS.forEach(resource => {
+        village.budget.mil[resource] = redistributedBudget[resource];
+    });
+    syncVillageBudgetToResources(village);
+
+    const gain = Math.max(0, exchangeMax - Math.max(0, currentMax));
+    kpi.activations += 1;
+    kpi.totalPotentialUnitGain += gain;
+    kpi.lastActivationAt = now;
+    unitKpi.activations += 1;
+    unitKpi.totalPotentialUnitGain += gain;
+
+    if (typeof log === 'function') {
+        const snapshot = getRecruitmentExchangeKpiSnapshot(kpi);
+        log(
+            'info',
+            village,
+            'Reclutamiento',
+            `Intercambio tactico activado para ${unitData.id}: ${Math.max(0, currentMax)} -> ${exchangeMax} unidades potenciales (+${gain}). KPI ${snapshot.activations}/${snapshot.attempts} (${(snapshot.activationRate * 100).toFixed(1)}%), ganancia total +${snapshot.totalPotentialUnitGain}.`,
+            {
+                difficulty,
+                probability,
+                before: beforeBudgetSnapshot,
+                after: {
+                    wood: Number(village.budget.mil.wood) || 0,
+                    stone: Number(village.budget.mil.stone) || 0,
+                    iron: Number(village.budget.mil.iron) || 0,
+                    food: Number(village.budget.mil.food) || 0,
+                },
+                kpi: snapshot,
+            },
+        );
+    }
+
+    return {
+        applied: true,
+        probability,
+        currentMax,
+        exchangeMax,
+    };
 }
 
 function getAverageResourceFieldLevel(village) {
@@ -276,6 +476,7 @@ export function manageRecruitmentForGoal({
     log,
     goalScope,
     gameSpeed = 1,
+    difficulty = 'Pesadilla',
 }) {
     const allVillages = gameState.villages.filter(candidate => candidate.ownerId === ownerId);
     const scopedVillages = getVillagesForGoalScope(allVillages, village, goalScope);
@@ -347,6 +548,13 @@ export function manageRecruitmentForGoal({
     }
 
     if (unitsNeeded <= 0) return { success: true };
+
+    maybeExchangeMilitaryBudgetForRecruitment({
+        village,
+        unitData,
+        difficulty,
+        log,
+    });
 
     const militaryBudget = getVillageBudget(village, 'mil');
     const maxAffordableTotal = getMaxAffordableCount(unitData.cost, militaryBudget);

@@ -6,8 +6,10 @@ import {
     buildPrerequisiteResolverStepFromBlock,
     clonePhaseStep,
     createSharedPhaseOneCycleTargets,
+    createSharedPhaseTwoCycleTargets,
     createPhaseTransition,
     evaluateSharedPhaseOneInfrastructure,
+    evaluateSharedPhaseTwoInfrastructure,
     getAverageResourceFieldLevel,
     getCompletedTrainingCycles,
     getPhaseStepSignature,
@@ -15,7 +17,9 @@ import {
     isPhaseQueueAvailable,
     isPhaseResearchStepCompleted,
     getQueuedTrainingMs,
+    getConstructionMicroStepsForVillage,
     getSharedPhaseOneConstructionSteps,
+    getSharedPhaseTwoConstructionSteps,
     handleCommonPhaseActionResult,
     getBuildingTypeLevel,
     getDifficultyTemplate,
@@ -32,6 +36,7 @@ import {
     runPhaseLaneMatrix,
     runPriorityStepList,
     SHARED_PHASE_ONE_INFRASTRUCTURE_TARGETS,
+    SHARED_PHASE_TWO_INFRASTRUCTURE_TARGETS,
     TRAINING_CYCLE_MS,
 } from './phase-engine-common.js';
 
@@ -74,10 +79,7 @@ const PHASE_TEMPLATE_BY_DIFFICULTY = Object.freeze({
 
 const PHASE_ONE_EXIT = SHARED_PHASE_ONE_INFRASTRUCTURE_TARGETS;
 
-const PHASE_TWO_EXIT = Object.freeze({
-    minBarracksLevel: 1,
-    minWallLevel: 5,
-});
+const PHASE_TWO_EXIT = SHARED_PHASE_TWO_INFRASTRUCTURE_TARGETS;
 
 const PHASE_THREE_EXIT = Object.freeze({
     minAverageResourceFieldLevel: 7,
@@ -104,7 +106,7 @@ const PHASE_FIVE_EXIT = Object.freeze({
 
 const PHASE_EXIT_CYCLE_TARGETS = Object.freeze({
     phase1: createSharedPhaseOneCycleTargets('defensiveInfantry', 10, 3),
-    phase2: { total: 5, defensiveInfantry: 3, defensiveCavalry: 2 },
+    phase2: createSharedPhaseTwoCycleTargets('defensiveInfantry', 'defensiveCavalry', 20, 5, 3),
     phase3: { total: 5, defensiveInfantry: 2, defensiveCavalry: 2, scout: 1 },
     phase4: { total: 5, defensiveInfantry: 1, defensiveCavalry: 1, offensiveInfantry: 2, scout: 1 },
     phase5: { total: 5, defensiveInfantry: 2, defensiveCavalry: 2, offensiveCavalry: 1 },
@@ -395,13 +397,13 @@ function getQueuedLevelsForBuilding(village, buildingId) {
 }
 
 function getEstimatedConstructionCost(village, step) {
-    if (!step) return Number.POSITIVE_INFINITY;
+    if (!step) return null;
 
     if (step.type === 'building') {
         const nextLevel = Math.max(1, getEffectiveBuildingLevel(village, step.buildingType) + 1);
         const levelData = getBuildingLevelData(step.buildingType, nextLevel);
-        if (!levelData?.cost) return Number.POSITIVE_INFINITY;
-        return Object.values(levelData.cost).reduce((sum, value) => sum + (value || 0), 0);
+        if (!levelData?.cost) return null;
+        return { ...levelData.cost };
     }
 
     if (step.type === 'resource_fields_level') {
@@ -414,13 +416,13 @@ function getEstimatedConstructionCost(village, step) {
             .filter(entry => entry.effectiveLevel < (step.level || 1))
             .sort((a, b) => a.effectiveLevel - b.effectiveLevel)[0];
 
-        if (!candidate) return 0;
+        if (!candidate) return {};
         const levelData = getBuildingLevelData(candidate.building.type, candidate.effectiveLevel + 1);
-        if (!levelData?.cost) return Number.POSITIVE_INFINITY;
-        return Object.values(levelData.cost).reduce((sum, value) => sum + (value || 0), 0);
+        if (!levelData?.cost) return null;
+        return { ...levelData.cost };
     }
 
-    return Number.POSITIVE_INFINITY;
+    return null;
 }
 
 function hasEstimatedResourcesForStep(village, step, subGoal = null) {
@@ -433,10 +435,9 @@ function hasEstimatedResourcesForStep(village, step, subGoal = null) {
     }
 
     if (step.type === 'building' || step.type === 'resource_fields_level') {
-        const estimated = getEstimatedConstructionCost(village, step);
-        if (!Number.isFinite(estimated)) return false;
-        const total = Object.values(pool).reduce((sum, value) => sum + (value || 0), 0);
-        return total >= estimated;
+        const estimatedCost = getEstimatedConstructionCost(village, step);
+        if (!estimatedCost || typeof estimatedCost !== 'object') return false;
+        return hasResourcesForNeededCost(pool, estimatedCost);
     }
 
     if (step.type === 'units' || step.type === 'research' || step.type === 'upgrade' || step.type === 'proportional_units') {
@@ -695,11 +696,17 @@ function createCycleMicroRecruitmentStep(unitType, extra = {}) {
 }
 
 function tryConstructionPriority({ actionExecutor, village, gameState, phaseState, phaseId, laneId = 'construction', options, shouldAttemptStep = null }) {
+    const microOptions = getConstructionMicroStepsForVillage({
+        village,
+        steps: options,
+        getEffectiveBuildingLevel,
+    });
+
     const orderedOptions = getRoundRobinPhaseSteps({
         phaseState,
         phaseId,
         laneId,
-        steps: options,
+        steps: microOptions,
     });
 
     return runPriorityStepList({
@@ -832,22 +839,16 @@ function updatePhaseThreeQueueTelemetry(phaseState, village) {
     }
 }
 
-function getMinimumPhaseTwoDefensiveCore(village) {
-    const population = Math.max(0, village.population?.current || 0);
-    return Math.max(30, Math.ceil(population / 9));
-}
-
 function evaluatePhaseTwoExit(village, phaseState) {
-    const barracks = getEffectiveBuildingLevel(village, 'barracks');
-    const wall = getEffectiveBuildingLevel(village, 'cityWall');
-    const defensiveCore = countDefensiveCoreUnits(village);
-    const minDefensiveCore = getMinimumPhaseTwoDefensiveCore(village);
+    const infraGate = evaluateSharedPhaseTwoInfrastructure({
+        village,
+        getAverageResourceFieldLevel,
+        getEffectiveBuildingLevel,
+        targets: PHASE_TWO_EXIT,
+    });
     const cycleGate = evaluateCycleTargets(phaseState, 'phase2');
 
-    return barracks >= PHASE_TWO_EXIT.minBarracksLevel
-        && wall >= PHASE_TWO_EXIT.minWallLevel
-        && defensiveCore >= minDefensiveCore
-        && cycleGate.ready;
+    return infraGate.ready && cycleGate.ready;
 }
 
 function evaluatePhaseThreeExit(village, phaseState) {
@@ -1071,14 +1072,7 @@ function runPhaseTwo({ village, gameState, actionExecutor, phaseState, threatCon
                             phaseId: EGYPTIAN_PHASE_IDS.phase2,
                             laneId: 'phase2_priority_construction',
                             shouldAttemptStep: constructionFilter,
-                            options: [
-                                { type: 'building', buildingType: 'rallyPoint', level: 2 },
-                                { type: 'building', buildingType: 'barracks', level: 3 },
-                                { type: 'building', buildingType: 'academy', level: 2 },
-                                { type: 'building', buildingType: 'smithy', level: 2 },
-                                { type: 'building', buildingType: 'cityWall', level: 5 },
-                                { type: 'resource_fields_level', level: 5 },
-                            ],
+                            options: getSharedPhaseTwoConstructionSteps(PHASE_TWO_EXIT),
                         }),
                     ];
 
@@ -1091,7 +1085,7 @@ function runPhaseTwo({ village, gameState, actionExecutor, phaseState, threatCon
                             phaseId: EGYPTIAN_PHASE_IDS.phase2,
                             laneId: 'phase2_high_threat_construction',
                             shouldAttemptStep: constructionFilter,
-                            options: [{ type: 'building', buildingType: 'cityWall', level: 7 }],
+                            options: [{ type: 'building', buildingType: 'cityWall', level: PHASE_TWO_EXIT.buildingLevels.cityWall }],
                         }));
                     }
 
@@ -1121,8 +1115,8 @@ function runPhaseTwo({ village, gameState, actionExecutor, phaseState, threatCon
                     shouldAttemptStep: recruitmentFilter,
                     options: [
                         createCycleMicroRecruitmentStep('defensive_infantry'),
-                        createCycleMicroRecruitmentStep('defensive_cavalry'),
                         createCycleMicroRecruitmentStep('scout'),
+                        createCycleMicroRecruitmentStep('defensive_cavalry'),
                     ],
                 }),
             },

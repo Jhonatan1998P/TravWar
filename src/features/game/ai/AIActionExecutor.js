@@ -67,6 +67,7 @@ class AIActionExecutor {
             log: this._controller.log.bind(this._controller),
             goalScope: activeGoal?.scope,
             gameSpeed: this._controller.getGameConfig()?.gameSpeed || 1,
+            difficulty: this._controller.getDifficulty(),
         });
     }
 

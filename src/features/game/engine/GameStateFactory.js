@@ -16,6 +16,20 @@ function getInitialOasisBeastAmount(spawnMin, gameSpeed) {
     return Math.max(1, Math.floor(spawnMin * speedMultiplier));
 }
 
+function createDefaultRecruitmentExchangeKpi() {
+    return {
+        attempts: 0,
+        activations: 0,
+        skippedByProbability: 0,
+        skippedNoEfficiencyGain: 0,
+        skippedNoBudget: 0,
+        totalPotentialUnitGain: 0,
+        lastAttemptAt: null,
+        lastActivationAt: null,
+        byUnit: {},
+    };
+}
+
 export class GameStateFactory {
     #config;
 
@@ -118,6 +132,7 @@ export class GameStateFactory {
                     econ: { wood: 0, stone: 0, iron: 0, food: 0 },
                     mil: { wood: 0, stone: 0, iron: 0, food: 0 }
                 };
+                village.aiRecruitmentExchangeKpi ??= createDefaultRecruitmentExchangeKpi();
             }
         });
         if (savedState.unreadReports !== undefined && savedState.unreadCounts === undefined) {
@@ -216,6 +231,7 @@ export class GameStateFactory {
                 econ: { wood: 0, stone: 0, iron: 0, food: 0 },
                 mil: { wood: 0, stone: 0, iron: 0, food: 0 }
             };
+            village.aiRecruitmentExchangeKpi = createDefaultRecruitmentExchangeKpi();
         }
 
         return village;

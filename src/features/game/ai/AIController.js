@@ -59,6 +59,79 @@ const ACTION_LABELS = Object.freeze({
     INICIO_CICLO_MILITAR: 'Inicio Ciclo Militar',
     StrategicAI: 'Analisis Estrategico',
     'Strategic AI': 'Analisis Estrategico',
+    'Razonamiento Estrategico': 'Analisis del General',
+    'Razonamiento del General': 'Analisis del General',
+    'Sin Comandos': 'Sin Ordenes',
+    'Comando Invalido': 'Comando Invalido',
+    'Comando Inválido': 'Comando Invalido',
+    'Comando Enviado': 'Comando Enviado',
+    'Comando Fallido': 'Comando Fallido',
+    'Error en Ciclo Militar': 'Error Ciclo Militar',
+    'Ciclo Militar Omitido': 'Ciclo Militar Omitido',
+    'Evento Reactivo': 'Evento Reactivo',
+    'Reactive Cooldown': 'Cooldown Reactivo',
+    'Reactive Lock': 'Bloqueo Reactivo',
+    'Reactive Fallback': 'Fallback Reactivo',
+    'Counter Reaction': 'Reaccion de Contraataque',
+    'Counter Action': 'Accion de Contraataque',
+    'Counter Window': 'Ventana de Contraataque',
+    'Counter-espionage': 'Contraespionaje',
+    'Executing Dodge': 'Ejecucion de Esquiva',
+    'Dodge Maneuver': 'Maniobra de Esquiva',
+    'Dodge Maneuver Skipped': 'Esquiva Omitida',
+    'Defensa Coordinada': 'Defensa Coordinada',
+    'Defensa Coordinada Fallida': 'Defensa Coordinada Fallida',
+    'Local Defense': 'Defensa Local',
+    'Tactical Evasion': 'Evasion Tactica',
+    'Reinforcement Recall': 'Retiro de Refuerzos',
+    'Ajuste Estratégico': 'Ajuste Estrategico',
+    'Ahorro de Recursos': 'Espera de Recursos',
+    'Acción de Objetivo': 'Accion de Objetivo',
+    'Objetivo military Completado': 'Objetivo Militar Completado',
+    'Nuevo Objetivo military': 'Nuevo Objetivo Militar',
+    'Objetivo economic Completado': 'Objetivo Economico Completado',
+    'Nuevo Objetivo economic': 'Nuevo Objetivo Economico',
+    'Farmeo de Oasis': 'Farmeo de Oasis',
+    'Rebalanceo de Recursos': 'Rebalanceo de Recursos',
+    'Colonización': 'Colonizacion',
+    'Construcción': 'Construccion',
+    'Investigación': 'Investigacion',
+    'Herrería': 'Herreria',
+    'Movimiento': 'Movimiento',
+    'Comercio': 'Comercio',
+    'Presupuesto Ciclo': 'Presupuesto Ciclo',
+});
+
+const LOG_CATEGORY_LABELS = Object.freeze({
+    economic: 'ECO',
+    military: 'MIL',
+    general: 'GEN',
+});
+
+const REASON_LABELS = Object.freeze({
+    INSUFFICIENT_RESOURCES: 'recursos insuficientes',
+    PREREQUISITES_NOT_MET: 'prerequisitos no cumplidos',
+    QUEUE_FULL: 'cola ocupada',
+    NO_ACTION: 'sin accion',
+    NO_PRIORITY_ACTION: 'sin accion prioritaria',
+    NO_PRIORITY_RECRUITMENT: 'sin reclutamiento prioritario',
+    NO_FALLBACK_ACTION: 'sin accion de fallback',
+    NO_CANDIDATE_FOUND: 'sin candidato valido',
+    BUILDING_NOT_FOUND: 'edificio no encontrado',
+    INVALID_UNIT_DATA: 'datos de unidad invalidos',
+    INVALID_LEVEL_DATA: 'nivel invalido',
+    INVALID_BUILDING_DATA: 'datos de edificio invalidos',
+    UNKNOWN_COMMAND: 'comando desconocido',
+    PROCESSOR_NOT_FOUND: 'procesador no encontrado',
+    NO_VILLAGE_ID: 'aldea no definida',
+    ROMAN_RESOURCE_QUEUE_FULL: 'cola romana de recursos llena',
+    ROMAN_INFRA_QUEUE_FULL: 'cola romana de infraestructura llena',
+    RESEARCH_REQUIRED: 'investigacion requerida',
+    EXPANSION_BUILDING_LOW_LEVEL: 'edificio de expansion insuficiente',
+    EXPANSION_SLOTS_FULL: 'sin slots de expansion',
+    THREAT_BOOST_NOT_REQUIRED: 'sin amenaza que requiera boost',
+    PROBABILITY_GATE: 'no activo por probabilidad',
+    NO_EFFICIENCY_GAIN: 'sin mejora de eficiencia',
 });
 
 const COMBAT_STATE_TTL_BY_THREAT_LEVEL_MS = Object.freeze({
@@ -228,6 +301,110 @@ function getMilitaryDecisionIntervalMs(gameSpeed) {
     return Math.round(clamp(rawInterval, MILITARY_INTERVAL_MIN_MS, MILITARY_INTERVAL_MAX_MS));
 }
 
+function normalizeReasonCode(reason) {
+    if (!reason) return null;
+    const code = String(reason).trim();
+    const label = REASON_LABELS[code];
+    return label ? `${code} (${label})` : code;
+}
+
+function normalizeReasonCodesInText(text) {
+    if (text === null || text === undefined) return '';
+    return String(text).replace(/\b[A-Z][A-Z0-9_]{2,}\b/g, token => normalizeReasonCode(token) || token);
+}
+
+function formatResourceBag(resources) {
+    if (!resources || typeof resources !== 'object') return null;
+    const keys = ['wood', 'stone', 'iron', 'food'];
+    const parts = keys
+        .filter(resource => Number.isFinite(Number(resources[resource])))
+        .map(resource => `${resource}:${Math.floor(Number(resources[resource]))}`);
+    return parts.length > 0 ? parts.join(', ') : null;
+}
+
+function normalizeBudgetBag(resources) {
+    return {
+        wood: Math.max(0, Number(resources?.wood) || 0),
+        stone: Math.max(0, Number(resources?.stone) || 0),
+        iron: Math.max(0, Number(resources?.iron) || 0),
+        food: Math.max(0, Number(resources?.food) || 0),
+    };
+}
+
+function toCoordsText(coords) {
+    if (!coords || typeof coords !== 'object') return null;
+    const x = Number(coords.x);
+    const y = Number(coords.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return `${Math.floor(x)}|${Math.floor(y)}`;
+}
+
+function getDetailReason(details) {
+    if (!details || typeof details !== 'object') return null;
+    return details.reason
+        || details?.result?.reason
+        || details?.payload?.result?.reason
+        || null;
+}
+
+function buildAiLogDetailSummary(details) {
+    if (details === null || details === undefined) return null;
+    if (typeof details === 'string') {
+        const normalized = normalizeReasonCodesInText(details).trim();
+        return normalized || null;
+    }
+
+    if (typeof details !== 'object') {
+        return String(details);
+    }
+
+    const parts = [];
+    const reasonText = normalizeReasonCode(getDetailReason(details));
+    if (reasonText) parts.push(`motivo=${reasonText}`);
+
+    const needed = details.needed || details?.result?.details?.needed || details?.payload?.result?.details?.needed;
+    const available = details.available || details?.result?.details?.available || details?.payload?.result?.details?.available;
+    const required = details.required || details?.result?.details?.required || details?.payload?.result?.details?.required;
+    const missing = details.missing || details?.result?.details?.missing || details?.payload?.result?.details?.missing;
+
+    const neededText = formatResourceBag(needed);
+    if (neededText) parts.push(`necesario={${neededText}}`);
+
+    const availableText = formatResourceBag(available);
+    if (availableText) parts.push(`disponible={${availableText}}`);
+
+    const missingText = formatResourceBag(missing);
+    if (missingText) parts.push(`faltante={${missingText}}`);
+
+    if (required && typeof required === 'object') {
+        const reqText = Object.entries(required)
+            .map(([key, value]) => `${key}:${value}`)
+            .join(', ');
+        if (reqText) parts.push(`prereq={${reqText}}`);
+    }
+
+    const unitId = details.unitId || details?.payload?.unitId || details?.result?.details?.unitId;
+    if (unitId) parts.push(`unidad=${unitId}`);
+
+    const buildingType = details.buildingType || details.building || details?.payload?.buildingType || details?.payload?.buildingId;
+    if (buildingType) parts.push(`edificio=${buildingType}`);
+
+    const villageId = details.villageId || details?.payload?.villageId;
+    if (villageId) parts.push(`aldea=${villageId}`);
+
+    const movementId = details.movementId || details?.payload?.movementId;
+    if (movementId) parts.push(`mov=${movementId}`);
+
+    const targetCoords = details.targetCoords || details?.payload?.targetCoords;
+    const coordsText = toCoordsText(targetCoords);
+    if (coordsText) parts.push(`objetivo=${coordsText}`);
+
+    if (parts.length > 0) return parts.join(' | ');
+
+    const keys = Object.keys(details).slice(0, 6);
+    return keys.length > 0 ? `detalle={${keys.join(', ')}}` : null;
+}
+
 class AIController {
     _ownerId;
     _personality;
@@ -342,18 +519,21 @@ class AIController {
         const logVillage = village || this._resolvePrimaryVillage();
         const context = this._buildLogContext(logVillage, category);
         const normalizedAction = ACTION_LABELS[action] || action;
+        const categoryLabel = LOG_CATEGORY_LABELS[context.category] || LOG_CATEGORY_LABELS.general;
+        const normalizedMessage = normalizeReasonCodesInText(message);
+        const detailSummary = buildAiLogDetailSummary(details);
 
         console.log(
-            `%c${ICONS[level] || ''} [IA ${this._ownerId}] [Juego ${context.gameTime}] [Etapa ${context.stage}] [${context.phase}] [${context.villageLabel}] [${normalizedAction}] :: ${message}`,
+            `%c${ICONS[level] || ''} [IA ${this._ownerId}] [${categoryLabel}] [Juego ${context.gameTime}] [Etapa ${context.stage}] [${context.phase}] [${context.villageLabel}] [${normalizedAction}] :: ${normalizedMessage}`,
             STYLES[level] || '',
         );
 
-        if (details) {
-            if (typeof details === 'string') {
-                console.log(details);
-            } else {
-                console.dir(details);
-            }
+        if (detailSummary) {
+            console.log(`   ↳ ${detailSummary}`);
+        }
+
+        if (details && (level === 'warn' || level === 'error')) {
+            console.debug('[IA raw details]', details);
         }
     }
 
@@ -483,6 +663,45 @@ class AIController {
             villageLabel: village ? `${village.name} (${village.coords.x}|${village.coords.y})` : 'Global',
             category: category || 'general',
         };
+    }
+
+    _resolveVillageBudgetRatio(village) {
+        const econRatio = Number(village?.budgetRatio?.econ);
+        const milRatio = Number(village?.budgetRatio?.mil);
+        if (Number.isFinite(econRatio) && Number.isFinite(milRatio)) {
+            return {
+                econ: Math.max(0, econRatio),
+                mil: Math.max(0, milRatio),
+            };
+        }
+
+        return {
+            econ: 0.5,
+            mil: 0.5,
+        };
+    }
+
+    _logBudgetSnapshotForCycle(cycleType, villages) {
+        const isEconomicCycle = cycleType === 'economic';
+        const budgetKind = isEconomicCycle ? 'econ' : 'mil';
+        const category = isEconomicCycle ? 'economic' : 'military';
+        const cycleLabel = isEconomicCycle ? 'ECO' : 'MIL';
+
+        (villages || []).forEach(village => {
+            const ratio = this._resolveVillageBudgetRatio(village);
+            const budgetPool = normalizeBudgetBag(village?.budget?.[budgetKind]);
+            const ratioText = `${Math.round((ratio.econ || 0) * 100)}/${Math.round((ratio.mil || 0) * 100)}`;
+            const budgetText = formatResourceBag(budgetPool) || 'wood:0, stone:0, iron:0, food:0';
+
+            this.log(
+                'info',
+                village,
+                'Presupuesto Ciclo',
+                `[${cycleLabel}] ratio E/M ${ratioText} | budget.${budgetKind} {${budgetText}}`,
+                null,
+                category,
+            );
+        });
     }
 
     init(gameState, aiPlayerState) {
@@ -1250,6 +1469,7 @@ class AIController {
 
         if (!this._isThinkingEconomic && (now - this._lastEconomicDecisionTime >= this._economicDecisionInterval)) {
             this.log('info', null, 'INICIO_CICLO_GESTION', 'Iniciando evaluacion economica y militar.');
+            this._logBudgetSnapshotForCycle('economic', myVillages);
             this._isThinkingEconomic = true;
             this._lastEconomicDecisionTime = now;
             try {
@@ -1341,6 +1561,8 @@ class AIController {
     async _processMilitaryDecision(gameState) {
         this._isThinkingMilitary = true;
         this._lastMilitaryDecisionTime = Date.now();
+        const myVillages = gameState.villages.filter(village => village.ownerId === this._ownerId);
+        this._logBudgetSnapshotForCycle('military', myVillages);
         
         try {
             const telemetry = runMilitaryDecision({

@@ -6,13 +6,17 @@ import {
     buildPrerequisiteResolverStepFromBlock,
     clonePhaseStep,
     createSharedPhaseOneCycleTargets,
+    createSharedPhaseTwoCycleTargets,
     evaluateSharedPhaseOneInfrastructure,
+    evaluateSharedPhaseTwoInfrastructure,
     createOrRefreshPhaseSubGoal,
     getCompletedTrainingCycles,
     getPhaseStepSignature,
     getRoundRobinPhaseSteps,
     getQueuedTrainingMs,
+    getConstructionMicroStepsForVillage,
     getSharedPhaseOneConstructionSteps,
+    getSharedPhaseTwoConstructionSteps,
     handleCommonPhaseActionResult,
     isPhaseQueueAvailable,
     isPhaseResearchStepCompleted,
@@ -26,6 +30,7 @@ import {
     runPhaseLaneMatrix,
     runPriorityStepList,
     SHARED_PHASE_ONE_INFRASTRUCTURE_TARGETS,
+    SHARED_PHASE_TWO_INFRASTRUCTURE_TARGETS,
     TRAINING_CYCLE_MS,
 } from './phase-engine-common.js';
 
@@ -140,9 +145,11 @@ const PHASE_ONE_PRIORITY = Object.freeze({
     minIdleLogIntervalMs: 20_000,
 });
 
+const PHASE_TWO_EXIT_CONDITIONS = SHARED_PHASE_TWO_INFRASTRUCTURE_TARGETS;
+
 const PHASE_TWO_PRIORITY = Object.freeze({
-    barracksTargetLevel: 3,
-    resourceFieldsTargetLevel: 5,
+    barracksTargetLevel: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.barracks,
+    resourceFieldsTargetLevel: PHASE_TWO_EXIT_CONDITIONS.resourceFieldsLevel,
     minIdleLogIntervalMs: 20_000,
 });
 
@@ -195,7 +202,7 @@ const PHASE_CYCLE_TARGETS_BY_DIFFICULTY = Object.freeze({
     Normal: {
         phase1: createSharedPhaseOneCycleTargets('offensiveInfantry', 10, 3),
         phase1Emergency: { defensiveInfantry: 3, total: 3 },
-        phase2: { total: 5, offensiveInfantry: 3, scout: 2 },
+        phase2: createSharedPhaseTwoCycleTargets('offensiveInfantry', 'offensiveCavalry', 20, 5, 3),
         phase3: { total: 5, offensiveInfantry: 3, scout: 2 },
         phase4: { total: 5, offensiveInfantry: 2, offensiveCavalry: 2, scout: 1 },
         phase5: { total: 8, offensiveInfantry: 3, offensiveCavalry: 2, ram: 1, catapult: 1, scout: 1, expansion: 2 },
@@ -203,7 +210,7 @@ const PHASE_CYCLE_TARGETS_BY_DIFFICULTY = Object.freeze({
     Dificil: {
         phase1: createSharedPhaseOneCycleTargets('offensiveInfantry', 10, 3),
         phase1Emergency: { defensiveInfantry: 4, total: 4 },
-        phase2: { total: 5, offensiveInfantry: 3, scout: 2 },
+        phase2: createSharedPhaseTwoCycleTargets('offensiveInfantry', 'offensiveCavalry', 20, 5, 3),
         phase3: { total: 5, offensiveInfantry: 3, scout: 2 },
         phase4: { total: 5, offensiveInfantry: 2, offensiveCavalry: 2, scout: 1 },
         phase5: { total: 8, offensiveInfantry: 3, offensiveCavalry: 2, ram: 1, catapult: 1, scout: 1, expansion: 2 },
@@ -211,7 +218,7 @@ const PHASE_CYCLE_TARGETS_BY_DIFFICULTY = Object.freeze({
     Pesadilla: {
         phase1: createSharedPhaseOneCycleTargets('offensiveInfantry', 10, 3),
         phase1Emergency: { defensiveInfantry: 5, total: 5 },
-        phase2: { total: 5, offensiveInfantry: 3, scout: 2 },
+        phase2: createSharedPhaseTwoCycleTargets('offensiveInfantry', 'offensiveCavalry', 20, 5, 3),
         phase3: { total: 5, offensiveInfantry: 3, scout: 2 },
         phase4: { total: 5, offensiveInfantry: 2, offensiveCavalry: 2, scout: 1 },
         phase5: { total: 8, offensiveInfantry: 3, offensiveCavalry: 2, ram: 1, catapult: 1, scout: 1, expansion: 2 },
@@ -290,7 +297,14 @@ function getPhaseBucketForUnitId(village, phaseKey, unitId) {
         return null;
     }
 
-    if (phaseKey === 'phase2' || phaseKey === 'phase3') {
+    if (phaseKey === 'phase2') {
+        if (unit.type === 'infantry' && unit.role === 'offensive') return 'offensiveInfantryMs';
+        if (unit.type === 'cavalry' && unit.role === 'offensive') return 'offensiveCavalryMs';
+        if (unit.role === 'scout') return 'scoutMs';
+        return null;
+    }
+
+    if (phaseKey === 'phase3') {
         if (unit.type === 'infantry' && unit.role === 'offensive') return 'offensiveInfantryMs';
         if (unit.role === 'scout') return 'scoutMs';
         return null;
@@ -498,11 +512,18 @@ function evaluatePhaseOneExit(village, phaseState, difficulty) {
 }
 
 function evaluatePhaseTwoExit(village, phaseState, difficulty) {
+    const infraGate = evaluateSharedPhaseTwoInfrastructure({
+        village,
+        getAverageResourceFieldLevel: candidateVillage => getResourceFieldStats(candidateVillage).average,
+        getEffectiveBuildingLevel: getEffectiveBuildingTypeLevel,
+        targets: PHASE_TWO_EXIT_CONDITIONS,
+    });
     const cycleGate = evaluateCycleTargets(phaseState, difficulty, 'phase2');
-    const ready = cycleGate.ready;
+    const ready = infraGate.ready && cycleGate.ready;
 
     return {
         ready,
+        details: infraGate.details,
         cycles: cycleGate.cycles,
         cycleTargets: cycleGate.targets,
     };
@@ -677,7 +698,7 @@ function evaluatePhaseFiveExit(village, phaseState, difficulty) {
     };
 }
 
-function getStepCostEstimate(village, step) {
+function getStepCostRequirement(village, step) {
     if (step.type === 'building') {
         const buildings = village.buildings.filter(building => building.type === step.buildingType);
         const candidateLevel = buildings.length > 0
@@ -685,8 +706,8 @@ function getStepCostEstimate(village, step) {
             : 1;
 
         const levelData = getBuildingLevelData(step.buildingType, candidateLevel);
-        if (!levelData?.cost) return Number.POSITIVE_INFINITY;
-        return Object.values(levelData.cost).reduce((sum, value) => sum + (value || 0), 0);
+        if (!levelData?.cost) return null;
+        return { ...levelData.cost };
     }
 
     if (step.type === 'resource_fields_level') {
@@ -699,13 +720,69 @@ function getStepCostEstimate(village, step) {
             .sort((a, b) => a.level - b.level);
 
         const candidate = fields[0];
-        if (!candidate) return Number.POSITIVE_INFINITY;
+        if (!candidate) return {};
         const levelData = getBuildingLevelData(candidate.field.type, candidate.level + 1);
-        if (!levelData?.cost) return Number.POSITIVE_INFINITY;
-        return Object.values(levelData.cost).reduce((sum, value) => sum + (value || 0), 0);
+        if (!levelData?.cost) return null;
+        return { ...levelData.cost };
     }
 
-    return Number.POSITIVE_INFINITY;
+    return null;
+}
+
+function getStepCostEstimate(village, step) {
+    const requirement = getStepCostRequirement(village, step);
+    if (!requirement || typeof requirement !== 'object') return Number.POSITIVE_INFINITY;
+    return Object.values(requirement).reduce((sum, value) => sum + (value || 0), 0);
+}
+
+function getUnitResourceRequirement(village, step) {
+    const unitIdentifier = step?.unitId || step?.unitType;
+    const unitData = getRaceTroops(village.race || 'germans').find(unit => unit.id === unitIdentifier);
+    if (!unitData) return null;
+
+    const requestedCount = step.type === 'units' && Number.isFinite(step.count) && step.count > 0
+        ? Math.floor(step.count)
+        : 1;
+    const baseCost = step.type === 'research' && unitData.research?.cost
+        ? unitData.research.cost
+        : unitData.cost;
+    if (!baseCost || typeof baseCost !== 'object') return null;
+
+    return Object.fromEntries(
+        Object.entries(baseCost).map(([resource, amount]) => [resource, Math.max(0, (amount || 0) * requestedCount)]),
+    );
+}
+
+function hasAnyPositiveResource(pool) {
+    return Object.values(pool || {}).some(value => Number(value) > 0);
+}
+
+function hasEstimatedResourcesForStep(village, step, subGoal = null) {
+    if (!step) return true;
+
+    const blockedNeededCost = subGoal?.latestDetails?.needed;
+    if (blockedNeededCost && typeof blockedNeededCost === 'object') {
+        const pool = getResourcePoolForStep(village, step);
+        return hasResourcesForNeededCost(pool, blockedNeededCost);
+    }
+
+    if (step.type === 'building' || step.type === 'resource_fields_level') {
+        const estimatedCost = getStepCostRequirement(village, step);
+        if (!estimatedCost || typeof estimatedCost !== 'object') return false;
+        const pool = getResourcePoolForKind(village, 'econ');
+        return hasResourcesForNeededCost(pool, estimatedCost);
+    }
+
+    if (step.type === 'units' || step.type === 'research' || step.type === 'upgrade' || step.type === 'proportional_units') {
+        const pool = getResourcePoolForStep(village, step);
+        const requirement = getUnitResourceRequirement(village, step);
+        if (requirement && typeof requirement === 'object') {
+            return hasResourcesForNeededCost(pool, requirement);
+        }
+        return hasAnyPositiveResource(pool);
+    }
+
+    return true;
 }
 
 function cloneStep(step) {
@@ -746,6 +823,39 @@ function runStepList({
     });
 }
 
+function runConstructionStepList({
+    village,
+    steps,
+    executeStep,
+    noActionReason,
+    shouldAttemptStep = null,
+    stopOnRecoverableBlock = false,
+    phaseState = null,
+    phaseId = null,
+    laneId = null,
+}) {
+    const microSteps = getConstructionMicroStepsForVillage({
+        village,
+        steps,
+        getEffectiveBuildingLevel: getEffectiveBuildingTypeLevel,
+    });
+
+    const orderedSteps = getRoundRobinPhaseSteps({
+        phaseState,
+        phaseId,
+        laneId,
+        steps: microSteps,
+    });
+
+    return runPriorityStepList({
+        steps: orderedSteps,
+        executeStep,
+        noActionReason,
+        shouldAttemptStep,
+        stopOnRecoverableBlock,
+    });
+}
+
 function createCycleMicroRecruitmentStep(unitType, extra = {}) {
     return {
         type: 'units',
@@ -763,10 +873,12 @@ function isMilitaryConstructionStep(step) {
 function getMilitaryConstructionTargetsForPhase(phaseId) {
     if (phaseId === GERMAN_PHASE_IDS.phase2) {
         return [
-            { buildingType: 'rallyPoint', level: 1 },
-            { buildingType: 'barracks', level: 1 },
-            { buildingType: 'academy', level: 1 },
-            { buildingType: 'smithy', level: 1 },
+            { buildingType: 'rallyPoint', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.rallyPoint },
+            { buildingType: 'barracks', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.barracks },
+            { buildingType: 'academy', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.academy },
+            { buildingType: 'smithy', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.smithy },
+            { buildingType: 'stable', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.stable },
+            { buildingType: 'workshop', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.workshop },
         ];
     }
 
@@ -926,44 +1038,6 @@ function hasResourcesForNeededCost(pool, neededCost) {
         if (!Number.isFinite(required) || required <= 0) return true;
         return (pool?.[resource] || 0) >= required;
     });
-}
-
-function hasEstimatedResourcesForStep(village, step, subGoal = null) {
-    if (!step) return true;
-
-    const blockedNeededCost = subGoal?.latestDetails?.needed;
-    if (blockedNeededCost && typeof blockedNeededCost === 'object') {
-        const pool = getResourcePoolForStep(village, step);
-        return hasResourcesForNeededCost(pool, blockedNeededCost);
-    }
-
-    if (step.type === 'building' || step.type === 'resource_fields_level') {
-        const estimated = getStepCostEstimate(village, step);
-        if (!Number.isFinite(estimated)) return false;
-        const pool = getResourcePoolForKind(village, 'econ');
-        const total = Object.values(pool).reduce((sum, value) => sum + (value || 0), 0);
-        return total >= estimated;
-    }
-
-    if (step.type === 'units' || step.type === 'research' || step.type === 'upgrade' || step.type === 'proportional_units') {
-        const pool = getResourcePoolForStep(village, step);
-        const unitIdentifier = step.unitId || step.unitType;
-        const unitData = getRaceTroops(village.race || 'germans').find(unit => unit.id === unitIdentifier);
-        if (unitData?.cost) {
-            const requestedCount = step.type === 'units' && Number.isFinite(step.count) && step.count > 0
-                ? Math.floor(step.count)
-                : 1;
-            const estimatedCost = Object.fromEntries(
-                Object.entries(unitData.cost).map(([resource, amount]) => [resource, (amount || 0) * requestedCount]),
-            );
-            return hasResourcesForNeededCost(pool, estimatedCost);
-        }
-
-        const total = Object.values(pool).reduce((sum, value) => sum + (value || 0), 0);
-        return total > 0;
-    }
-
-    return true;
 }
 
 function buildPrerequisiteSubGoalStep(village, blockedResult) {
@@ -1365,7 +1439,8 @@ function attemptRecruitmentStep({ village, gameState, step, actionExecutor }) {
 function tryPhaseOnePriorityConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
     const prioritySteps = getSharedPhaseOneConstructionSteps(PHASE_ONE_EXIT_CONDITIONS);
 
-    return runStepList({
+    return runConstructionStepList({
+        village,
         steps: prioritySteps,
         phaseState,
         phaseId: GERMAN_PHASE_IDS.phase1,
@@ -1404,7 +1479,8 @@ function tryPhaseOneFallbackConstruction({ village, gameState, actionExecutor, p
 
     fallbackSteps.sort((a, b) => getStepCostEstimate(village, a) - getStepCostEstimate(village, b));
 
-    return runStepList({
+    return runConstructionStepList({
+        village,
         steps: fallbackSteps,
         phaseState,
         phaseId: GERMAN_PHASE_IDS.phase1,
@@ -1417,16 +1493,10 @@ function tryPhaseOneFallbackConstruction({ village, gameState, actionExecutor, p
 }
 
 function tryPhaseTwoPriorityConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
-    const prioritySteps = [
-        { type: 'building', buildingType: 'rallyPoint', level: 1 },
-        { type: 'building', buildingType: 'barracks', level: 1 },
-        { type: 'building', buildingType: 'barracks', level: PHASE_TWO_PRIORITY.barracksTargetLevel },
-        { type: 'building', buildingType: 'academy', level: 1 },
-        { type: 'building', buildingType: 'smithy', level: 1 },
-        { type: 'resource_fields_level', level: PHASE_TWO_PRIORITY.resourceFieldsTargetLevel },
-    ];
+    const prioritySteps = getSharedPhaseTwoConstructionSteps(PHASE_TWO_EXIT_CONDITIONS);
 
-    return runStepList({
+    return runConstructionStepList({
+        village,
         steps: prioritySteps,
         phaseState,
         phaseId: GERMAN_PHASE_IDS.phase2,
@@ -1441,7 +1511,7 @@ function tryPhaseTwoPriorityConstruction({ village, gameState, actionExecutor, p
 function tryPhaseTwoFallbackConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
     const resourceStats = getResourceFieldStats(village);
     const fallbackSteps = [
-        { type: 'resource_fields_level', level: Math.max(PHASE_TWO_PRIORITY.resourceFieldsTargetLevel, resourceStats.min + 1) },
+        { type: 'resource_fields_level', level: Math.max(PHASE_TWO_EXIT_CONDITIONS.resourceFieldsLevel, resourceStats.min + 1) },
         { type: 'building', buildingType: 'warehouse', level: getEffectiveBuildingTypeLevel(village, 'warehouse') + 1 },
         { type: 'building', buildingType: 'granary', level: getEffectiveBuildingTypeLevel(village, 'granary') + 1 },
         { type: 'building', buildingType: 'mainBuilding', level: getEffectiveBuildingTypeLevel(village, 'mainBuilding') + 1 },
@@ -1449,7 +1519,8 @@ function tryPhaseTwoFallbackConstruction({ village, gameState, actionExecutor, p
 
     fallbackSteps.sort((a, b) => getStepCostEstimate(village, a) - getStepCostEstimate(village, b));
 
-    return runStepList({
+    return runConstructionStepList({
+        village,
         steps: fallbackSteps,
         phaseState,
         phaseId: GERMAN_PHASE_IDS.phase2,
@@ -1470,7 +1541,8 @@ function tryPhaseThreePriorityConstruction({ village, gameState, actionExecutor,
         { type: 'building', buildingType: 'mainBuilding', level: 10 },
     ];
 
-    return runStepList({
+    return runConstructionStepList({
+        village,
         steps: prioritySteps,
         phaseState,
         phaseId: GERMAN_PHASE_IDS.phase3,
@@ -1493,7 +1565,8 @@ function tryPhaseThreeFallbackConstruction({ village, gameState, actionExecutor,
 
     fallbackSteps.sort((a, b) => getStepCostEstimate(village, a) - getStepCostEstimate(village, b));
 
-    return runStepList({
+    return runConstructionStepList({
+        village,
         steps: fallbackSteps,
         phaseState,
         phaseId: GERMAN_PHASE_IDS.phase3,
@@ -1524,7 +1597,8 @@ function tryPhaseFourPriorityConstruction({ village, gameState, actionExecutor, 
         );
     }
 
-    return runStepList({
+    return runConstructionStepList({
+        village,
         steps: prioritySteps,
         phaseState,
         phaseId: GERMAN_PHASE_IDS.phase4,
@@ -1552,7 +1626,8 @@ function tryPhaseFourFallbackConstruction({ village, gameState, actionExecutor, 
 
     fallbackSteps.sort((a, b) => getStepCostEstimate(village, a) - getStepCostEstimate(village, b));
 
-    return runStepList({
+    return runConstructionStepList({
+        village,
         steps: fallbackSteps,
         phaseState,
         phaseId: GERMAN_PHASE_IDS.phase4,
@@ -1592,7 +1667,8 @@ function tryPhaseFivePriorityConstruction({ village, gameState, actionExecutor, 
         );
     }
 
-    return runStepList({
+    return runConstructionStepList({
+        village,
         steps: prioritySteps,
         phaseState,
         phaseId: GERMAN_PHASE_IDS.phase5,
@@ -1622,7 +1698,8 @@ function tryPhaseFiveFallbackConstruction({ village, gameState, actionExecutor, 
 
     fallbackSteps.sort((a, b) => getStepCostEstimate(village, a) - getStepCostEstimate(village, b));
 
-    return runStepList({
+    return runConstructionStepList({
+        village,
         steps: fallbackSteps,
         phaseState,
         phaseId: GERMAN_PHASE_IDS.phase5,
@@ -1697,6 +1774,10 @@ function tryPhaseTwoPriorityResearch({ village, gameState, actionExecutor, phase
 
     if (shouldEnqueueResearch(village, actionExecutor, 'scout')) {
         steps.push({ type: 'research', unitType: 'scout' });
+    }
+
+    if (shouldEnqueueResearch(village, actionExecutor, 'offensive_cavalry')) {
+        steps.push({ type: 'research', unitType: 'offensive_cavalry' });
     }
 
     return runStepList({
@@ -1783,6 +1864,7 @@ function tryPhaseTwoPriorityRecruitment({ village, gameState, actionExecutor, ph
     const steps = [
         createCycleMicroRecruitmentStep('offensive_infantry'),
         createCycleMicroRecruitmentStep('scout'),
+        createCycleMicroRecruitmentStep('offensive_cavalry'),
     ];
 
     return runStepList({
@@ -1796,7 +1878,11 @@ function tryPhaseTwoPriorityRecruitment({ village, gameState, actionExecutor, ph
 }
 
 function tryPhaseTwoFallbackRecruitment({ village, gameState, actionExecutor, phaseState }) {
-    const steps = [createCycleMicroRecruitmentStep('offensive_infantry')];
+    const steps = [
+        createCycleMicroRecruitmentStep('offensive_infantry'),
+        createCycleMicroRecruitmentStep('offensive_cavalry'),
+        createCycleMicroRecruitmentStep('scout'),
+    ];
     return runStepList({
         steps,
         phaseState,
