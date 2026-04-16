@@ -15,6 +15,7 @@ import {
     getQueuedTrainingMs,
     getConstructionMicroStepsForVillage,
     getRecruitmentMicroStepsByPriority,
+    advanceRoundRobinPhasePointer,
     getSharedPhaseOneConstructionSteps,
     getSharedPhaseTwoConstructionSteps,
     handleCommonPhaseActionResult,
@@ -327,10 +328,12 @@ function getPhaseBucketForUnitId(village, phaseKey, unitId) {
     return null;
 }
 
-export function recordGermanPhaseRecruitmentProgress({ phaseState, phaseKey, village, unitId, count, timePerUnit }) {
+export function recordGermanPhaseRecruitmentProgress({ phaseState, phaseKey, village, unitId, count, timePerUnit, trainedMs = null }) {
     const progress = getCycleProgressByPhase(phaseState, phaseKey);
     const bucket = getPhaseBucketForUnitId(village, phaseKey, unitId);
-    const completedMs = getQueuedTrainingMs(count, timePerUnit);
+    const completedMs = Number.isFinite(trainedMs) && trainedMs > 0
+        ? Math.floor(trainedMs)
+        : getQueuedTrainingMs(count, timePerUnit);
 
     if (completedMs <= 0) return;
 
@@ -338,6 +341,18 @@ export function recordGermanPhaseRecruitmentProgress({ phaseState, phaseKey, vil
     if (bucket) {
         progress[bucket] += completedMs;
     }
+}
+
+function getCommittedRecruitmentMs(result) {
+    const cycleCount = result?.step?.countMode === 'cycle_batch'
+        ? Math.max(1, Math.floor(result?.step?.cycleCount || 1))
+        : 0;
+
+    if (cycleCount > 0) {
+        return cycleCount * TRAINING_CYCLE_MS;
+    }
+
+    return getQueuedTrainingMs(result?.count, result?.timePerUnit);
 }
 
 function msToCycles(ms) {
@@ -812,13 +827,25 @@ function runStepList({
         ? getRecruitmentMicroStepsByPriority({ phaseState, phaseId, laneId, steps: normalizedSteps })
         : normalizedSteps;
 
-    return runPriorityStepList({
+    const result = runPriorityStepList({
         steps: orderedSteps,
         executeStep,
         noActionReason,
         shouldAttemptStep,
-        stopOnRecoverableBlock,
+        stopOnRecoverableBlock: shouldUseRecruitmentPriority ? true : stopOnRecoverableBlock,
     });
+
+    if (shouldUseRecruitmentPriority && result?.success) {
+        advanceRoundRobinPhasePointer({
+            phaseState,
+            phaseId,
+            laneId,
+            steps: orderedSteps,
+            completedStep: result.step,
+        });
+    }
+
+    return result;
 }
 
 function runConstructionStepList({
@@ -2014,7 +2041,8 @@ function registerRecruitmentCommitFromAction({ result, phaseState, phaseId, vill
     if (!result?.success) return;
     if (!Number.isFinite(result.count) || result.count <= 0) return;
     if (!result.unitId) return;
-    if (!Number.isFinite(result.timePerUnit) || result.timePerUnit <= 0) return;
+    const trainedMs = getCommittedRecruitmentMs(result);
+    if (trainedMs <= 0) return;
 
     const phaseKey = phaseId === GERMAN_PHASE_IDS.phase1
         ? 'phase1'
@@ -2035,6 +2063,7 @@ function registerRecruitmentCommitFromAction({ result, phaseState, phaseId, vill
         unitId: result.unitId,
         count: result.count,
         timePerUnit: result.timePerUnit,
+        trainedMs,
     });
 
     if (typeof log === 'function') {
@@ -2357,6 +2386,7 @@ export function createDefaultGermanPhaseState(now = Date.now()) {
             phase4: createEmptyCycleProgress(),
             phase5: createEmptyCycleProgress(),
         },
+        roundRobinPointers: {},
         activeSubGoal: null,
         subGoalHistory: [],
     };
@@ -2425,6 +2455,10 @@ export function hydrateGermanPhaseState(rawState = null, now = Date.now()) {
                 ? rawState.lastAppliedBudgetPhaseId
                 : null,
         phaseCycleProgress: normalizedCycleProgress,
+        roundRobinPointers:
+            rawState.roundRobinPointers && typeof rawState.roundRobinPointers === 'object'
+                ? { ...rawState.roundRobinPointers }
+                : {},
         activeSubGoal: normalizedActiveSubGoal,
         subGoalHistory: normalizedSubGoalHistory,
     };
@@ -2457,6 +2491,7 @@ export function serializeGermanPhaseStates(stateByVillageMap) {
             phase5ConsecutiveActiveSamples: state.phase5ConsecutiveActiveSamples,
             lastAppliedBudgetPhaseId: state.lastAppliedBudgetPhaseId,
             phaseCycleProgress: state.phaseCycleProgress,
+            roundRobinPointers: state.roundRobinPointers,
             activeSubGoal: state.activeSubGoal,
             subGoalHistory: state.subGoalHistory,
         };

@@ -1029,14 +1029,41 @@ export function getRoundRobinPhaseSteps({
     const rawPointer = Number(phaseState.roundRobinPointers[pointerKey] || 0);
     const normalizedPointer = ((rawPointer % orderedSteps.length) + orderedSteps.length) % orderedSteps.length;
 
-    phaseState.roundRobinPointers[pointerKey] = (normalizedPointer + 1) % orderedSteps.length;
-
     if (normalizedPointer === 0) return orderedSteps;
 
     return [
         ...orderedSteps.slice(normalizedPointer),
         ...orderedSteps.slice(0, normalizedPointer),
     ];
+}
+
+export function advanceRoundRobinPhasePointer({
+    phaseState,
+    phaseId,
+    laneId,
+    steps,
+    completedStep = null,
+}) {
+    const orderedSteps = Array.isArray(steps) ? steps.filter(Boolean) : [];
+    if (orderedSteps.length <= 1) return;
+    if (!phaseState || typeof phaseState !== 'object') return;
+    if (!phaseId || !laneId) return;
+
+    if (!phaseState.roundRobinPointers || typeof phaseState.roundRobinPointers !== 'object') {
+        phaseState.roundRobinPointers = {};
+    }
+
+    const pointerKey = `${phaseId}:${laneId}`;
+    const rawPointer = Number(phaseState.roundRobinPointers[pointerKey] || 0);
+    const normalizedPointer = ((rawPointer % orderedSteps.length) + orderedSteps.length) % orderedSteps.length;
+
+    const completedSignature = getPhaseStepSignature(completedStep);
+    const completedIndex = completedSignature
+        ? orderedSteps.findIndex(step => getPhaseStepSignature(step) === completedSignature)
+        : -1;
+    const currentIndex = completedIndex >= 0 ? completedIndex : normalizedPointer;
+
+    phaseState.roundRobinPointers[pointerKey] = (currentIndex + 1) % orderedSteps.length;
 }
 
 function getRecruitmentStepCategory(step) {

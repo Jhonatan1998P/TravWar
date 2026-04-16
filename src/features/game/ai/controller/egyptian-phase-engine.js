@@ -23,6 +23,7 @@ import {
     getEffectiveBuildingTypeLevel,
     getPhaseStepQueueType,
     getRecruitmentMicroStepsByPriority,
+    advanceRoundRobinPhasePointer,
     pickPhaseLaneResult,
     getUnitCountInVillageAndQueue,
     isRecoverablePhaseBlockReason,
@@ -308,15 +309,68 @@ function resolveCycleBucketByUnit(village, unitId) {
     return null;
 }
 
-function recordEgyptianPhaseRecruitmentProgress({ phaseState, phaseKey, village, unitId, count, timePerUnit }) {
+const CYCLE_BUCKET_BY_PROGRESS_KEY = Object.freeze({
+    defensiveInfantryMs: 'defensiveInfantry',
+    defensiveCavalryMs: 'defensiveCavalry',
+    offensiveInfantryMs: 'offensiveInfantry',
+    offensiveCavalryMs: 'offensiveCavalry',
+    scoutMs: 'scout',
+    siegeMs: 'siege',
+    expansionMs: 'expansion',
+});
+
+function resolveRecruitmentCycleBucketForStep(village, step) {
+    if (!step || step.type !== 'units') return null;
+
+    const resolvedUnitId = getResolvedUnitId(village, step.unitType) || step.unitId || step.unitType;
+    const progressBucket = resolveCycleBucketByUnit(village, resolvedUnitId);
+    return CYCLE_BUCKET_BY_PROGRESS_KEY[progressBucket] || null;
+}
+
+function getCommittedRecruitmentMs(result) {
+    const cycleCount = result?.step?.countMode === 'cycle_batch'
+        ? Math.max(1, Math.floor(result?.step?.cycleCount || 1))
+        : 0;
+
+    if (cycleCount > 0) {
+        return cycleCount * TRAINING_CYCLE_MS;
+    }
+
+    return getQueuedTrainingMs(result?.count, result?.timePerUnit);
+}
+
+function filterRecruitmentStepsByCycleTargets({ phaseState, phaseId, village, laneId, steps }) {
+    const normalizedSteps = Array.isArray(steps) ? steps.filter(Boolean) : [];
+
+    if (String(laneId || '').includes('threat_emergency_recruitment')) {
+        return normalizedSteps;
+    }
+
+    const phaseKey = getEgyptianPhaseKey(phaseId);
+    if (!phaseKey) return normalizedSteps;
+
+    const cycleStatus = evaluateCycleTargets(phaseState, phaseKey);
+    const targets = cycleStatus.targets || {};
+    const cycles = cycleStatus.cycles || {};
+
+    return normalizedSteps.filter(step => {
+        const bucket = resolveRecruitmentCycleBucketForStep(village, step);
+        if (!bucket) return true;
+
+        const required = Number(targets[bucket]);
+        if (!Number.isFinite(required) || required <= 0) return true;
+
+        const completed = Number(cycles[bucket] || 0);
+        return completed < required;
+    });
+}
+
+function recordEgyptianPhaseRecruitmentProgress({ phaseState, phaseKey, village, unitId, trainedMs }) {
     if (!phaseKey) return;
-    if (!Number.isFinite(count) || count <= 0) return;
-    if (!Number.isFinite(timePerUnit) || timePerUnit <= 0) return;
+    if (!Number.isFinite(trainedMs) || trainedMs <= 0) return;
 
     const progress = getCycleProgressByPhase(phaseState, phaseKey);
     const bucket = resolveCycleBucketByUnit(village, unitId);
-    const trainedMs = getQueuedTrainingMs(count, timePerUnit);
-    if (trainedMs <= 0) return;
     progress.totalMs = Math.max(0, Number(progress.totalMs) || 0) + trainedMs;
     if (bucket) {
         progress[bucket] = Math.max(0, Number(progress[bucket]) || 0) + trainedMs;
@@ -327,18 +381,19 @@ function registerRecruitmentCommitFromAction({ result, phaseState, phaseId, vill
     if (!result?.success) return;
     if (!Number.isFinite(result.count) || result.count <= 0) return;
     if (!result.unitId) return;
-    if (!Number.isFinite(result.timePerUnit) || result.timePerUnit <= 0) return;
 
     const phaseKey = getEgyptianPhaseKey(phaseId);
     if (!phaseKey) return;
+
+    const trainedMs = getCommittedRecruitmentMs(result);
+    if (trainedMs <= 0) return;
 
     recordEgyptianPhaseRecruitmentProgress({
         phaseState,
         phaseKey,
         village,
         unitId: result.unitId,
-        count: result.count,
-        timePerUnit: result.timePerUnit,
+        trainedMs,
     });
 
     if (typeof log === 'function') {
@@ -713,20 +768,40 @@ function tryConstructionPriority({ actionExecutor, village, gameState, phaseStat
 }
 
 function tryRecruitmentPriority({ actionExecutor, village, gameState, phaseState, phaseId, laneId = 'recruitment', options, shouldAttemptStep = null }) {
-    const orderedOptions = getRecruitmentMicroStepsByPriority({
+    const targetAwareOptions = filterRecruitmentStepsByCycleTargets({
         phaseState,
         phaseId,
+        village,
         laneId,
         steps: options,
     });
 
-    return runPriorityStepList({
+    const orderedOptions = getRecruitmentMicroStepsByPriority({
+        phaseState,
+        phaseId,
+        laneId,
+        steps: targetAwareOptions,
+    });
+
+    const result = runPriorityStepList({
         steps: orderedOptions,
         executeStep: step => tryStep(actionExecutor, village, gameState, step),
         noActionReason: 'NO_ACTION',
         shouldAttemptStep,
         stopOnRecoverableBlock: true,
     });
+
+    if (result?.success) {
+        advanceRoundRobinPhasePointer({
+            phaseState,
+            phaseId,
+            laneId,
+            steps: orderedOptions,
+            completedStep: result.step,
+        });
+    }
+
+    return result;
 }
 
 function tryResearchPriority({ actionExecutor, village, gameState, options, shouldAttemptStep = null }) {
@@ -1674,6 +1749,7 @@ export function createDefaultEgyptianPhaseState(now = Date.now()) {
         phase3DefensiveQueueSamples: 0,
         phase3DefensiveQueueActiveSamples: 0,
         phaseCycleProgress: {},
+        roundRobinPointers: {},
         activeSubGoal: null,
         subGoalHistory: [],
         lastThreatOverrideLogAt: 0,
@@ -1732,6 +1808,10 @@ export function hydrateEgyptianPhaseState(rawState = null, now = Date.now()) {
                 ? rawState.phase3QueueActiveSamples
                 : 0,
         phaseCycleProgress: normalizedCycleProgress,
+        roundRobinPointers:
+            rawState.roundRobinPointers && typeof rawState.roundRobinPointers === 'object'
+                ? { ...rawState.roundRobinPointers }
+                : {},
         activeSubGoal: normalizedActiveSubGoal,
         subGoalHistory: normalizedSubGoalHistory,
         lastThreatOverrideLogAt: Number.isFinite(rawState.lastThreatOverrideLogAt) ? rawState.lastThreatOverrideLogAt : 0,
@@ -1788,6 +1868,7 @@ export function serializeEgyptianPhaseStates(stateByVillageMap) {
             phase3DefensiveQueueSamples: state.phase3DefensiveQueueSamples,
             phase3DefensiveQueueActiveSamples: state.phase3DefensiveQueueActiveSamples,
             phaseCycleProgress: state.phaseCycleProgress,
+            roundRobinPointers: state.roundRobinPointers,
             activeSubGoal: state.activeSubGoal,
             subGoalHistory: state.subGoalHistory,
             lastThreatOverrideLogAt: state.lastThreatOverrideLogAt,
