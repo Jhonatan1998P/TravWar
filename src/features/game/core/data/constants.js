@@ -19,7 +19,7 @@ export const STORAGE_BUILDING_BY_RESOURCE = Object.freeze({
     iron: 'warehouse',
 });
 
-export const BEGINNER_PROTECTION_POPULATION_THRESHOLD = 200;
+export const BEGINNER_PROTECTION_POPULATION_THRESHOLD = 250;
 
 export const BUDGET_RATIO_REBALANCE_INTERVAL_MS = 600000;
 

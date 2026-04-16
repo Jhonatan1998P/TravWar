@@ -44,8 +44,6 @@ export const GERMAN_PHASE_IDS = Object.freeze({
 });
 
 const HOSTILE_MOVEMENT_TYPES = new Set(['attack', 'raid']);
-const FLOAT_EPSILON = 0.0001;
-
 const PHASE_TEMPLATE_BY_DIFFICULTY = Object.freeze({
     Normal: {
         phase1: {
@@ -1147,12 +1145,6 @@ function processActiveSubGoal({
     });
 }
 
-function sameRatio(currentRatio, targetRatio) {
-    if (!currentRatio) return false;
-    return Math.abs((currentRatio.econ || 0) - targetRatio.econ) <= FLOAT_EPSILON
-        && Math.abs((currentRatio.mil || 0) - targetRatio.mil) <= FLOAT_EPSILON;
-}
-
 function normalizeVillageCombatState(villageCombatState, now = Date.now()) {
     if (!villageCombatState || typeof villageCombatState !== 'object') {
         return {
@@ -1180,13 +1172,6 @@ function normalizeVillageCombatState(villageCombatState, now = Date.now()) {
     };
 }
 
-function getThreatRatioAdjustment(threatLevel) {
-    if (threatLevel === 'critical') return { econ: 0.2, mil: 0.8 };
-    if (threatLevel === 'high') return { econ: 0.28, mil: 0.72 };
-    if (threatLevel === 'medium') return { econ: 0.38, mil: 0.62 };
-    return null;
-}
-
 function getThreatAllowedNonMilitarySet(threatLevel) {
     if (threatLevel === 'critical') return CRITICAL_ALLOWED_NON_MILITARY_TYPES;
     if (threatLevel === 'high') return HIGH_ALLOWED_NON_MILITARY_TYPES;
@@ -1194,54 +1179,29 @@ function getThreatAllowedNonMilitarySet(threatLevel) {
     return null;
 }
 
-function applyThreatAwareRatio({ village, baseRatio, phaseState, phaseLabel, threatContext, log, now }) {
-    const threatLevel = threatContext?.threatLevel || 'none';
-    const adjustment = getThreatRatioAdjustment(threatLevel);
+function ensurePhaseRatioOnEntry({ village, difficulty, phaseState, phaseKey, phaseLabel, log }) {
+    const template = getDifficultyTemplate(difficulty);
+    const phaseConfig = template[phaseKey];
+    if (!phaseConfig?.ratio) return;
 
-    let finalRatio = { ...baseRatio };
-    if (adjustment) {
-        finalRatio = {
-            econ: Math.min(finalRatio.econ, adjustment.econ),
-            mil: Math.max(finalRatio.mil, adjustment.mil),
-        };
-
-        const ratioSum = finalRatio.econ + finalRatio.mil;
-        if (ratioSum > 0) {
-            finalRatio = {
-                econ: finalRatio.econ / ratioSum,
-                mil: finalRatio.mil / ratioSum,
-            };
-        }
-    }
-
-    if (sameRatio(village.budgetRatio, finalRatio)) {
+    if (phaseState.lastAppliedBudgetPhaseId === phaseKey) {
         return;
     }
 
-    village.budgetRatio = finalRatio;
-    rebalanceVillageBudgetToRatio(village);
+    const ratio = {
+        econ: Number(phaseConfig.ratio.econ) || 0.5,
+        mil: Number(phaseConfig.ratio.mil) || 0.5,
+    };
 
-    const canLogThreat = now - (phaseState.lastThreatOverrideLogAt || 0) >= THREAT_OVERRIDE_LOG_THROTTLE_MS;
-    if (!canLogThreat) return;
-
-    phaseState.lastThreatOverrideLogAt = now;
-    if (!adjustment) {
-        log(
-            'info',
-            village,
-            phaseLabel,
-            `Ratio eco/mil aplicado: ${(finalRatio.econ * 100).toFixed(0)}%/${(finalRatio.mil * 100).toFixed(0)}%.`,
-            null,
-            'economic',
-        );
-        return;
-    }
+    village.budgetRatio = { ...ratio };
+    rebalanceVillageBudgetToRatio(village, ratio);
+    phaseState.lastAppliedBudgetPhaseId = phaseKey;
 
     log(
-        'warn',
+        'info',
         village,
-        `${phaseLabel} Threat Override`,
-        `Amenaza ${threatLevel}: ratio temporal eco/mil ${(finalRatio.econ * 100).toFixed(0)}%/${(finalRatio.mil * 100).toFixed(0)}%.`,
+        phaseLabel,
+        `Ratio eco/mil aplicado por fase: ${(ratio.econ * 100).toFixed(0)}%/${(ratio.mil * 100).toFixed(0)}% (${phaseKey}).`,
         null,
         'economic',
     );
@@ -1355,71 +1315,6 @@ function tryThreatEmergencyRecruitment({ village, gameState, actionExecutor, dif
         ...result,
         step: cloneStep(emergencyStep),
     };
-}
-
-function ensurePhaseOneRatio({ village, difficulty, log, phaseState, threatContext, now }) {
-    const phaseConfig = getPhaseOneConfig(difficulty);
-    applyThreatAwareRatio({
-        village,
-        baseRatio: phaseConfig.ratio,
-        phaseState,
-        phaseLabel: `Macro Fase 1 (${difficulty})`,
-        threatContext,
-        log,
-        now,
-    });
-}
-
-function ensurePhaseTwoRatio({ village, difficulty, log, phaseState, threatContext, now }) {
-    const phaseConfig = getPhaseTwoConfig(difficulty);
-    applyThreatAwareRatio({
-        village,
-        baseRatio: phaseConfig.ratio,
-        phaseState,
-        phaseLabel: `Macro Fase 2 (${difficulty})`,
-        threatContext,
-        log,
-        now,
-    });
-}
-
-function ensurePhaseThreeRatio({ village, difficulty, log, phaseState, threatContext, now }) {
-    const phaseConfig = getPhaseThreeConfig(difficulty);
-    applyThreatAwareRatio({
-        village,
-        baseRatio: phaseConfig.ratio,
-        phaseState,
-        phaseLabel: `Macro Fase 3 (${difficulty})`,
-        threatContext,
-        log,
-        now,
-    });
-}
-
-function ensurePhaseFourRatio({ village, difficulty, log, phaseState, threatContext, now }) {
-    const phaseConfig = getPhaseFourConfig(difficulty);
-    applyThreatAwareRatio({
-        village,
-        baseRatio: phaseConfig.ratio,
-        phaseState,
-        phaseLabel: `Macro Fase 4 (${difficulty})`,
-        threatContext,
-        log,
-        now,
-    });
-}
-
-function ensurePhaseFiveRatio({ village, difficulty, log, phaseState, threatContext, now }) {
-    const phaseConfig = getPhaseFiveConfig(difficulty);
-    applyThreatAwareRatio({
-        village,
-        baseRatio: phaseConfig.ratio,
-        phaseState,
-        phaseLabel: `Macro Fase 5 (${difficulty})`,
-        threatContext,
-        log,
-        now,
-    });
 }
 
 function attemptConstructionStep({ village, gameState, step, actionExecutor }) {
@@ -2068,7 +1963,7 @@ function handlePhaseActionResult({
     log,
     onSuccess,
 }) {
-    const handling = handleCommonPhaseActionResult({
+    return handleCommonPhaseActionResult({
         result,
         phaseState,
         phaseId,
@@ -2082,16 +1977,6 @@ function handlePhaseActionResult({
             log,
         }),
     });
-
-    if (
-        result?.reason === 'INSUFFICIENT_RESOURCES'
-        && phaseState.activeSubGoal?.kind === SUBGOAL_KIND.waitResources
-        && village?.budgetRatio
-    ) {
-        rebalanceVillageBudgetToRatio(village, village.budgetRatio);
-    }
-
-    return handling;
 }
 
 function runAndHandlePhaseLaneMatrix({
@@ -2465,6 +2350,7 @@ export function createDefaultGermanPhaseState(now = Date.now()) {
         phase5MilitaryQueueSamples: 0,
         phase5MilitaryQueueActiveSamples: 0,
         phase5ConsecutiveActiveSamples: 0,
+        lastAppliedBudgetPhaseId: null,
         phaseCycleProgress: {
             phase2: createEmptyCycleProgress(),
             phase3: createEmptyCycleProgress(),
@@ -2534,6 +2420,10 @@ export function hydrateGermanPhaseState(rawState = null, now = Date.now()) {
                 ? rawState.phase5QueueActiveSamples
                 : 0,
         phase5ConsecutiveActiveSamples: Number.isFinite(rawState.phase5ConsecutiveActiveSamples) ? rawState.phase5ConsecutiveActiveSamples : 0,
+        lastAppliedBudgetPhaseId:
+            typeof rawState.lastAppliedBudgetPhaseId === 'string'
+                ? rawState.lastAppliedBudgetPhaseId
+                : null,
         phaseCycleProgress: normalizedCycleProgress,
         activeSubGoal: normalizedActiveSubGoal,
         subGoalHistory: normalizedSubGoalHistory,
@@ -2565,6 +2455,7 @@ export function serializeGermanPhaseStates(stateByVillageMap) {
             phase5MilitaryQueueSamples: state.phase5MilitaryQueueSamples,
             phase5MilitaryQueueActiveSamples: state.phase5MilitaryQueueActiveSamples,
             phase5ConsecutiveActiveSamples: state.phase5ConsecutiveActiveSamples,
+            lastAppliedBudgetPhaseId: state.lastAppliedBudgetPhaseId,
             phaseCycleProgress: state.phaseCycleProgress,
             activeSubGoal: state.activeSubGoal,
             subGoalHistory: state.subGoalHistory,
@@ -2594,7 +2485,14 @@ export function runGermanEconomicPhaseCycle({
     }
 
     if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase1) {
-        ensurePhaseOneRatio({ village, difficulty, log, phaseState, threatContext, now });
+        ensurePhaseRatioOnEntry({
+            village,
+            difficulty,
+            phaseState,
+            phaseKey: 'phase1',
+            phaseLabel: `Macro Fase 1 (${difficulty})`,
+            log,
+        });
 
         const exit = evaluatePhaseOneExit(village, phaseState, difficulty);
         if (exit.ready) {
@@ -2713,7 +2611,14 @@ export function runGermanEconomicPhaseCycle({
     }
 
     if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase2) {
-        ensurePhaseTwoRatio({ village, difficulty, log, phaseState, threatContext, now });
+        ensurePhaseRatioOnEntry({
+            village,
+            difficulty,
+            phaseState,
+            phaseKey: 'phase2',
+            phaseLabel: `Macro Fase 2 (${difficulty})`,
+            log,
+        });
         updatePhaseTwoQueueTelemetry(phaseState, village, evaluationDeltaMs);
         const phaseTwoConstructionReserveFilter = createConstructionStepFilter({
             phaseState,
@@ -2854,7 +2759,14 @@ export function runGermanEconomicPhaseCycle({
     }
 
     if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase3) {
-        ensurePhaseThreeRatio({ village, difficulty, log, phaseState, threatContext, now });
+        ensurePhaseRatioOnEntry({
+            village,
+            difficulty,
+            phaseState,
+            phaseKey: 'phase3',
+            phaseLabel: `Macro Fase 3 (${difficulty})`,
+            log,
+        });
         updatePhaseThreeQueueTelemetry(phaseState, village, evaluationDeltaMs);
         const phaseThreeConstructionReserveFilter = createConstructionStepFilter({
             phaseState,
@@ -2995,7 +2907,14 @@ export function runGermanEconomicPhaseCycle({
     }
 
     if (phaseState.activePhaseId === GERMAN_PHASE_IDS.phase4) {
-        ensurePhaseFourRatio({ village, difficulty, log, phaseState, threatContext, now });
+        ensurePhaseRatioOnEntry({
+            village,
+            difficulty,
+            phaseState,
+            phaseKey: 'phase4',
+            phaseLabel: `Macro Fase 4 (${difficulty})`,
+            log,
+        });
         updatePhaseFourQueueTelemetry(phaseState, village, evaluationDeltaMs);
         const phaseFourConstructionReserveFilter = createConstructionStepFilter({
             phaseState,
@@ -3139,7 +3058,14 @@ export function runGermanEconomicPhaseCycle({
         return { handled: false, phaseState };
     }
 
-    ensurePhaseFiveRatio({ village, difficulty, log, phaseState, threatContext, now });
+    ensurePhaseRatioOnEntry({
+        village,
+        difficulty,
+        phaseState,
+        phaseKey: 'phase5',
+        phaseLabel: `Macro Fase 5 (${difficulty})`,
+        log,
+    });
     updatePhaseFiveQueueTelemetry(phaseState, village, evaluationDeltaMs);
     const phaseFiveConstructionReserveFilter = createConstructionStepFilter({
         phaseState,

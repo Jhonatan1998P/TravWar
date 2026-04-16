@@ -18,10 +18,8 @@ import { simulateOfflineProgress as simulateOfflineProgressStep } from './worker
 import {
     addResourceIncomeToVillage,
     initializeAIVillageBudget,
-    rebalanceAIVillageBudgets,
 } from './worker/budget.js';
 import {
-    BUDGET_RATIO_REBALANCE_INTERVAL_MS,
     isUnderBeginnerProtectionByPopulation,
 } from '../core/data/constants.js';
 
@@ -147,27 +145,6 @@ let mainLoopInterval = null;
 let sessionId = null;
 let aiControllers = [];
 let villageProcessors = [];
-let budgetRebalanceAccumulatorMs = 0;
-
-function maybeRebalanceAIBudgetsByElapsedMs(elapsedMs, reason = 'online') {
-    if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) return;
-    if (!Number.isFinite(BUDGET_RATIO_REBALANCE_INTERVAL_MS) || BUDGET_RATIO_REBALANCE_INTERVAL_MS <= 0) return;
-
-    budgetRebalanceAccumulatorMs += elapsedMs;
-    const intervalsDue = Math.floor(budgetRebalanceAccumulatorMs / BUDGET_RATIO_REBALANCE_INTERVAL_MS);
-    if (intervalsDue <= 0) return;
-
-    budgetRebalanceAccumulatorMs -= intervalsDue * BUDGET_RATIO_REBALANCE_INTERVAL_MS;
-    const rebalancedVillages = rebalanceAIVillageBudgets(gameState?.villages || []);
-    if (rebalancedVillages <= 0) return;
-
-    const intervalMinutes = BUDGET_RATIO_REBALANCE_INTERVAL_MS / (60 * 1000);
-    _log(
-        'info',
-        'Rebalance Budget',
-        `Rebalance eco/mil aplicado (${reason}): ${rebalancedVillages} aldeas IA, intervalos=${intervalsDue}, cada ${intervalMinutes}m reales (fijo).`,
-    );
-}
 
 function _log(level, action, message, details = null, context = {}) {
     if (!ENABLE_WORKER_LOGS) return;
@@ -224,7 +201,6 @@ function getActiveVillage() {
 function mainLoop() {
     if (!gameState) return;
     const currentTime = Date.now();
-    const elapsedRealMs = Math.max(0, currentTime - lastTick);
     try {
         villageProcessors.forEach(processor => {
             const notifications = processor.update(currentTime, lastTick);
@@ -237,8 +213,6 @@ function mainLoop() {
         processMovements(currentTime);
         processOasisRegeneration(currentTime);
         updatePlayerProtectionStatus();
-        maybeRebalanceAIBudgetsByElapsedMs(elapsedRealMs, 'online');
-
         aiControllers.forEach(controller => {
             controller.makeDecision(gameState);
         });
@@ -276,15 +250,13 @@ function updatePlayerProtectionStatus() {
     if (!gameState || !gameState.players) return;
 
     gameState.players.forEach(player => {
-        if (player.isUnderProtection) {
-            const totalPopulation = gameState.villages
-                .filter(v => v.ownerId === player.id)
-                .reduce((sum, v) => sum + v.population.current, 0);
-
-            if (!isUnderBeginnerProtectionByPopulation(totalPopulation)) {
-                player.isUnderProtection = false;
-                _log('info', 'Protección', `El jugador ${player.id} ha perdido la protección de principiante.`);
-            }
+        if (!player.isUnderProtection) return;
+        const totalPopulation = gameState.villages
+            .filter(v => v.ownerId === player.id)
+            .reduce((sum, v) => sum + (v.population?.current || 0), 0);
+        if (!isUnderBeginnerProtectionByPopulation(totalPopulation)) {
+            player.isUnderProtection = false;
+            _log('info', 'Protección', `El jugador ${player.id} ha perdido la protección de principiante.`);
         }
     });
 }
@@ -624,7 +596,6 @@ self.onmessage = function(event) {
 
         aiControllers = [];
         villageProcessors = [];
-        budgetRebalanceAccumulatorMs = 0;
         
         const personalityName = 'Pesadilla';
         const personality = AIPersonality[personalityName];
@@ -647,7 +618,6 @@ self.onmessage = function(event) {
         const savedLastTick = payload.savedState?.lastTick || now;
         if (now > savedLastTick) {
             simulateOfflineProgress(savedLastTick, now);
-            maybeRebalanceAIBudgetsByElapsedMs(now - savedLastTick, 'offline');
         }
         lastTick = now;
         

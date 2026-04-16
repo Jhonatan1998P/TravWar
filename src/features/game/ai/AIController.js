@@ -6,7 +6,6 @@ import StrategicAI from './StrategicAI.js';
 import { AI_CONTROLLER_CONSTANTS } from './config/AIConstants.js';
 import { gameData } from '../core/GameData.js';
 import { resolvePhaseEngineRolloutFlags } from '../core/data/constants.js';
-import { applyDevelopmentBudgetMode } from './controller/economic.js';
 import { executeCommands } from './controller/commands.js';
 import { handleAttackReact, handleEspionageReact, processDodgeTasks, processReinforcementRecalls } from './controller/reactive.js';
 import { runMilitaryDecision } from './controller/military.js';
@@ -136,6 +135,8 @@ const REASON_LABELS = Object.freeze({
     THREAT_BOOST_NOT_REQUIRED: 'sin amenaza que requiera boost',
     PROBABILITY_GATE: 'no activo por probabilidad',
     NO_EFFICIENCY_GAIN: 'sin mejora de eficiencia',
+    ATTACKER_UNDER_BEGINNER_PROTECTION: 'atacante bajo proteccion de principiante',
+    TARGET_UNDER_BEGINNER_PROTECTION: 'objetivo bajo proteccion de principiante',
 });
 
 const COMBAT_STATE_TTL_BY_THREAT_LEVEL_MS = Object.freeze({
@@ -371,6 +372,18 @@ function buildAiLogDetailSummary(details) {
     const required = details.required || details?.result?.details?.required || details?.payload?.result?.details?.required;
     const missing = details.missing || details?.result?.details?.missing || details?.payload?.result?.details?.missing;
     const moved = details.moved || details?.result?.details?.moved || details?.payload?.result?.details?.moved;
+    const militaryBudgetFinal = details.militaryBudgetFinal
+        || details?.after?.mil
+        || details?.after?.military
+        || (
+            details?.after
+            && Number.isFinite(Number(details.after.wood))
+            && Number.isFinite(Number(details.after.stone))
+            && Number.isFinite(Number(details.after.iron))
+            && Number.isFinite(Number(details.after.food))
+                ? details.after
+                : null
+        );
 
     const neededText = formatResourceBag(needed);
     if (neededText) parts.push(`necesario={${neededText}}`);
@@ -394,6 +407,11 @@ function buildAiLogDetailSummary(details) {
 
     if (Number.isFinite(Number(details.movedTotal))) {
         parts.push(`prestamo_total=${Math.floor(Number(details.movedTotal))}`);
+    }
+
+    const militaryBudgetFinalText = formatResourceBag(militaryBudgetFinal);
+    if (militaryBudgetFinalText) {
+        parts.push(`budget_mil_final={${militaryBudgetFinalText}}`);
     }
 
     if (required && typeof required === 'object') {
@@ -1517,14 +1535,6 @@ class AIController {
             try {
                 if (this._goalManager) {
                     myVillages.forEach(village => this._goalManager.ensureVillageStateExists(village.id));
-                }
-
-                if (this._goalManager) {
-                    applyDevelopmentBudgetMode({
-                        myVillages,
-                        personality: this._personality,
-                        log: this.log.bind(this),
-                    });
                 }
 
                 myVillages.forEach((village, index) => {

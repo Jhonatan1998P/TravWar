@@ -1,5 +1,5 @@
 import { getBuildingLevelData, getRaceTroops } from '../../core/data/lookups.js';
-import { BUDGET_RATIO_REBALANCE_INTERVAL_MS, RESOURCE_FIELD_BUILDING_TYPES } from '../../core/data/constants.js';
+import { RESOURCE_FIELD_BUILDING_TYPES } from '../../core/data/constants.js';
 import { rebalanceVillageBudgetToRatio } from '../../state/worker/budget.js';
 import { resolveUnitIdForRace } from '../utils/AIUnitUtils.js';
 import {
@@ -168,14 +168,6 @@ const THREAT_CRITICAL_ALLOWED_CONSTRUCTION_TYPES = new Set([
     'smithy',
     'stable',
 ]);
-
-const THREAT_LEVEL_BOOST = Object.freeze({
-    none: 0,
-    low: 0,
-    medium: 0.06,
-    high: 0.14,
-    critical: 0.22,
-});
 
 const PHASE_IDLE_LOG_MS = 20_000;
 const EXPANSION_CHECK_MS = 25_000;
@@ -586,7 +578,7 @@ function handlePhaseActionResult({
     log,
     onSuccess,
 }) {
-    const handling = handleCommonPhaseActionResult({
+    return handleCommonPhaseActionResult({
         result,
         phaseState,
         phaseId,
@@ -599,16 +591,6 @@ function handlePhaseActionResult({
             log,
         }),
     });
-
-    if (
-        result?.reason === 'INSUFFICIENT_RESOURCES'
-        && phaseState.activeSubGoal?.kind === SUBGOAL_KIND.waitResources
-        && village?.budgetRatio
-    ) {
-        rebalanceVillageBudgetToRatio(village, village.budgetRatio);
-    }
-
-    return handling;
 }
 
 function getResolvedUnitId(village, unitType) {
@@ -676,26 +658,24 @@ function normalizeVillageCombatState(villageCombatState, now) {
     };
 }
 
-function applyPhaseRatio({ village, difficulty, phaseId, threatContext, phaseState, log, now }) {
+function applyPhaseRatioOnPhaseEntry({ village, difficulty, phaseId, phaseState, log }) {
     const template = getDifficultyTemplate(PHASE_TEMPLATE_BY_DIFFICULTY, difficulty);
     const phaseConfig = template[phaseId] || template.phase6;
-    const baseRatio = phaseConfig.ratio;
-    const boost = THREAT_LEVEL_BOOST[threatContext.threatLevel] || 0;
-    const mil = Math.min(0.85, baseRatio.mil + boost);
-    const ratio = { econ: 1 - mil, mil };
+    const ratio = {
+        econ: Number(phaseConfig?.ratio?.econ) || 0.5,
+        mil: Number(phaseConfig?.ratio?.mil) || 0.5,
+    };
 
-    const rebalanceDue = !Number.isFinite(phaseState.lastBudgetRebalanceAt)
-        || (now - phaseState.lastBudgetRebalanceAt) >= BUDGET_RATIO_REBALANCE_INTERVAL_MS;
-    if (!rebalanceDue) return;
+    if (phaseState.lastAppliedBudgetPhaseId === phaseId) return;
 
     rebalanceVillageBudgetToRatio(village, ratio);
-    phaseState.lastBudgetRebalanceAt = now;
+    phaseState.lastAppliedBudgetPhaseId = phaseId;
 
     log(
         'info',
         village,
         'Macro Egipcia',
-        `Ratio presupuestario aplicado ${Math.round(ratio.econ * 100)}/${Math.round(ratio.mil * 100)} (threat=${threatContext.threatLevel}).`,
+        `Ratio presupuestario aplicado por fase ${Math.round(ratio.econ * 100)}/${Math.round(ratio.mil * 100)} (${phaseId}).`,
         null,
         'economic',
     );
@@ -792,7 +772,7 @@ function updateReadinessScores(phaseState, village, threatContext) {
     );
 }
 
-function transitionTo(phaseState, from, to, now, reason, log, village) {
+function transitionTo(phaseState, from, to, now, reason, log, village, difficulty) {
     if (phaseState.activeSubGoal) {
         clearActiveSubGoal(
             phaseState,
@@ -805,6 +785,18 @@ function transitionTo(phaseState, from, to, now, reason, log, village) {
     }
     phaseState.activePhaseId = to;
     phaseState.transitions.push(createPhaseTransition(from, to, reason, now));
+
+    const nextPhaseKey = getEgyptianPhaseKey(to);
+    if (nextPhaseKey) {
+        applyPhaseRatioOnPhaseEntry({
+            village,
+            difficulty,
+            phaseId: nextPhaseKey,
+            phaseState,
+            log,
+        });
+    }
+
     log('success', village, 'Macro Egipcia', `Transicion ${from} -> ${to}.`, { reason }, 'economic');
 }
 
@@ -1691,7 +1683,7 @@ export function createDefaultEgyptianPhaseState(now = Date.now()) {
         defenseReadinessScore: 0,
         storagePressureHistory: [],
         lastSafeExpansionCheckAt: 0,
-        lastBudgetRebalanceAt: 0,
+        lastAppliedBudgetPhaseId: null,
         kpiThreatInterruptedCycles: 0,
         kpiStoragePressureCriticalSamples: 0,
         kpiExpansionAttempts: 0,
@@ -1757,7 +1749,10 @@ export function hydrateEgyptianPhaseState(rawState = null, now = Date.now()) {
                 : 0,
         storagePressureHistory: normalizeStoragePressureHistory(rawState.storagePressureHistory || rawState.storagePressureSamples),
         lastSafeExpansionCheckAt: Number.isFinite(rawState.lastSafeExpansionCheckAt) ? rawState.lastSafeExpansionCheckAt : 0,
-        lastBudgetRebalanceAt: Number.isFinite(rawState.lastBudgetRebalanceAt) ? rawState.lastBudgetRebalanceAt : 0,
+        lastAppliedBudgetPhaseId:
+            typeof rawState.lastAppliedBudgetPhaseId === 'string'
+                ? rawState.lastAppliedBudgetPhaseId
+                : null,
         kpiThreatInterruptedCycles: Number.isFinite(rawState.kpiThreatInterruptedCycles)
             ? rawState.kpiThreatInterruptedCycles
             : Number.isFinite(rawState.kpiThreatCycles)
@@ -1802,7 +1797,7 @@ export function serializeEgyptianPhaseStates(stateByVillageMap) {
             defenseReadinessScore: state.defenseReadinessScore,
             storagePressureHistory: state.storagePressureHistory,
             lastSafeExpansionCheckAt: state.lastSafeExpansionCheckAt,
-            lastBudgetRebalanceAt: state.lastBudgetRebalanceAt,
+            lastAppliedBudgetPhaseId: state.lastAppliedBudgetPhaseId,
             kpiThreatInterruptedCycles: state.kpiThreatInterruptedCycles,
             kpiStoragePressureCriticalSamples: state.kpiStoragePressureCriticalSamples,
             kpiExpansionAttempts: state.kpiExpansionAttempts,
@@ -1838,7 +1833,7 @@ export function runEgyptianEconomicPhaseCycle({
 
     const phaseKey = getEgyptianPhaseKey(phaseState.activePhaseId) || 'phase6';
 
-    applyPhaseRatio({ village, difficulty, phaseId: phaseKey, threatContext, phaseState, log, now });
+    applyPhaseRatioOnPhaseEntry({ village, difficulty, phaseId: phaseKey, phaseState, log });
     updateReadinessScores(phaseState, village, threatContext);
     const constructionFilter = createThreatConstructionFilter(threatContext);
     const recruitmentFilter = createThreatRecruitmentFilter(village, threatContext);
@@ -1902,7 +1897,7 @@ export function runEgyptianEconomicPhaseCycle({
 
     if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase1) {
         if (evaluatePhaseOneExit(village, phaseState)) {
-            transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase1, EGYPTIAN_PHASE_IDS.phase2, now, 'PHASE_1_EXIT_CRITERIA_MET', log, village);
+            transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase1, EGYPTIAN_PHASE_IDS.phase2, now, 'PHASE_1_EXIT_CRITERIA_MET', log, village, difficulty);
         }
         if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase1) {
             result = runPhaseOne({ village, gameState, actionExecutor, phaseState, threatContext, constructionFilter, recruitmentFilter });
@@ -1912,7 +1907,7 @@ export function runEgyptianEconomicPhaseCycle({
     if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase2) {
         updatePhaseTwoQueueTelemetry(phaseState, village);
         if (evaluatePhaseTwoExit(village, phaseState)) {
-            transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase2, EGYPTIAN_PHASE_IDS.phase3, now, 'PHASE_2_EXIT_CRITERIA_MET', log, village);
+            transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase2, EGYPTIAN_PHASE_IDS.phase3, now, 'PHASE_2_EXIT_CRITERIA_MET', log, village, difficulty);
         }
         if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase2) {
             result = runPhaseTwo({ village, gameState, actionExecutor, phaseState, threatContext, constructionFilter, recruitmentFilter });
@@ -1922,7 +1917,7 @@ export function runEgyptianEconomicPhaseCycle({
     if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase3) {
         updatePhaseThreeQueueTelemetry(phaseState, village);
         if (evaluatePhaseThreeExit(village, phaseState)) {
-            transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase3, EGYPTIAN_PHASE_IDS.phase4, now, 'PHASE_3_EXIT_CRITERIA_MET', log, village);
+            transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase3, EGYPTIAN_PHASE_IDS.phase4, now, 'PHASE_3_EXIT_CRITERIA_MET', log, village, difficulty);
         }
         if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase3) {
             result = runPhaseThree({ village, gameState, actionExecutor, phaseState, constructionFilter, recruitmentFilter });
@@ -1931,7 +1926,7 @@ export function runEgyptianEconomicPhaseCycle({
 
     if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase4) {
         if (evaluatePhaseFourExit(village, phaseState)) {
-            transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase4, EGYPTIAN_PHASE_IDS.phase5, now, 'PHASE_4_EXIT_CRITERIA_MET', log, village);
+            transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase4, EGYPTIAN_PHASE_IDS.phase5, now, 'PHASE_4_EXIT_CRITERIA_MET', log, village, difficulty);
         }
         if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase4) {
             result = runPhaseFour({ village, gameState, actionExecutor, phaseState, constructionFilter, recruitmentFilter });
@@ -1940,7 +1935,7 @@ export function runEgyptianEconomicPhaseCycle({
 
     if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase5) {
         if (evaluatePhaseFiveExit(village, gameState, phaseState)) {
-            transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase5, EGYPTIAN_PHASE_IDS.phase6, now, 'PHASE_5_EXIT_CRITERIA_MET', log, village);
+            transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase5, EGYPTIAN_PHASE_IDS.phase6, now, 'PHASE_5_EXIT_CRITERIA_MET', log, village, difficulty);
         }
         if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase5) {
             result = runPhaseFive({
@@ -1958,7 +1953,7 @@ export function runEgyptianEconomicPhaseCycle({
 
     if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase6) {
         if (evaluatePhaseSixExit(village, gameState, phaseState)) {
-            transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase6, EGYPTIAN_PHASE_IDS.phaseDone, now, 'PHASE_6_EXIT_CRITERIA_MET', log, village);
+            transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase6, EGYPTIAN_PHASE_IDS.phaseDone, now, 'PHASE_6_EXIT_CRITERIA_MET', log, village, difficulty);
             return { handled: true, phaseState };
         }
         result = runPhaseSix({

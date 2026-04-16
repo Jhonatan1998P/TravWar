@@ -1,89 +1,85 @@
+## Contexto actual (canonico)
+
+Este documento consolida el estado vigente del trabajo de IA para **Egipcios** y **Germanos**, priorizando reglas activas y decisiones canonicas sin duplicacion.
+
 ## Goal
 
-Completar y ajustar la convergencia entre los motores IA por fases de **Egyptians** y **Germans** para asegurar:
-
-- Prioridad absoluta de bloqueos/subgoals sobre acciones macro.
-- Presupuestos correctos por tipo de accion (economico vs militar).
-- Salida por fases basada en ciclos de reclutamiento por tipo de unidad.
-- Ejecucion en micro-pasos con round robin para evitar bloqueos por objetivos largos.
-- Reutilizacion maxima entre motores, sin duplicidad.
+Consolidar y estabilizar la logica de IA por fases (Egipcios/Germanos), con reglas de presupuesto predecibles y una regla unica de proteccion de principiante basada en poblacion total por owner.
 
 ## Instructions
 
-- Priorizar bloqueos y subgoals por encima de construccion/reclutamiento/investigacion.
-- Si hay bloqueo recuperable, activar subgoal inmediato y pausar decisiones economicas hasta resolver.
-- `wait_resources` solo para `INSUFFICIENT_RESOURCES`; luego rebalance inmediato al ratio objetivo.
-- Routing de presupuesto:
-  - Reclutamiento -> `budget.mil`
-  - Construccion/investigacion/herreria -> `budget.econ`
-- Rebalance eco/mil en tiempo real fijo: `600000 ms` (independiente de `gameSpeed`).
-- Reemplazar gates de uptime de cola por ciclos militares por fase y bucket de unidad.
-- Implementar matrix de lanes con round robin y micro-pasos en ambos motores.
-- Mantener arquitectura compartida para facilitar extension a futuras tribus.
+- Mantener ejecucion por lanes fija y subgoals con prioridad sobre flujo macro.
+- No reintroducir rebalanceos eco/mil por timer, por `INSUFFICIENT_RESOURCES` ni por override de amenaza.
+- Aplicar ajuste de ratio de presupuesto solo al entrar/cambiar de fase.
+- Unificar proteccion de principiante con una sola constante de poblacion total por owner.
+- Usar umbral de salida de proteccion en `250` habitantes (suma de todas las aldeas del owner).
+- Permitir ataques hostiles (`attack`, `raid`, `espionage`) solo entre owners sin proteccion.
+- Mantener logging legible y consistente para prestamos/intercambios y razones de rechazo.
 
 ## Discoveries
 
-- Ya existia convergencia fuerte en runtime comun (`phase-engine-common.js`) para subgoals y ciclos base.
-- Se detectaron casos donde objetivos combinados (construccion + reclutamiento) perdian bloqueos recuperables; corregido.
-- Se detecto mezcla de prioridades y routing de presupuesto; corregido.
-- Se incorporo scheduler por matriz de lanes (`construction -> research -> upgrade -> recruitment`) con round robin.
-- Reclutamiento paso a `countMode: cycle_batch` para micro-pasos con minimo 1 ciclo.
-- Por decision de producto, se eliminaron scripts de validacion/harness porque no aportaban decision operativa confiable.
+- La caida de capacidad militar observada no era perdida aleatoria de recursos: provenia de rebalanceos automaticos 70/30 en distintos puntos.
+- Existian tres fuentes de rebalance no deseado: al entrar `wait_resources` por `INSUFFICIENT_RESOURCES`, en timer del phase engine egipcio y en timer global de `GameWorker`.
+- La logica de proteccion estaba repartida entre estado (`player.isUnderProtection`) y calculos por poblacion en distintos lugares.
+- Para decisiones de ataque, la fuente canonica debia ser el umbral por poblacion total.
 
 ## Accomplished
 
-- **Prioridad de bloqueos y subgoals:**
-  - Bloqueos/subgoals se atienden antes del flujo economico normal.
-  - `wait_resources` restringido a `INSUFFICIENT_RESOURCES` y rebalance posterior inmediato.
-- **Presupuestos corregidos por accion:**
-  - Reclutamiento usa `mil`.
-  - Construccion, investigacion y herreria usan `econ`.
-- **Salida por fases basada en ciclos:**
-  - Se removieron gates por uptime de cola en fases relevantes de Egyptians y Germans.
-  - Se migraron a ciclos por bucket de unidad.
-- **Micro-pasos + round robin compartidos:**
-  - Nuevos helpers en `phase-engine-common.js`:
-    - `getRoundRobinPhaseSteps`
-    - `runPhaseLaneMatrix`
-    - `pickPhaseLaneResult`
-  - Ambos motores migrados a lane matrix por fase.
-  - Reclutamiento ejecuta micro-pasos por ciclos (`cycle_batch`).
-- **Fase 1 actualizada en ambos motores (requisito reciente):**
-  - Infraestructura objetivo: `mainBuilding 5`, fields `4`, `cityWall 5`, `barracks 5`, `warehouse 6`, `granary 6`, `embassy 3`, `marketplace 3`, `academy 5`, `smithy 3`, `stable 3`.
-  - Ciclos de salida:
-    - Germans: `offensive_infantry 10` + `scout 3`
-    - Egyptians: `defensive_infantry 10` + `scout 3`
-  - Implementado con helpers compartidos para evitar duplicidad.
-- **Documentacion funcional por fase:**
-  - Nuevo documento `docs/ai/objetivos_fases_egipcios_germanos.md` con objetivos por fase, pasos y criterios de salida.
-- **Limpieza de scripts de validacion/harness:**
-  - Eliminados scripts en `scripts/validation/*` y `scripts/harnesses/*`.
-  - `package.json` limpiado de comandos `ai:validate:*` y `ai:harness:*`.
-  - `reports/sessions/session-ses_2776.md` y este contexto alineados con la decision operativa.
+- **Presupuesto IA estabilizado (solo por fase):**
+  - Eliminado rebalance por `INSUFFICIENT_RESOURCES` en engines egipcio y germano.
+  - Eliminado rebalance periodico global en `GameWorker`.
+  - Eliminada ruta legacy `applyDevelopmentBudgetMode(...)` en `AIController`.
+  - Implementado ajuste por entrada de fase con `lastAppliedBudgetPhaseId`:
+    - Egipcios: `applyPhaseRatioOnPhaseEntry(...)`.
+    - Germanos: `ensurePhaseRatioOnEntry(...)`.
+
+- **Logs de reclutamiento/presupuesto mejorados:**
+  - Prestamo e intercambio ahora reportan `budget.mil final`.
+  - El resumen compacto incluye `budget_mil_final=...`.
+
+- **Proteccion de principiante unificada:**
+  - `BEGINNER_PROTECTION_POPULATION_THRESHOLD` actualizado a `250`.
+  - Validacion central en `send_movement` para hostiles:
+    - `ATTACKER_UNDER_BEGINNER_PROTECTION`.
+    - `TARGET_UNDER_BEGINNER_PROTECTION`.
+  - Se removio la regla previa de bloqueo fijo "AI vs AI" y se reemplazo por regla universal de proteccion por poblacion.
+  - `updatePlayerProtectionStatus()` mantiene salida de proteccion al superar umbral (sin reingreso automatico en esta version).
+  - `AIController` mapea y registra las nuevas razones de rechazo.
+
+- **Build:**
+  - `npm run build` en verde despues de los cambios.
 
 ## Estado actual
 
-- Fase 1 quedo cerrada con los requisitos nuevos aplicados en ambos motores.
-- El siguiente bloque de trabajo es Fase 2 en ambos motores, manteniendo patron compartido y sin duplicidad.
-- Persisten menciones historicas en algunos docs antiguos sobre validacion/harness (texto no operativo), potencialmente limpiables en una pasada posterior.
+- Codigo compila y reglas de ataque/proteccion quedaron centralizadas para hostiles en `worker/commands.js`.
+- Rebalance de presupuesto restringido a cambios de fase.
+- La proteccion de principiante depende del umbral unico de poblacion total (`250`) por owner.
 
 ## Relevant files / directories
 
-- **Motores y runtime compartido**
-  - `src/features/game/ai/controller/phase-engine-common.js`
+- **Proteccion de principiante (regla canonica):**
+  - `src/features/game/core/data/constants.js`
+  - `src/features/game/state/worker/commands.js`
+  - `src/features/game/state/GameWorker.js`
+
+- **Presupuesto y motores de fase:**
   - `src/features/game/ai/controller/egyptian-phase-engine.js`
   - `src/features/game/ai/controller/german-phase-engine.js`
-- **Ejecucion y presupuesto**
+  - `src/features/game/state/worker/budget.js`
+
+- **IA y logging de razones:**
+  - `src/features/game/ai/AIController.js`
   - `src/features/game/ai/action-executor/recruitment.js`
   - `src/features/game/engine/VillageProcessor.js`
-  - `src/features/game/state/GameManager.js` (modificado en workspace)
-- **Documentacion y sesion**
+
+- **Documentacion:**
   - `docs/ai/contexto_actual.md`
   - `docs/ai/objetivos_fases_egipcios_germanos.md`
-  - `reports/sessions/session-ses_2776.md`
-- **Scripts/config limpiados**
-  - `package.json`
-  - `scripts/validation/*` (eliminado)
-  - `scripts/harnesses/*` (eliminado)
+
+## Historial consolidado (resumen)
+
+- Se conserva la convergencia previa a ejecucion determinista por lanes (`construction -> research -> upgrade -> recruitment`).
+- Se mantienen correcciones previas de subgoals/prerequisitos y objetivos de fase egipcia (F1/F2).
+- El foco actual canonico es: presupuesto estable por fase + proteccion de principiante universal por poblacion total.
 
 ---

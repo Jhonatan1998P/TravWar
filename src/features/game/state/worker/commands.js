@@ -1,7 +1,69 @@
+import {
+    BEGINNER_PROTECTION_POPULATION_THRESHOLD,
+    isUnderBeginnerProtectionByPopulation,
+} from '../../core/data/constants.js';
+
+const HOSTILE_MISSION_TYPES = new Set(['attack', 'raid', 'espionage']);
+
+function getOwnerTotalPopulation(gameState, ownerId) {
+    return (gameState?.villages || [])
+        .filter(village => village.ownerId === ownerId)
+        .reduce((sum, village) => sum + (village.population?.current || 0), 0);
+}
+
+function isOwnerUnderBeginnerProtection(gameState, ownerId) {
+    const ownerState = gameState?.players?.find(player => player.id === ownerId);
+    if (ownerState && typeof ownerState.isUnderProtection === 'boolean') {
+        return ownerState.isUnderProtection;
+    }
+    const totalPopulation = getOwnerTotalPopulation(gameState, ownerId);
+    return isUnderBeginnerProtectionByPopulation(totalPopulation);
+}
+
 export function handleSendMovementCommand({ payload, gameState, gameConfig, gameData, aiControllers }) {
     const { originVillageId, targetCoords, troops, missionType, catapultTargets } = payload;
     const village = gameState.villages.find(candidate => candidate.id === originVillageId);
     if (!village) return { success: false, reason: 'VILLAGE_NOT_FOUND' };
+
+    const targetTile = gameState.mapData.find(tile => tile.x === targetCoords?.x && tile.y === targetCoords?.y);
+    const defenderVillage = targetTile?.type === 'village'
+        ? gameState.villages.find(candidate => candidate.id === targetTile.villageId)
+        : null;
+
+    if (HOSTILE_MISSION_TYPES.has(missionType) && defenderVillage && defenderVillage.ownerId !== village.ownerId) {
+        const attackerPopulation = getOwnerTotalPopulation(gameState, village.ownerId);
+        const defenderPopulation = getOwnerTotalPopulation(gameState, defenderVillage.ownerId);
+        const attackerUnderProtection = isOwnerUnderBeginnerProtection(gameState, village.ownerId);
+        const defenderUnderProtection = isOwnerUnderBeginnerProtection(gameState, defenderVillage.ownerId);
+
+        if (attackerUnderProtection) {
+            return {
+                success: false,
+                reason: 'ATTACKER_UNDER_BEGINNER_PROTECTION',
+                details: {
+                    missionType,
+                    attackerOwnerId: village.ownerId,
+                    defenderOwnerId: defenderVillage.ownerId,
+                    threshold: BEGINNER_PROTECTION_POPULATION_THRESHOLD,
+                    attackerPopulation,
+                },
+            };
+        }
+
+        if (defenderUnderProtection) {
+            return {
+                success: false,
+                reason: 'TARGET_UNDER_BEGINNER_PROTECTION',
+                details: {
+                    missionType,
+                    attackerOwnerId: village.ownerId,
+                    defenderOwnerId: defenderVillage.ownerId,
+                    threshold: BEGINNER_PROTECTION_POPULATION_THRESHOLD,
+                    defenderPopulation,
+                },
+            };
+        }
+    }
 
     if (missionType === 'espionage') {
         const raceTroops = gameData.units[village.race].troops;
@@ -113,7 +175,6 @@ export function handleSendMovementCommand({ payload, gameState, gameConfig, game
     gameState.movements.push(newMovement);
     gameState.movements.sort((a, b) => a.arrivalTime - b.arrivalTime);
 
-    const targetTile = gameState.mapData.find(tile => tile.x === targetCoords.x && tile.y === targetCoords.y);
     if (targetTile && targetTile.type === 'village' && targetTile.ownerId.startsWith('ai_') && targetTile.ownerId !== village.ownerId) {
         const targetAIController = aiControllers.find(controller => controller.getOwnerId() === targetTile.ownerId);
         if (targetAIController) {

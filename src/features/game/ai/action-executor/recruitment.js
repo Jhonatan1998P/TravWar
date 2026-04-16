@@ -162,6 +162,21 @@ function getBudgetTotalResources(budget) {
     return EXCHANGE_RESOURCE_KEYS.reduce((sum, resource) => sum + Math.max(0, Number(budget?.[resource]) || 0), 0);
 }
 
+function getBudgetSnapshot(budget = {}) {
+    return {
+        wood: Math.max(0, Number(budget.wood) || 0),
+        stone: Math.max(0, Number(budget.stone) || 0),
+        iron: Math.max(0, Number(budget.iron) || 0),
+        food: Math.max(0, Number(budget.food) || 0),
+    };
+}
+
+function formatBudgetSnapshot(snapshot = {}) {
+    return EXCHANGE_RESOURCE_KEYS
+        .map(resource => `${resource}:${Math.floor(Math.max(0, Number(snapshot[resource]) || 0))}`)
+        .join(', ');
+}
+
 function getUnitTotalCost(cost = {}) {
     return EXCHANGE_RESOURCE_KEYS.reduce((sum, resource) => sum + Math.max(0, Number(cost?.[resource]) || 0), 0);
 }
@@ -232,6 +247,10 @@ function maybeBorrowEconomicBudgetForRecruitment({ village, step, log }) {
 
     syncVillageBudgetToResources(village);
 
+    const economicBudgetFinal = getBudgetSnapshot(village.budget.econ);
+    const militaryBudgetFinal = getBudgetSnapshot(village.budget.mil);
+    const militaryBudgetFinalText = formatBudgetSnapshot(militaryBudgetFinal);
+
     if (typeof log === 'function') {
         const movedText = EXCHANGE_RESOURCE_KEYS
             .map(resource => `${resource}:+${(Number(moved[resource]) || 0).toFixed(1)}`)
@@ -240,26 +259,18 @@ function maybeBorrowEconomicBudgetForRecruitment({ village, step, log }) {
             'info',
             village,
             'Prestamo Presupuesto',
-            `Prestamo ECO->MIL activado (10%) para reclutamiento. Transferido: ${movedText}.`,
+            `Prestamo ECO->MIL activado (10%) para reclutamiento. Transferido: ${movedText}. budget.mil final: {${militaryBudgetFinalText}}.`,
             {
                 probability: RECRUITMENT_BUDGET_BORROW_PROBABILITY,
                 share: RECRUITMENT_BUDGET_BORROW_ECON_SHARE,
                 moved,
                 movedTotal,
+                economicBudgetFinal,
+                militaryBudgetFinal,
                 before,
                 after: {
-                    econ: {
-                        wood: Number(village.budget.econ.wood) || 0,
-                        stone: Number(village.budget.econ.stone) || 0,
-                        iron: Number(village.budget.econ.iron) || 0,
-                        food: Number(village.budget.econ.food) || 0,
-                    },
-                    mil: {
-                        wood: Number(village.budget.mil.wood) || 0,
-                        stone: Number(village.budget.mil.stone) || 0,
-                        iron: Number(village.budget.mil.iron) || 0,
-                        food: Number(village.budget.mil.food) || 0,
-                    },
+                    econ: economicBudgetFinal,
+                    mil: militaryBudgetFinal,
                 },
             },
         );
@@ -338,6 +349,8 @@ function maybeExchangeMilitaryBudgetForRecruitment({ village, unitData, difficul
         village.budget.mil[resource] = redistributedBudget[resource];
     });
     syncVillageBudgetToResources(village);
+    const militaryBudgetFinal = getBudgetSnapshot(village.budget.mil);
+    const militaryBudgetFinalText = formatBudgetSnapshot(militaryBudgetFinal);
 
     const gain = Math.max(0, exchangeMax - Math.max(0, currentMax));
     kpi.activations += 1;
@@ -352,17 +365,13 @@ function maybeExchangeMilitaryBudgetForRecruitment({ village, unitData, difficul
             'info',
             village,
             'Reclutamiento',
-            `Intercambio tactico activado para ${unitData.id}: ${Math.max(0, currentMax)} -> ${exchangeMax} unidades potenciales (+${gain}). KPI ${snapshot.activations}/${snapshot.attempts} (${(snapshot.activationRate * 100).toFixed(1)}%), ganancia total +${snapshot.totalPotentialUnitGain}.`,
+            `Intercambio tactico activado para ${unitData.id}: ${Math.max(0, currentMax)} -> ${exchangeMax} unidades potenciales (+${gain}). budget.mil final: {${militaryBudgetFinalText}}. KPI ${snapshot.activations}/${snapshot.attempts} (${(snapshot.activationRate * 100).toFixed(1)}%), ganancia total +${snapshot.totalPotentialUnitGain}.`,
             {
                 difficulty,
                 probability,
                 before: beforeBudgetSnapshot,
-                after: {
-                    wood: Number(village.budget.mil.wood) || 0,
-                    stone: Number(village.budget.mil.stone) || 0,
-                    iron: Number(village.budget.mil.iron) || 0,
-                    food: Number(village.budget.mil.food) || 0,
-                },
+                after: militaryBudgetFinal,
+                militaryBudgetFinal,
                 kpi: snapshot,
             },
         );
