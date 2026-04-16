@@ -9,6 +9,8 @@ const PHASE_BATCH_CONFIG = {
 const RECRUITMENT_CYCLE_MS = 3 * 60 * 1000;
 const SIEGE_TARGET_RAM_RATIO = 0.7;
 const EXCHANGE_RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
+const RECRUITMENT_BUDGET_BORROW_PROBABILITY = 0.1;
+const RECRUITMENT_BUDGET_BORROW_ECON_SHARE = 0.25;
 const RECRUITMENT_EXCHANGE_PROBABILITY_BY_DIFFICULTY = Object.freeze({
     normal: 0.1,
     dificil: 0.15,
@@ -175,6 +177,100 @@ function syncVillageBudgetToResources(village) {
         if (!village?.resources?.[resource]) return;
         village.resources[resource].current = (village.budget?.econ?.[resource] || 0) + (village.budget?.mil?.[resource] || 0);
     });
+}
+
+function maybeBorrowEconomicBudgetForRecruitment({ village, step, log }) {
+    if (step?.allowBudgetBorrow === false) {
+        return { applied: false, reason: 'BORROW_DISABLED' };
+    }
+
+    if (!village?.budget?.econ || !village?.budget?.mil) {
+        return { applied: false, reason: 'NO_AI_BUDGET' };
+    }
+
+    if (Math.random() > RECRUITMENT_BUDGET_BORROW_PROBABILITY) {
+        return {
+            applied: false,
+            reason: 'PROBABILITY_GATE',
+            probability: RECRUITMENT_BUDGET_BORROW_PROBABILITY,
+        };
+    }
+
+    const before = {
+        econ: {
+            wood: Number(village.budget.econ.wood) || 0,
+            stone: Number(village.budget.econ.stone) || 0,
+            iron: Number(village.budget.econ.iron) || 0,
+            food: Number(village.budget.econ.food) || 0,
+        },
+        mil: {
+            wood: Number(village.budget.mil.wood) || 0,
+            stone: Number(village.budget.mil.stone) || 0,
+            iron: Number(village.budget.mil.iron) || 0,
+            food: Number(village.budget.mil.food) || 0,
+        },
+    };
+
+    const moved = { wood: 0, stone: 0, iron: 0, food: 0 };
+    let movedTotal = 0;
+
+    EXCHANGE_RESOURCE_KEYS.forEach(resource => {
+        const econAvailable = Math.max(0, Number(village.budget.econ[resource]) || 0);
+        const transferAmount = econAvailable * RECRUITMENT_BUDGET_BORROW_ECON_SHARE;
+        if (transferAmount <= 0) return;
+
+        village.budget.econ[resource] = Math.max(0, econAvailable - transferAmount);
+        village.budget.mil[resource] = Math.max(0, Number(village.budget.mil[resource]) || 0) + transferAmount;
+
+        moved[resource] = transferAmount;
+        movedTotal += transferAmount;
+    });
+
+    if (movedTotal <= 0) {
+        return { applied: false, reason: 'NO_ECON_RESOURCES' };
+    }
+
+    syncVillageBudgetToResources(village);
+
+    if (typeof log === 'function') {
+        const movedText = EXCHANGE_RESOURCE_KEYS
+            .map(resource => `${resource}:+${(Number(moved[resource]) || 0).toFixed(1)}`)
+            .join(', ');
+        log(
+            'info',
+            village,
+            'Prestamo Presupuesto',
+            `Prestamo ECO->MIL activado (10%) para reclutamiento. Transferido: ${movedText}.`,
+            {
+                probability: RECRUITMENT_BUDGET_BORROW_PROBABILITY,
+                share: RECRUITMENT_BUDGET_BORROW_ECON_SHARE,
+                moved,
+                movedTotal,
+                before,
+                after: {
+                    econ: {
+                        wood: Number(village.budget.econ.wood) || 0,
+                        stone: Number(village.budget.econ.stone) || 0,
+                        iron: Number(village.budget.econ.iron) || 0,
+                        food: Number(village.budget.econ.food) || 0,
+                    },
+                    mil: {
+                        wood: Number(village.budget.mil.wood) || 0,
+                        stone: Number(village.budget.mil.stone) || 0,
+                        iron: Number(village.budget.mil.iron) || 0,
+                        food: Number(village.budget.mil.food) || 0,
+                    },
+                },
+            },
+        );
+    }
+
+    return {
+        applied: true,
+        probability: RECRUITMENT_BUDGET_BORROW_PROBABILITY,
+        share: RECRUITMENT_BUDGET_BORROW_ECON_SHARE,
+        moved,
+    };
 }
 
 function maybeExchangeMilitaryBudgetForRecruitment({ village, unitData, difficulty, log }) {
@@ -548,6 +644,12 @@ export function manageRecruitmentForGoal({
     }
 
     if (unitsNeeded <= 0) return { success: true };
+
+    maybeBorrowEconomicBudgetForRecruitment({
+        village,
+        step,
+        log,
+    });
 
     maybeExchangeMilitaryBudgetForRecruitment({
         village,

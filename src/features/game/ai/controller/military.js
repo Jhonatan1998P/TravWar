@@ -2,6 +2,7 @@ import { countCombatTroopsInVillages } from '../utils/AITroopUtils.js';
 import { MemoryManager } from '../index.js';
 
 const MAX_PRIORITY_GOAL = 'MAX_PRIORITY_GOAL';
+const MILITARY_ALLOWED_COMMANDS = new Set(['ATTACK', 'SPY', 'REINFORCE']);
 
 function getTargetTile(gameState, targetCoords) {
     if (!targetCoords) return null;
@@ -120,9 +121,23 @@ export function runMilitaryDecision({
         }
     }
 
-    if (commandsToExecute.length > 0) {
-        log('success', null, 'Ordenes Recibidas', `Ejecutando ${commandsToExecute.length} comandos militares.`, commandsToExecute, 'military');
-        executeCommands(commandsToExecute, gameState);
+    const filteredMilitaryCommands = commandsToExecute.filter(command => MILITARY_ALLOWED_COMMANDS.has(command?.comando));
+    const ignoredNonMilitaryCommands = commandsToExecute.length - filteredMilitaryCommands.length;
+
+    if (ignoredNonMilitaryCommands > 0) {
+        log(
+            'warn',
+            null,
+            'Ciclo Militar Omitido',
+            `Se ignoraron ${ignoredNonMilitaryCommands} comandos no militares en este ciclo. Reclutamiento y economia quedan en el ciclo economico.`,
+            null,
+            'military',
+        );
+    }
+
+    if (filteredMilitaryCommands.length > 0) {
+        log('success', null, 'Ordenes Recibidas', `Ejecutando ${filteredMilitaryCommands.length} comandos militares.`, filteredMilitaryCommands, 'military');
+        executeCommands(filteredMilitaryCommands, gameState);
     } else {
         log('info', null, 'Sin Comandos', 'El general no emitio comandos en este ciclo.', null, 'military');
     }

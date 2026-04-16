@@ -1,4 +1,5 @@
 import { RESOURCE_FIELD_BUILDING_TYPES } from '../../core/data/constants.js';
+import { resolveUnitIdForRace } from '../utils/AIUnitUtils.js';
 
 export const PHASE_RECOVERABLE_BLOCK_REASONS = new Set([
     'PREREQUISITES_NOT_MET',
@@ -138,6 +139,7 @@ export function evaluateSharedPhaseOneInfrastructure({
     const details = {
         resourceFieldsLevel: avgFields,
         mainBuilding: Number(getEffectiveBuildingLevel?.(village, 'mainBuilding') || 0),
+        cranny: Number(getEffectiveBuildingLevel?.(village, 'cranny') || 0),
         cityWall: Number(getEffectiveBuildingLevel?.(village, 'cityWall') || 0),
         barracks: Number(getEffectiveBuildingLevel?.(village, 'barracks') || 0),
         warehouse: Number(getEffectiveBuildingLevel?.(village, 'warehouse') || 0),
@@ -151,6 +153,7 @@ export function evaluateSharedPhaseOneInfrastructure({
 
     const ready = details.resourceFieldsLevel >= (targets?.resourceFieldsLevel || 0)
         && details.mainBuilding >= (buildingLevels.mainBuilding || 0)
+        && details.cranny >= (buildingLevels.cranny || 0)
         && details.cityWall >= (buildingLevels.cityWall || 0)
         && details.barracks >= (buildingLevels.barracks || 0)
         && details.warehouse >= (buildingLevels.warehouse || 0)
@@ -176,6 +179,7 @@ export function evaluateSharedPhaseTwoInfrastructure({
     const details = {
         resourceFieldsLevel: avgFields,
         mainBuilding: Number(getEffectiveBuildingLevel?.(village, 'mainBuilding') || 0),
+        cranny: Number(getEffectiveBuildingLevel?.(village, 'cranny') || 0),
         palace: Number(getEffectiveBuildingLevel?.(village, 'palace') || 0),
         embassy: Number(getEffectiveBuildingLevel?.(village, 'embassy') || 0),
         marketplace: Number(getEffectiveBuildingLevel?.(village, 'marketplace') || 0),
@@ -193,6 +197,7 @@ export function evaluateSharedPhaseTwoInfrastructure({
 
     const ready = details.resourceFieldsLevel >= (targets?.resourceFieldsLevel || 0)
         && details.mainBuilding >= (buildingLevels.mainBuilding || 0)
+        && details.cranny >= (buildingLevels.cranny || 0)
         && details.palace >= (buildingLevels.palace || 0)
         && details.embassy >= (buildingLevels.embassy || 0)
         && details.marketplace >= (buildingLevels.marketplace || 0)
@@ -325,9 +330,18 @@ export function isPhaseQueueAvailable(village, queueType) {
 
 export function isPhaseResearchStepCompleted(village, step) {
     if (!step) return true;
-    const unitId = step.unitId || step.unitType;
-    if (!unitId) return false;
-    return village.research?.completed?.includes(unitId);
+    const race = village?.race || '';
+    const candidates = [
+        step.unitId,
+        step.unitType,
+        resolveUnitIdForRace(step.unitId, race),
+        resolveUnitIdForRace(step.unitType, race),
+    ].filter(Boolean);
+
+    if (candidates.length === 0) return false;
+
+    const completed = Array.isArray(village?.research?.completed) ? village.research.completed : [];
+    return candidates.some(unitId => completed.includes(unitId));
 }
 
 export function normalizePhaseSubGoalKind(kind, subGoalKind = PHASE_SUBGOAL_KIND) {
@@ -493,6 +507,17 @@ export function processPhaseActiveSubGoal({
         }
 
         subGoal.nextAttemptAt = now + getSubGoalRetryIntervalMs(gameSpeed, config);
+        if (now - (subGoal.lastLogAt || 0) >= config.logThrottleMs) {
+            subGoal.lastLogAt = now;
+            log(
+                'info',
+                village,
+                'Macro SubGoal',
+                `Subgoal activo ${subGoal.kind}. Esperando liberacion de cola (${subGoal.queueType}).`,
+                null,
+                'economic',
+            );
+        }
         return { handled: true };
     }
 
@@ -539,21 +564,6 @@ export function processPhaseActiveSubGoal({
                 message: resolvedMessage,
                 config,
             });
-
-            if (neededText || availableText) {
-                log(
-                    'info',
-                    village,
-                    'Macro SubGoal',
-                    `WAIT_RESOURCES CHECK -> necesario{${neededText || 'n/a'}} disponible{${availableText || 'n/a'}} faltante{${missingText || '0'}}.`,
-                    {
-                        needed: neededResources,
-                        available: availableResources,
-                        missing: missingResources,
-                    },
-                    'economic',
-                );
-            }
             return { handled: false };
         }
 
@@ -617,6 +627,7 @@ export function processPhaseActiveSubGoal({
             subGoal.reason = 'QUEUE_FULL';
             subGoal.blockedStep = cloneStep(resolverStep);
             subGoal.resolverStep = null;
+            subGoal.latestDetails = result.details || null;
         }
         return { handled: true };
     }
@@ -626,6 +637,7 @@ export function processPhaseActiveSubGoal({
         subGoal.reason = 'INSUFFICIENT_RESOURCES';
         subGoal.blockedStep = cloneStep(resolverStep);
         subGoal.resolverStep = null;
+        subGoal.latestDetails = result.details || null;
         return { handled: true };
     }
 
@@ -642,30 +654,30 @@ export function processPhaseActiveSubGoal({
                 ? subGoalKind.researchPrerequisite
                 : subGoalKind.buildPrerequisite;
             subGoal.reason = result.reason;
+            subGoal.latestDetails = result.details || null;
+
+            if (now - (subGoal.lastLogAt || 0) >= config.logThrottleMs) {
+                subGoal.lastLogAt = now;
+                log(
+                    'info',
+                    village,
+                    'Macro SubGoal',
+                    `Subgoal activo ${subGoal.kind}. Bloqueo encadenado detectado; nuevo resolver ${getStepSignature(nestedResolver)}.`,
+                    result.details || null,
+                    'economic',
+                );
+            }
             return { handled: true };
         }
-    }
-
-    if (subGoal.attempts >= config.maxAttemptsBeforeReset) {
-        clearPhaseActiveSubGoal({
-            phaseState,
-            now,
-            village,
-            log,
-            message: `Subgoal reiniciado tras ${subGoal.attempts} intentos sin resolver.`,
-            status: 'max_attempts_reached',
-            config,
-        });
-        return { handled: false };
     }
 
     if (now - (subGoal.lastLogAt || 0) >= config.logThrottleMs) {
         subGoal.lastLogAt = now;
         log(
-            'warn',
+            'info',
             village,
             'Macro SubGoal',
-            `Subgoal ${subGoal.kind} sigue bloqueado. Ultimo rechazo: ${result.reason || 'UNKNOWN'}.`,
+            `Subgoal activo ${subGoal.kind}. Intento ${subGoal.attempts} sin resolver; ultimo rechazo: ${result.reason || 'UNKNOWN'}.`,
             result.details || null,
             'economic',
         );
@@ -985,12 +997,7 @@ export function runPhaseLaneMatrix({
         return { handled: false, result: { success: false, reason: noActionReason }, lane: null };
     }
 
-    const orderedLanes = getRoundRobinPhaseSteps({
-        phaseState,
-        phaseId,
-        laneId: laneMatrixId,
-        steps: normalizedLanes,
-    });
+    const orderedLanes = normalizedLanes;
 
     for (const lane of orderedLanes) {
         const result = lane.execute() || { success: false, reason: noActionReason };
@@ -1030,6 +1037,61 @@ export function getRoundRobinPhaseSteps({
         ...orderedSteps.slice(normalizedPointer),
         ...orderedSteps.slice(0, normalizedPointer),
     ];
+}
+
+function getRecruitmentStepCategory(step) {
+    const raw = String(step?.unitType || step?.unitId || '').toLowerCase();
+    if (!raw) return 'unknown';
+
+    if (raw.includes('settler') || raw.includes('chief') || raw.includes('colon') || raw.includes('conquest')) {
+        return 'expansion';
+    }
+
+    if (raw.includes('ram') || raw.includes('catapult') || raw.includes('siege')) {
+        return 'siege';
+    }
+
+    if (raw.includes('scout') || raw.includes('spy')) {
+        return 'scout';
+    }
+
+    if (raw.includes('cavalry') || raw.includes('horse')) {
+        return 'cavalry';
+    }
+
+    if (raw.includes('infantry') || raw.includes('axe') || raw.includes('spear') || raw.includes('club') || raw.includes('sword')) {
+        return 'infantry';
+    }
+
+    return 'unknown';
+}
+
+export function getRecruitmentMicroStepsByPriority({
+    phaseState,
+    phaseId,
+    laneId = 'recruitment',
+    steps,
+}) {
+    const normalized = Array.isArray(steps) ? steps.filter(Boolean) : [];
+    if (normalized.length <= 1) return normalized;
+
+    const categoryOrder = ['infantry', 'scout', 'cavalry', 'siege', 'expansion', 'unknown'];
+    const grouped = new Map(categoryOrder.map(category => [category, []]));
+
+    normalized.forEach(step => {
+        const category = getRecruitmentStepCategory(step);
+        if (!grouped.has(category)) grouped.set(category, []);
+        grouped.get(category).push(step);
+    });
+
+    const sortedByPriority = categoryOrder.flatMap(category => grouped.get(category) || []);
+
+    return getRoundRobinPhaseSteps({
+        phaseState,
+        phaseId,
+        laneId,
+        steps: sortedByPriority,
+    });
 }
 
 export function getPhaseStepQueueType(step) {

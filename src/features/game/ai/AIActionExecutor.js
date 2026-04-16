@@ -119,7 +119,12 @@ class AIActionExecutor {
         } else {
             this._controller.log('fail', village, 'Investigación', `La orden para investigar ${unitId} fue rechazada. Razón: ${result.reason}`, result.details);
         }
-        return { success: result.success, reason: result.reason, unitId };
+        return {
+            success: result.success,
+            reason: result.reason,
+            unitId,
+            details: result.details || null,
+        };
     }
 
     _manageUpgradeForGoal(village, gameState, step) {
@@ -134,7 +139,12 @@ class AIActionExecutor {
         } else {
             this._controller.log('fail', village, 'Herrería', `La orden para mejorar ${unitId} fue rechazada. Razón: ${result.reason}`, result.details);
         }
-        return { success: result.success, reason: result.reason };
+        return {
+            success: result.success,
+            reason: result.reason,
+            unitId,
+            details: result.details || null,
+        };
     }
 
     resolveUnitId(identifier) {

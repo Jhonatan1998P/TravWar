@@ -12,9 +12,9 @@ import {
     createOrRefreshPhaseSubGoal,
     getCompletedTrainingCycles,
     getPhaseStepSignature,
-    getRoundRobinPhaseSteps,
     getQueuedTrainingMs,
     getConstructionMicroStepsForVillage,
+    getRecruitmentMicroStepsByPriority,
     getSharedPhaseOneConstructionSteps,
     getSharedPhaseTwoConstructionSteps,
     handleCommonPhaseActionResult,
@@ -807,12 +807,12 @@ function runStepList({
     phaseId = null,
     laneId = null,
 }) {
-    const orderedSteps = getRoundRobinPhaseSteps({
-        phaseState,
-        phaseId,
-        laneId,
-        steps,
-    });
+    const normalizedSteps = Array.isArray(steps) ? steps.filter(Boolean) : [];
+    const shouldUseRecruitmentPriority = String(laneId || '').includes('recruitment')
+        && normalizedSteps.some(step => step?.type === 'units' || step?.type === 'proportional_units');
+    const orderedSteps = shouldUseRecruitmentPriority
+        ? getRecruitmentMicroStepsByPriority({ phaseState, phaseId, laneId, steps: normalizedSteps })
+        : normalizedSteps;
 
     return runPriorityStepList({
         steps: orderedSteps,
@@ -840,15 +840,8 @@ function runConstructionStepList({
         getEffectiveBuildingLevel: getEffectiveBuildingTypeLevel,
     });
 
-    const orderedSteps = getRoundRobinPhaseSteps({
-        phaseState,
-        phaseId,
-        laneId,
-        steps: microSteps,
-    });
-
     return runPriorityStepList({
-        steps: orderedSteps,
+        steps: microSteps,
         executeStep,
         noActionReason,
         shouldAttemptStep,
@@ -862,6 +855,7 @@ function createCycleMicroRecruitmentStep(unitType, extra = {}) {
         unitType,
         countMode: 'cycle_batch',
         cycleCount: 1,
+        allowBudgetBorrow: true,
         ...extra,
     };
 }

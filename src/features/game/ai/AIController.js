@@ -100,6 +100,7 @@ const ACTION_LABELS = Object.freeze({
     'Movimiento': 'Movimiento',
     'Comercio': 'Comercio',
     'Presupuesto Ciclo': 'Presupuesto Ciclo',
+    'Prestamo Presupuesto': 'Prestamo Presupuesto',
 });
 
 const LOG_CATEGORY_LABELS = Object.freeze({
@@ -127,6 +128,9 @@ const REASON_LABELS = Object.freeze({
     ROMAN_RESOURCE_QUEUE_FULL: 'cola romana de recursos llena',
     ROMAN_INFRA_QUEUE_FULL: 'cola romana de infraestructura llena',
     RESEARCH_REQUIRED: 'investigacion requerida',
+    ALREADY_RESEARCHED: 'ya investigado',
+    ALREADY_QUEUED: 'ya en cola',
+    MAX_LEVEL_REACHED: 'nivel maximo alcanzado',
     EXPANSION_BUILDING_LOW_LEVEL: 'edificio de expansion insuficiente',
     EXPANSION_SLOTS_FULL: 'sin slots de expansion',
     THREAT_BOOST_NOT_REQUIRED: 'sin amenaza que requiera boost',
@@ -366,6 +370,7 @@ function buildAiLogDetailSummary(details) {
     const available = details.available || details?.result?.details?.available || details?.payload?.result?.details?.available;
     const required = details.required || details?.result?.details?.required || details?.payload?.result?.details?.required;
     const missing = details.missing || details?.result?.details?.missing || details?.payload?.result?.details?.missing;
+    const moved = details.moved || details?.result?.details?.moved || details?.payload?.result?.details?.moved;
 
     const neededText = formatResourceBag(needed);
     if (neededText) parts.push(`necesario={${neededText}}`);
@@ -375,6 +380,21 @@ function buildAiLogDetailSummary(details) {
 
     const missingText = formatResourceBag(missing);
     if (missingText) parts.push(`faltante={${missingText}}`);
+
+    const movedText = formatResourceBag(moved);
+    if (movedText) parts.push(`prestamo={${movedText}}`);
+
+    if (Number.isFinite(Number(details.share))) {
+        parts.push(`porcentaje_prestamo=${Math.round(Number(details.share) * 100)}%`);
+    }
+
+    if (Number.isFinite(Number(details.probability))) {
+        parts.push(`probabilidad=${Math.round(Number(details.probability) * 100)}%`);
+    }
+
+    if (Number.isFinite(Number(details.movedTotal))) {
+        parts.push(`prestamo_total=${Math.floor(Number(details.movedTotal))}`);
+    }
 
     if (required && typeof required === 'object') {
         const reqText = Object.entries(required)
@@ -506,7 +526,14 @@ class AIController {
     }
 
     log(level, village, action, message, details, category = null) {
-        const ICONS = { info: '⚙️', success: '✅', fail: '❌', warn: '⚠️', goal: '🎯', error: '🔥' };
+        const LEVEL_TAGS = {
+            info: 'INFO',
+            success: 'OK',
+            fail: 'FAIL',
+            warn: 'WARN',
+            goal: 'SPECIAL',
+            error: 'ERROR',
+        };
         const STYLES = {
             info: 'color: #6c757d;',
             success: 'color: #28a745; font-weight: bold;',
@@ -515,6 +542,17 @@ class AIController {
             goal: 'color: #6f42c1; font-weight: bold;',
             error: 'color: #E91E63; font-weight: bold;',
         };
+        const SPECIAL_ACTION_STYLES = {
+            'Macro SubGoal': 'color: #8e44ad; font-weight: 700;',
+            'Presupuesto Ciclo': 'color: #0c8599; font-weight: 700;',
+            'Inicio Ciclo Gestion': 'color: #1d4ed8; font-weight: 700;',
+            'Inicio Ciclo Militar': 'color: #0d9488; font-weight: 700;',
+            'Macro Egipcia': 'color: #b45309; font-weight: 700;',
+            'Macro Germana': 'color: #7c2d12; font-weight: 700;',
+            'Macro Fases': 'color: #4c1d95; font-weight: 700;',
+            'Macro Reclutamiento': 'color: #9a3412; font-weight: 700;',
+            'Prestamo Presupuesto': 'color: #06b6d4; font-weight: 800;',
+        };
 
         const logVillage = village || this._resolvePrimaryVillage();
         const context = this._buildLogContext(logVillage, category);
@@ -522,10 +560,14 @@ class AIController {
         const categoryLabel = LOG_CATEGORY_LABELS[context.category] || LOG_CATEGORY_LABELS.general;
         const normalizedMessage = normalizeReasonCodesInText(message);
         const detailSummary = buildAiLogDetailSummary(details);
+        const levelTag = LEVEL_TAGS[level] || 'INFO';
+        const baseStyle = STYLES[level] || STYLES.info;
+        const specialStyle = SPECIAL_ACTION_STYLES[normalizedAction] || '';
+        const finalStyle = `${baseStyle}${specialStyle ? ` ${specialStyle}` : ''}`;
 
         console.log(
-            `%c${ICONS[level] || ''} [IA ${this._ownerId}] [${categoryLabel}] [Juego ${context.gameTime}] [Etapa ${context.stage}] [${context.phase}] [${context.villageLabel}] [${normalizedAction}] :: ${normalizedMessage}`,
-            STYLES[level] || '',
+            `%c[${levelTag}] [IA ${this._ownerId}] [${categoryLabel}] [Juego ${context.gameTime}] [Etapa ${context.stage}] [${context.phase}] [${context.villageLabel}] [${normalizedAction}] :: ${normalizedMessage}`,
+            finalStyle,
         );
 
         if (detailSummary) {

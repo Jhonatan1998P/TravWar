@@ -355,6 +355,23 @@ export class VillageProcessor {
         if (!unitData || !unitData.research || unitData.research.time === 0) return { success: false, reason: 'INVALID_UNIT_ID' };
         if (this.#village.research.completed.includes(unitId)) return { success: false, reason: 'ALREADY_RESEARCHED' };
 
+        const requiredBuildings = unitData.research.requires || {};
+        for (const [buildingType, requiredLevelRaw] of Object.entries(requiredBuildings)) {
+            const requiredLevel = Math.max(1, Number(requiredLevelRaw) || 1);
+            const currentLevel = this.#village.buildings.find(building => building.type === buildingType)?.level || 0;
+            if (currentLevel < requiredLevel) {
+                return {
+                    success: false,
+                    reason: 'PREREQUISITES_NOT_MET',
+                    details: {
+                        required: { [buildingType]: requiredLevel },
+                        current: { [buildingType]: currentLevel },
+                        unitId,
+                    },
+                };
+            }
+        }
+
         // GASTO DE RECURSOS: Partición Estricta (Económico)
         const availableRes = this.#village.budgetRatio ? this.#village.budget.econ : {
             wood: this.#village.resources.wood.current,
@@ -400,8 +417,21 @@ export class VillageProcessor {
 
         const smithyLevel = this.#village.buildings.find(b => b.type === 'smithy')?.level || 0;
         const currentUpgradeLevel = this.#village.smithy.upgrades[unitId] || 0;
-        if (currentUpgradeLevel >= smithyLevel || currentUpgradeLevel >= 20) {
-            return { success: false, reason: 'MAX_LEVEL_REACHED_OR_SMITHY_TOO_LOW', details: { currentLevel: currentUpgradeLevel, smithyLevel } };
+        if (currentUpgradeLevel >= 20) {
+            return { success: false, reason: 'MAX_LEVEL_REACHED', details: { currentLevel: currentUpgradeLevel, smithyLevel } };
+        }
+
+        if (currentUpgradeLevel >= smithyLevel) {
+            const requiredSmithyLevel = Math.min(20, currentUpgradeLevel + 1);
+            return {
+                success: false,
+                reason: 'PREREQUISITES_NOT_MET',
+                details: {
+                    required: { smithy: requiredSmithyLevel },
+                    current: { smithy: smithyLevel },
+                    unitId,
+                },
+            };
         }
 
         const upgradeCost = {};
