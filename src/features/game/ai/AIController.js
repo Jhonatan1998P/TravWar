@@ -483,7 +483,7 @@ class AIController {
         this._personality = personality;
         this._race = race;
         this._archetype = archetype;
-        this._difficulty = difficulty;
+        this._difficulty = 'Pesadilla';
         this._sendCommandRaw = sendCommandCallback;
         this._sendCommand = this._dispatchCommand.bind(this);
         this._gameConfig = gameConfig;

@@ -1,5 +1,9 @@
 import { RESOURCE_FIELD_BUILDING_TYPES } from '../../core/data/constants.js';
-import { resolveUnitIdForRace } from '../utils/AIUnitUtils.js';
+import {
+    isResearchRequiredForUnitId,
+    resolveResearchUnitIdForRace,
+    resolveUnitIdForRace,
+} from '../utils/AIUnitUtils.js';
 
 export const PHASE_RECOVERABLE_BLOCK_REASONS = new Set([
     'PREREQUISITES_NOT_MET',
@@ -215,6 +219,44 @@ export function evaluateSharedPhaseTwoInfrastructure({
     return { ready, details, targets };
 }
 
+export function evaluatePhaseInfrastructureTargets({
+    village,
+    getAverageResourceFieldLevel,
+    getEffectiveBuildingLevel,
+    targets,
+}) {
+    const normalizedTargets = targets && typeof targets === 'object' ? targets : {};
+    const buildingTargets = normalizedTargets.buildingLevels && typeof normalizedTargets.buildingLevels === 'object'
+        ? normalizedTargets.buildingLevels
+        : {};
+
+    const avgFields = Number(getAverageResourceFieldLevel?.(village) || 0);
+    const fieldTarget = Math.max(0, Number(normalizedTargets.resourceFieldsLevel || 0));
+    const details = {
+        resourceFieldsLevel: avgFields,
+    };
+
+    let ready = avgFields >= fieldTarget;
+
+    for (const [buildingType, levelRaw] of Object.entries(buildingTargets)) {
+        const requiredLevel = Math.max(0, Number(levelRaw) || 0);
+        const currentLevel = Number(getEffectiveBuildingLevel?.(village, buildingType) || 0);
+        details[buildingType] = currentLevel;
+        if (requiredLevel > 0 && currentLevel < requiredLevel) {
+            ready = false;
+        }
+    }
+
+    return {
+        ready,
+        details,
+        targets: {
+            resourceFieldsLevel: fieldTarget,
+            buildingLevels: { ...buildingTargets },
+        },
+    };
+}
+
 export const PHASE_SUBGOAL_KIND = Object.freeze({
     buildPrerequisite: 'build_prerequisite',
     researchPrerequisite: 'research_prerequisite',
@@ -331,7 +373,13 @@ export function isPhaseQueueAvailable(village, queueType) {
 export function isPhaseResearchStepCompleted(village, step) {
     if (!step) return true;
     const race = village?.race || '';
+    const resolvedResearchUnitId = resolveResearchUnitIdForRace(step.unitId || step.unitType, race);
+    if (resolvedResearchUnitId && !isResearchRequiredForUnitId(resolvedResearchUnitId, race)) {
+        return true;
+    }
+
     const candidates = [
+        resolvedResearchUnitId,
         step.unitId,
         step.unitType,
         resolveUnitIdForRace(step.unitId, race),
@@ -342,6 +390,38 @@ export function isPhaseResearchStepCompleted(village, step) {
 
     const completed = Array.isArray(village?.research?.completed) ? village.research.completed : [];
     return candidates.some(unitId => completed.includes(unitId));
+}
+
+export function resolvePhaseRequirementUnitId(village, identifier) {
+    if (!identifier) return null;
+    const race = village?.race || '';
+    return resolveResearchUnitIdForRace(identifier, race)
+        || resolveUnitIdForRace(identifier, race)
+        || identifier;
+}
+
+export function isPhaseResearchRequirementMet(village, identifier) {
+    const unitId = resolvePhaseRequirementUnitId(village, identifier);
+    if (!unitId) return false;
+
+    const race = village?.race || '';
+    if (!isResearchRequiredForUnitId(unitId, race)) {
+        return true;
+    }
+
+    const completed = Array.isArray(village?.research?.completed) ? village.research.completed : [];
+    return completed.includes(unitId);
+}
+
+export function isPhaseUpgradeRequirementMet(village, identifier, targetLevel) {
+    const requiredLevel = Math.max(0, Number(targetLevel) || 0);
+    if (requiredLevel <= 0) return true;
+
+    const race = village?.race || '';
+    const unitId = resolveUnitIdForRace(identifier, race) || identifier;
+    if (!unitId) return false;
+
+    return (village?.smithy?.upgrades?.[unitId] || 0) >= requiredLevel;
 }
 
 export function normalizePhaseSubGoalKind(kind, subGoalKind = PHASE_SUBGOAL_KIND) {
@@ -771,7 +851,7 @@ export function handleCommonPhaseActionResult({
 
 export function getDifficultyTemplate(templateByDifficulty, difficulty, fallbackKey = 'Pesadilla') {
     if (!templateByDifficulty || typeof templateByDifficulty !== 'object') return null;
-    return templateByDifficulty[difficulty] || templateByDifficulty[fallbackKey] || null;
+    return templateByDifficulty[fallbackKey] || null;
 }
 
 export function createPhaseTransition(from, to, reason, at) {

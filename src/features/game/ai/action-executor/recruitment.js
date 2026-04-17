@@ -11,11 +11,7 @@ const SIEGE_TARGET_RAM_RATIO = 0.7;
 const EXCHANGE_RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
 const RECRUITMENT_BUDGET_BORROW_PROBABILITY = 0.1;
 const RECRUITMENT_BUDGET_BORROW_ECON_SHARE = 0.25;
-const RECRUITMENT_EXCHANGE_PROBABILITY_BY_DIFFICULTY = Object.freeze({
-    normal: 0.1,
-    dificil: 0.15,
-    pesadilla: 0.25,
-});
+const RECRUITMENT_EXCHANGE_PROBABILITY = 0.25;
 
 function createEmptyRecruitmentExchangeKpi() {
     return {
@@ -144,18 +140,8 @@ function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
 }
 
-function normalizeDifficultyKey(difficulty) {
-    return String(difficulty || 'Pesadilla')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .toLowerCase()
-        .trim();
-}
-
 function getRecruitmentExchangeProbability(difficulty) {
-    const key = normalizeDifficultyKey(difficulty);
-    return RECRUITMENT_EXCHANGE_PROBABILITY_BY_DIFFICULTY[key]
-        ?? RECRUITMENT_EXCHANGE_PROBABILITY_BY_DIFFICULTY.pesadilla;
+    return RECRUITMENT_EXCHANGE_PROBABILITY;
 }
 
 function getBudgetTotalResources(budget) {

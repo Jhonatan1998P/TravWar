@@ -1,5 +1,10 @@
 // RUTA: js/ai/AIActionExecutor.js
-import { getTrainingBuildingForUnitId, resolveUnitIdForRace } from './utils/AIUnitUtils.js';
+import {
+    getTrainingBuildingForUnitId,
+    isResearchRequiredForUnitId,
+    resolveResearchUnitIdForRace,
+    resolveUnitIdForRace,
+} from './utils/AIUnitUtils.js';
 import { getResourceTypeFromStep, manageConstructionForGoal } from './action-executor/construction.js';
 import { manageProportionalRecruitment, manageRecruitmentForGoal } from './action-executor/recruitment.js';
 import { executeDefensiveStance, shouldEndDefensiveStance } from './action-executor/responses.js';
@@ -102,8 +107,12 @@ class AIActionExecutor {
     }
 
     _manageResearchForGoal(village, gameState, step) {
-        const unitId = this.resolveUnitId(step.unitType);
+        const unitId = this.resolveResearchUnitId(step.unitId || step.unitType);
         if (!unitId) return { success: false, reason: 'INVALID_UNIT_ID' };
+
+        if (!isResearchRequiredForUnitId(unitId, this._controller.getRace())) {
+            return { success: true, reason: 'ALREADY_RESEARCHED', unitId };
+        }
 
         if (village.research.completed.includes(unitId)) {
             return { success: true, reason: 'ALREADY_RESEARCHED', unitId };
@@ -149,6 +158,10 @@ class AIActionExecutor {
 
     resolveUnitId(identifier) {
         return resolveUnitIdForRace(identifier, this._controller.getRace());
+    }
+
+    resolveResearchUnitId(identifier) {
+        return resolveResearchUnitIdForRace(identifier, this._controller.getRace());
     }
 
     getTrainingBuildingForUnit(unitId) {

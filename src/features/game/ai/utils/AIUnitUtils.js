@@ -16,6 +16,19 @@ function getTroopsForRace(race) {
     return gameData.units[race]?.troops || [];
 }
 
+function isResearchableUnit(unitData) {
+    if (!unitData?.research || typeof unitData.research !== 'object') return false;
+    return Number(unitData.research.time || 0) > 0;
+}
+
+function preferResearchableCandidates(candidates) {
+    const normalizedCandidates = Array.isArray(candidates) ? candidates.filter(Boolean) : [];
+    if (normalizedCandidates.length === 0) return [];
+
+    const researchable = normalizedCandidates.filter(isResearchableUnit);
+    return researchable.length > 0 ? researchable : normalizedCandidates;
+}
+
 export function getUnitTotalCost(unitData) {
     if (!unitData?.cost) return 0;
     return (unitData.cost.wood || 0) + (unitData.cost.stone || 0) + (unitData.cost.iron || 0) + (unitData.cost.food || 0);
@@ -62,8 +75,75 @@ export function resolveUnitIdForRace(identifier, race) {
     const directMatch = troops.find(t => t.id === identifier);
     if (directMatch) return directMatch.id;
 
-    const findBestUnit = (filterFn, scoreFn) => {
+    const findBestUnit = (filterFn, scoreFn, options = {}) => {
         const candidates = troops.filter(filterFn);
+        const scopedCandidates = options.preferResearchable
+            ? preferResearchableCandidates(candidates)
+            : candidates;
+
+        if (scopedCandidates.length === 0) return undefined;
+        if (scopedCandidates.length === 1) return scopedCandidates[0].id;
+        return scopedCandidates.reduce((best, current) => scoreFn(current) > scoreFn(best) ? current : best).id;
+    };
+
+    const findBestByRolePriority = (unitType, primaryRoles, secondaryRoles, scoreFn, options = {}) => {
+        const primary = findBestUnit(
+            troop => troop.type === unitType && primaryRoles.includes(troop.role),
+            scoreFn,
+            options,
+        );
+        if (primary) return primary;
+
+        const secondary = findBestUnit(
+            troop => troop.type === unitType && secondaryRoles.includes(troop.role),
+            scoreFn,
+            options,
+        );
+        if (secondary) return secondary;
+
+        return findBestUnit(troop => troop.type === unitType, scoreFn, options);
+    };
+
+    const defensiveScore = troop => getEfficiencyScore(troop, getDefensiveQuality);
+    const offensiveScore = troop => getEfficiencyScore(troop, getOffensiveQuality);
+
+    const preferResearchableOptions = { preferResearchable: true };
+
+    switch (identifier) {
+        case 'defensive_infantry':
+            return findBestByRolePriority('infantry', ['defensive'], ['versatile'], defensiveScore, preferResearchableOptions);
+        case 'offensive_infantry':
+            return findBestByRolePriority('infantry', ['offensive'], ['versatile'], offensiveScore, preferResearchableOptions);
+        case 'defensive_cavalry':
+            return findBestByRolePriority('cavalry', ['defensive'], ['versatile'], defensiveScore, preferResearchableOptions);
+        case 'offensive_cavalry':
+            return findBestByRolePriority('cavalry', ['offensive'], ['versatile'], offensiveScore, preferResearchableOptions);
+        case 'siege':
+            return troops.find(t => t.type === 'siege')?.id;
+        case 'ram':
+            return troops.find(t => t.type === 'siege' && t.id.includes('ram'))?.id;
+        case 'catapult':
+            return troops.find(t => t.type === 'siege' && (t.id.includes('catapult') || t.id.includes('trebuchet')))?.id;
+        case 'settler':
+            return troops.find(t => t.type === 'settler')?.id;
+        case 'chief':
+            return troops.find(t => t.type === 'chief')?.id;
+        case 'scout':
+            return troops.find(t => t.type === 'scout')?.id;
+        default:
+            return troops.find(t => t.id === identifier)?.id;
+    }
+}
+
+export function resolveResearchUnitIdForRace(identifier, race) {
+    const troops = getTroopsForRace(race);
+    if (troops.length === 0 || !identifier) return undefined;
+
+    const directMatch = troops.find(t => t.id === identifier);
+    if (directMatch && isResearchableUnit(directMatch)) return directMatch.id;
+
+    const findBestUnit = (filterFn, scoreFn) => {
+        const candidates = troops.filter(troop => filterFn(troop) && isResearchableUnit(troop));
         if (candidates.length === 0) return undefined;
         if (candidates.length === 1) return candidates[0].id;
         return candidates.reduce((best, current) => scoreFn(current) > scoreFn(best) ? current : best).id;
@@ -88,30 +168,51 @@ export function resolveUnitIdForRace(identifier, race) {
     const defensiveScore = troop => getEfficiencyScore(troop, getDefensiveQuality);
     const offensiveScore = troop => getEfficiencyScore(troop, getOffensiveQuality);
 
+    let resolved = undefined;
     switch (identifier) {
         case 'defensive_infantry':
-            return findBestByRolePriority('infantry', ['defensive'], ['versatile'], defensiveScore);
+            resolved = findBestByRolePriority('infantry', ['defensive'], ['versatile'], defensiveScore);
+            break;
         case 'offensive_infantry':
-            return findBestByRolePriority('infantry', ['offensive'], ['versatile'], offensiveScore);
+            resolved = findBestByRolePriority('infantry', ['offensive'], ['versatile'], offensiveScore);
+            break;
         case 'defensive_cavalry':
-            return findBestByRolePriority('cavalry', ['defensive'], ['versatile'], defensiveScore);
+            resolved = findBestByRolePriority('cavalry', ['defensive'], ['versatile'], defensiveScore);
+            break;
         case 'offensive_cavalry':
-            return findBestByRolePriority('cavalry', ['offensive'], ['versatile'], offensiveScore);
+            resolved = findBestByRolePriority('cavalry', ['offensive'], ['versatile'], offensiveScore);
+            break;
         case 'siege':
-            return troops.find(t => t.type === 'siege')?.id;
+            resolved = findBestUnit(troop => troop.type === 'siege', offensiveScore);
+            break;
         case 'ram':
-            return troops.find(t => t.type === 'siege' && t.id.includes('ram'))?.id;
+            resolved = findBestUnit(troop => troop.type === 'siege' && troop.role === 'ram', offensiveScore);
+            break;
         case 'catapult':
-            return troops.find(t => t.type === 'siege' && (t.id.includes('catapult') || t.id.includes('trebuchet')))?.id;
+            resolved = findBestUnit(troop => troop.type === 'siege' && troop.role === 'catapult', offensiveScore);
+            break;
         case 'settler':
-            return troops.find(t => t.type === 'settler')?.id;
+            resolved = findBestUnit(troop => troop.type === 'settler', offensiveScore);
+            break;
         case 'chief':
-            return troops.find(t => t.type === 'chief')?.id;
+            resolved = findBestUnit(troop => troop.type === 'chief', offensiveScore);
+            break;
         case 'scout':
-            return troops.find(t => t.type === 'scout')?.id;
+            resolved = findBestUnit(troop => troop.type === 'scout', offensiveScore);
+            break;
         default:
-            return troops.find(t => t.id === identifier)?.id;
+            resolved = troops.find(troop => troop.id === identifier && isResearchableUnit(troop))?.id;
+            break;
     }
+
+    return resolved || resolveUnitIdForRace(identifier, race);
+}
+
+export function isResearchRequiredForUnitId(unitId, race) {
+    if (!unitId || !race) return false;
+    const unitData = getTroopsForRace(race).find(unit => unit.id === unitId);
+    if (!unitData) return false;
+    return isResearchableUnit(unitData);
 }
 
 export function getTrainingBuildingForUnitId(unitId, race) {

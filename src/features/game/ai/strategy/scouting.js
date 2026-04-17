@@ -73,7 +73,7 @@ export function analyzeEspionageHistory(gameState, targetId, myOwnerId) {
 
 export function dispatchSpies(forces, target, baseCount, log, reason, isRetry = false, lastCount = 0) {
     let countNeeded = baseCount;
-    let mode = 'Normal';
+    let mode = 'Base';
 
     if (isRetry) {
         mode = 'Venganza';

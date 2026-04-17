@@ -47,22 +47,6 @@ export const EGYPTIAN_PHASE_IDS = Object.freeze({
 });
 
 const PHASE_TEMPLATE_BY_DIFFICULTY = Object.freeze({
-    Normal: {
-        phase1: { ratio: { econ: 0.7, mil: 0.3 } },
-        phase2: { ratio: { econ: 0.65, mil: 0.35 } },
-        phase3: { ratio: { econ: 0.72, mil: 0.28 } },
-        phase4: { ratio: { econ: 0.64, mil: 0.36 } },
-        phase5: { ratio: { econ: 0.6, mil: 0.4 } },
-        phase6: { ratio: { econ: 0.54, mil: 0.46 } },
-    },
-    Dificil: {
-        phase1: { ratio: { econ: 0.7, mil: 0.3 } },
-        phase2: { ratio: { econ: 0.65, mil: 0.35 } },
-        phase3: { ratio: { econ: 0.64, mil: 0.36 } },
-        phase4: { ratio: { econ: 0.56, mil: 0.44 } },
-        phase5: { ratio: { econ: 0.52, mil: 0.48 } },
-        phase6: { ratio: { econ: 0.46, mil: 0.54 } },
-    },
     Pesadilla: {
         phase1: { ratio: { econ: 0.7, mil: 0.3 } },
         phase2: { ratio: { econ: 0.65, mil: 0.35 } },
