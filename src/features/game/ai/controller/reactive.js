@@ -37,9 +37,9 @@ function getDodgeConfig(gameConfig) {
     };
 }
 
-function getCounterConfig(gameConfig) {
+function getCounterConfig(gameConfig, doctrine = null) {
     const cfg = gameConfig?.aiReactive?.counterattack || {};
-    return {
+    const resolved = {
         windowTtlMs: cfg.windowTtlMs ?? DEFAULT_COUNTER_CONFIG.windowTtlMs,
         retaliationCooldownMs: cfg.retaliationCooldownMs ?? DEFAULT_COUNTER_CONFIG.retaliationCooldownMs,
         threatLookaheadMs: cfg.threatLookaheadMs ?? DEFAULT_COUNTER_CONFIG.threatLookaheadMs,
@@ -49,6 +49,29 @@ function getCounterConfig(gameConfig) {
         maxPunitiveSiegeRatio: cfg.maxPunitiveSiegeRatio ?? DEFAULT_COUNTER_CONFIG.maxPunitiveSiegeRatio,
         minCounterTroops: cfg.minCounterTroops ?? DEFAULT_COUNTER_CONFIG.minCounterTroops,
     };
+
+    if (!doctrine?.counter) {
+        return resolved;
+    }
+
+    const doctrineCounter = doctrine.counter;
+    if (Number.isFinite(doctrineCounter.minResidualDefenseRatio)) {
+        resolved.minResidualDefenseRatio = doctrineCounter.minResidualDefenseRatio;
+    }
+    if (Number.isFinite(doctrineCounter.maxCounterpressureRatio)) {
+        resolved.maxCounterpressureRatio = doctrineCounter.maxCounterpressureRatio;
+    }
+    if (Number.isFinite(doctrineCounter.maxCounterattackRatio)) {
+        resolved.maxCounterattackRatio = doctrineCounter.maxCounterattackRatio;
+    }
+    if (Number.isFinite(doctrineCounter.maxPunitiveSiegeRatio)) {
+        resolved.maxPunitiveSiegeRatio = doctrineCounter.maxPunitiveSiegeRatio;
+    }
+    if (Number.isFinite(doctrineCounter.minCounterTroops)) {
+        resolved.minCounterTroops = doctrineCounter.minCounterTroops;
+    }
+
+    return resolved;
 }
 
 function clamp01(value) {
@@ -117,22 +140,45 @@ function getVillageStrategicValueScore(village, race) {
     return score;
 }
 
-function shouldAllowFullDodge({ evaluation, targetVillage, race, gameConfig }) {
+function shouldAllowFullDodge({ evaluation, targetVillage, race, gameConfig, doctrine }) {
     const dodgeConfig = getDodgeConfig(gameConfig);
     const strategicValueScore = getVillageStrategicValueScore(targetVillage, race);
+    const roleScore = getRoleCompositionScore(targetVillage.unitsInVillage || {}, race);
     const lossSeverityOrder = LOSS_SEVERITY_ORDER[evaluation.projectedLossSeverity] ?? LOSS_SEVERITY_ORDER.low;
-    const requiredSeverityOrder = LOSS_SEVERITY_ORDER[dodgeConfig.fullDodgeMinLossSeverity] ?? LOSS_SEVERITY_ORDER.high;
+    const requiredSeverityName = doctrine?.fullDodgeMinLossSeverity || dodgeConfig.fullDodgeMinLossSeverity;
+    const requiredSeverityOrder = LOSS_SEVERITY_ORDER[requiredSeverityName] ?? LOSS_SEVERITY_ORDER.high;
+    const maxStrategicScore = Number.isFinite(doctrine?.fullDodgeMaxStrategicScore)
+        ? doctrine.fullDodgeMaxStrategicScore
+        : dodgeConfig.fullDodgeMaxStrategicScore;
 
     const clearDefeat = !evaluation.canHoldWithReinforcements;
     const severeLosses = lossSeverityOrder >= requiredSeverityOrder;
-    const acceptableStrategicLoss = strategicValueScore <= dodgeConfig.fullDodgeMaxStrategicScore;
+    const offensiveCorePresent = roleScore.offensiveRatio >= (doctrine?.preserveOffenseRatio || 0.62);
+    const acceptableStrategicLoss = strategicValueScore <= maxStrategicScore;
+
+    let allow = clearDefeat && severeLosses && acceptableStrategicLoss;
+
+    if (!allow && doctrine?.id === 'germanic_reactive') {
+        const highThreat = evaluation.threatLevel === 'high' || evaluation.threatLevel === 'critical';
+        const eligibleByCore = doctrine.fullDodgeAllowForOffenseCore && offensiveCorePresent && highThreat;
+        allow = clearDefeat && severeLosses && (acceptableStrategicLoss || eligibleByCore);
+    }
+
+    if (doctrine?.id === 'egyptian_reactive') {
+        const criticalThreat = evaluation.threatType === 'conquest_attack'
+            || evaluation.threatType === 'siege_attack'
+            || evaluation.projectedLossSeverity === 'critical';
+        allow = allow && criticalThreat;
+    }
 
     return {
-        allow: clearDefeat && severeLosses && acceptableStrategicLoss,
+        allow,
         strategicValueScore,
         clearDefeat,
         severeLosses,
         acceptableStrategicLoss,
+        offensiveCorePresent,
+        doctrineId: doctrine?.id || 'unknown',
     };
 }
 
@@ -155,6 +201,40 @@ function collectTroopsByPriority(village, race, priorityGroups) {
 
     orderedCandidates.sort((a, b) => a.groupIndex - b.groupIndex);
     return orderedCandidates;
+}
+
+function splitTroopsByPriorityRatio({ village, race, dodgeRatio, minGarrisonUnits, priorityGroups }) {
+    const allTroops = toPositiveTroopMap(village.unitsInVillage || {});
+    const totalUnits = getTroopCount(allTroops);
+    const targetDodgeUnits = Math.floor(totalUnits * dodgeRatio);
+    const maxDodgeUnits = Math.max(0, totalUnits - minGarrisonUnits);
+    const effectiveDodgeUnits = Math.min(targetDodgeUnits, maxDodgeUnits);
+    const troopsToDodge = {};
+
+    const candidates = collectTroopsByPriority(village, race, priorityGroups);
+
+    let selected = 0;
+    for (const candidate of candidates) {
+        if (selected >= effectiveDodgeUnits) break;
+        const remaining = effectiveDodgeUnits - selected;
+        const take = Math.min(candidate.count, remaining);
+        addTroopCount(troopsToDodge, candidate.unitId, take);
+        selected += take;
+    }
+
+    return {
+        troopsToDodge: toPositiveTroopMap(troopsToDodge),
+        troopsToHold: subtractTroops(allTroops, troopsToDodge),
+        targetDodgeUnits: effectiveDodgeUnits,
+    };
+}
+
+function isConquestUnit(unitData) {
+    if (!unitData) return false;
+    return unitData.type === 'chief'
+        || unitData.type === 'settler'
+        || unitData.role === 'conquest'
+        || unitData.role === 'colonization';
 }
 
 function splitTroopsForOffensivePartialDodge(village, race, gameConfig) {
@@ -256,7 +336,65 @@ function splitTroopsForHybridPartialDodge(village, race, gameConfig) {
     };
 }
 
-function buildDodgeTroopPlan({ targetVillage, race, posture, responseType, evaluation, gameConfig }) {
+function splitTroopsForGermanicPartialDodge(village, race, evaluation, gameConfig) {
+    const dodgeConfig = getDodgeConfig(gameConfig);
+    const roleScore = getRoleCompositionScore(village.unitsInVillage || {}, race);
+    const severeThreat = evaluation.threatLevel === 'high'
+        || evaluation.threatLevel === 'critical'
+        || evaluation.threatType === 'siege_attack'
+        || evaluation.threatType === 'conquest_attack';
+    const baseRatio = severeThreat ? 0.82 : 0.72;
+    const offenseBias = roleScore.offensiveRatio >= 0.62 ? 0.06 : 0;
+    const dodgeRatio = Math.min(0.92, Math.max(baseRatio + offenseBias, dodgeConfig.offensivePartialRatio));
+
+    return {
+        ...splitTroopsByPriorityRatio({
+            village,
+            race,
+            dodgeRatio,
+            minGarrisonUnits: Math.max(10, Math.floor(dodgeConfig.minGarrisonUnits * 0.6)),
+            priorityGroups: [
+                unit => isConquestUnit(unit),
+                unit => unit.type === 'siege' || unit.role === 'catapult' || unit.role === 'ram',
+                unit => unit.role === 'offensive',
+                unit => unit.type === 'scout' || unit.role === 'scout',
+                unit => unit.role === 'versatile',
+                unit => unit.role === 'defensive',
+            ],
+        }),
+        planType: 'partial_germanic_core_preserve',
+    };
+}
+
+function splitTroopsForEgyptianPartialDodge(village, race, evaluation, gameConfig) {
+    const dodgeConfig = getDodgeConfig(gameConfig);
+    const roleScore = getRoleCompositionScore(village.unitsInVillage || {}, race);
+    const underHeavyPressure = evaluation.threatLevel === 'high'
+        || evaluation.threatLevel === 'critical'
+        || !evaluation.canHoldWithReinforcements;
+    const baseRatio = underHeavyPressure ? 0.48 : 0.34;
+    const offenseBias = roleScore.offensiveRatio >= 0.5 ? 0.08 : 0;
+    const dodgeRatio = Math.min(0.62, Math.max(baseRatio + offenseBias, dodgeConfig.defensivePartialRatio));
+
+    return {
+        ...splitTroopsByPriorityRatio({
+            village,
+            race,
+            dodgeRatio,
+            minGarrisonUnits: Math.max(30, dodgeConfig.minDefensiveGarrisonUnits + 12),
+            priorityGroups: [
+                unit => unit.type === 'scout' || unit.role === 'scout',
+                unit => unit.role === 'offensive' || unit.type === 'siege' || unit.role === 'catapult' || unit.role === 'ram',
+                unit => isConquestUnit(unit),
+                unit => unit.role === 'versatile',
+                unit => unit.role === 'defensive',
+            ],
+        }),
+        planType: 'partial_egyptian_guarded_dodge',
+    };
+}
+
+function buildDodgeTroopPlan({ targetVillage, race, posture, responseType, evaluation, doctrine, gameConfig }) {
     const allTroops = toPositiveTroopMap(targetVillage.unitsInVillage || {});
 
     if (responseType === 'full_dodge') {
@@ -265,6 +403,14 @@ function buildDodgeTroopPlan({ targetVillage, race, posture, responseType, evalu
             troopsToHold: {},
             planType: 'full_dodge',
         };
+    }
+
+    if (doctrine?.dodgeProfile === 'germanic') {
+        return splitTroopsForGermanicPartialDodge(targetVillage, race, evaluation, gameConfig);
+    }
+
+    if (doctrine?.dodgeProfile === 'egyptian') {
+        return splitTroopsForEgyptianPartialDodge(targetVillage, race, evaluation, gameConfig);
     }
 
     if (posture === 'offensive') {
@@ -326,6 +472,60 @@ function toTroopSubsetByRoles(troops, race, acceptedRoles = []) {
     return filtered;
 }
 
+function toTroopSubsetByPredicate(troops, race, predicate) {
+    const filtered = {};
+    for (const unitId in troops) {
+        const count = troops[unitId] || 0;
+        if (count <= 0) continue;
+        const unitData = getUnitData(race, unitId);
+        if (!unitData || !predicate(unitData, count, unitId)) continue;
+        filtered[unitId] = count;
+    }
+    return filtered;
+}
+
+function getOffensiveCoreTroops(troops, race) {
+    return toTroopSubsetByPredicate(troops, race, unit =>
+        unit.role === 'offensive'
+        || unit.role === 'catapult'
+        || unit.role === 'ram'
+        || unit.role === 'conquest'
+        || unit.role === 'colonization'
+        || unit.type === 'chief'
+        || unit.type === 'settler',
+    );
+}
+
+function buildReservedTroopsForReactiveState({ targetVillage, race, preferredResponse, doctrine, evaluation }) {
+    const allTroops = toPositiveTroopMap(targetVillage.unitsInVillage || {});
+
+    if (preferredResponse === 'full_dodge'
+        || preferredResponse === 'partial_dodge'
+        || preferredResponse === 'hold_with_reinforcements'
+        || preferredResponse === 'reinforce') {
+        return allTroops;
+    }
+
+    const threatLevel = evaluation?.threatLevel || 'none';
+    if (threatLevel === 'low' && preferredResponse === 'hold') {
+        return {};
+    }
+
+    if (doctrine?.id === 'egyptian_reactive') {
+        const defensiveCore = toTroopSubsetByRoles(allTroops, race, ['defensive', 'versatile']);
+        const strategicCore = toTroopSubsetByPredicate(allTroops, race, unit =>
+            unit.type === 'scout' || isConquestUnit(unit),
+        );
+        return toPositiveTroopMap({ ...defensiveCore, ...strategicCore });
+    }
+
+    if (evaluation?.shouldPreserveOffense) {
+        return getOffensiveCoreTroops(allTroops, race);
+    }
+
+    return toTroopSubsetByRoles(allTroops, race, ['defensive', 'versatile']);
+}
+
 function isCombatTroop(unitData) {
     if (!unitData) return false;
     return unitData.type !== 'merchant';
@@ -367,6 +567,78 @@ function getRaceDoctrinePosture(race) {
     if (race === 'gauls' || race === 'egyptians') return 'defensive';
     if (race === 'romans') return 'hybrid';
     return 'hybrid';
+}
+
+function getReactiveDoctrine(race, archetype) {
+    const isGermanic = race === 'germans' || race === 'huns' || archetype === 'rusher';
+    const isEgyptian = race === 'egyptians' || archetype === 'turtle';
+
+    if (isGermanic) {
+        return {
+            id: 'germanic_reactive',
+            preserveOffenseRatio: 0.55,
+            reinforcePreference: 'situational',
+            dodgeProfile: 'germanic',
+            fullDodgeMinLossSeverity: 'high',
+            fullDodgeMaxStrategicScore: 85,
+            fullDodgeAllowForOffenseCore: true,
+            counter: {
+                minCounterpressureVulnerability: 0.55,
+                minCounterattackVulnerability: 0.9,
+                minResidualDefenseRatio: 0.38,
+                maxCounterpressureRatio: 0.33,
+                maxCounterattackRatio: 0.5,
+                maxPunitiveSiegeRatio: 0.62,
+                minCounterTroops: 18,
+                minOffensiveCoreRetentionRatio: 0.55,
+                futureThreatResidualRatio: 0.55,
+            },
+        };
+    }
+
+    if (isEgyptian) {
+        return {
+            id: 'egyptian_reactive',
+            preserveOffenseRatio: 0.7,
+            reinforcePreference: 'high',
+            dodgeProfile: 'egyptian',
+            fullDodgeMinLossSeverity: 'critical',
+            fullDodgeMaxStrategicScore: 42,
+            fullDodgeAllowForOffenseCore: false,
+            counter: {
+                minCounterpressureVulnerability: 0.95,
+                minCounterattackVulnerability: 1.2,
+                minResidualDefenseRatio: 0.62,
+                maxCounterpressureRatio: 0.18,
+                maxCounterattackRatio: 0.3,
+                maxPunitiveSiegeRatio: 0.38,
+                minCounterTroops: 26,
+                minOffensiveCoreRetentionRatio: 0.88,
+                futureThreatResidualRatio: 0.85,
+            },
+        };
+    }
+
+    return {
+        id: 'balanced_reactive',
+        preserveOffenseRatio: 0.62,
+        reinforcePreference: 'normal',
+        dodgeProfile: 'hybrid',
+        fullDodgeMinLossSeverity: 'high',
+        fullDodgeMaxStrategicScore: 55,
+        fullDodgeAllowForOffenseCore: false,
+        counter: {
+            minCounterpressureVulnerability: 0.65,
+            minCounterattackVulnerability: 0.98,
+            minResidualDefenseRatio: 0.48,
+            maxCounterpressureRatio: 0.24,
+            maxCounterattackRatio: 0.42,
+            maxPunitiveSiegeRatio: 0.55,
+            minCounterTroops: 20,
+            minOffensiveCoreRetentionRatio: 0.7,
+            futureThreatResidualRatio: 0.65,
+        },
+    };
 }
 
 function getAttackerTroopFlags(troops, attackerRace) {
@@ -521,6 +793,9 @@ function openCounterWindow({ villageCombatState, villageId, movementId, ttlMs, r
     villageCombatState?.upsert?.(villageId, {
         counterWindowOpen: true,
         counterWindowExpiresAt: now + ttlMs,
+        counterDecisionState: 'pending',
+        counterDecisionReason: reason,
+        counterDecisionAt: now,
     }, {
         sourceMovementIds: [movementId],
         ttlMs,
@@ -536,7 +811,11 @@ function isCounterWindowAvailable(villageCombatState, villageId) {
     return state.counterWindowExpiresAt > Date.now();
 }
 
-function getCounterMode(evaluation) {
+function getCounterMode(evaluation, doctrine) {
+    if (doctrine?.id === 'egyptian_reactive') {
+        return 'counterpressure';
+    }
+
     if (evaluation.preferredResponse === 'counterattack') {
         if (evaluation.analysis?.hasSiege && evaluation.canHoldLocally) return 'punitive_siege';
         return 'counterattack';
@@ -544,21 +823,43 @@ function getCounterMode(evaluation) {
     return 'counterpressure';
 }
 
-function getCounterDispatchRatio(counterMode, gameConfig) {
-    const counterConfig = getCounterConfig(gameConfig);
+function getCounterDispatchRatio(counterMode, gameConfig, doctrine) {
+    const counterConfig = getCounterConfig(gameConfig, doctrine);
     if (counterMode === 'punitive_siege') return counterConfig.maxPunitiveSiegeRatio;
     if (counterMode === 'counterattack') return counterConfig.maxCounterattackRatio;
     return counterConfig.maxCounterpressureRatio;
 }
 
-function buildCounterTroopPlan({ targetVillage, attackerVillage, race, evaluation, gameConfig }) {
+function estimateIncomingAttackPowerLookahead({ gameState, targetVillage, ownerId, lookaheadMs, excludeMovementId = null }) {
+    const now = Date.now();
+    const windowEnd = now + lookaheadMs;
+
+    return gameState.movements.reduce((sum, movement) => {
+        if (!movement || !HOSTILE_MOVEMENT_TYPES.has(movement.type)) return sum;
+        if (movement.id === excludeMovementId) return sum;
+        if (movement.ownerId === ownerId) return sum;
+        if (!movement.targetCoords) return sum;
+        if (movement.targetCoords.x !== targetVillage.coords.x || movement.targetCoords.y !== targetVillage.coords.y) return sum;
+
+        const arrival = Number(movement.arrivalTime || 0);
+        if (arrival < now || arrival > windowEnd) return sum;
+
+        const attackerVillage = gameState.villages.find(village => village.id === movement.originVillageId);
+        const attackerRace = attackerVillage?.race || gameState.players.find(player => player.id === movement.ownerId)?.race || 'romans';
+        const attackerSmithy = attackerVillage?.smithy?.upgrades || {};
+        const power = CombatFormulas.calculateAttackPoints(movement.payload?.troops || {}, attackerRace, attackerSmithy).total;
+        return sum + power;
+    }, 0);
+}
+
+function buildCounterTroopPlan({ targetVillage, attackerVillage, race, ownerId, gameState, movementId, evaluation, doctrine, gameConfig }) {
     if (!attackerVillage) {
         return { allowed: false, reason: 'NO_TARGET', counterMode: 'counterpressure' };
     }
 
-    const counterConfig = getCounterConfig(gameConfig);
-    const counterMode = getCounterMode(evaluation);
-    const dispatchRatio = getCounterDispatchRatio(counterMode, gameConfig);
+    const counterConfig = getCounterConfig(gameConfig, doctrine);
+    const counterMode = getCounterMode(evaluation, doctrine);
+    const dispatchRatio = getCounterDispatchRatio(counterMode, gameConfig, doctrine);
     const allTroops = toPositiveTroopMap(targetVillage.unitsInVillage || {});
     const totalUnits = getTroopCount(allTroops);
 
@@ -597,14 +898,25 @@ function buildCounterTroopPlan({ targetVillage, attackerVillage, race, evaluatio
         100,
         (evaluation.attackPowerEstimate || 0) * counterConfig.minResidualDefenseRatio,
     );
+    const incomingLookaheadPower = estimateIncomingAttackPowerLookahead({
+        gameState,
+        targetVillage,
+        ownerId,
+        lookaheadMs: counterConfig.threatLookaheadMs,
+        excludeMovementId: movementId,
+    });
+    const requiredByIncoming = incomingLookaheadPower * (doctrine?.counter?.futureThreatResidualRatio || 0.6);
+    const finalRequiredResidualDefense = Math.max(requiredResidualDefense, requiredByIncoming);
 
-    if (residualDefense < requiredResidualDefense) {
+    if (residualDefense < finalRequiredResidualDefense) {
         return {
             allowed: false,
             reason: 'LOW_RESIDUAL_DEFENSE',
             counterMode,
             residualDefense,
-            requiredResidualDefense,
+            requiredResidualDefense: finalRequiredResidualDefense,
+            requiredResidualBase: requiredResidualDefense,
+            incomingLookaheadPower,
         };
     }
 
@@ -618,7 +930,9 @@ function buildCounterTroopPlan({ targetVillage, attackerVillage, race, evaluatio
     const outgoingAttackEstimate = CombatFormulas.calculateAttackPoints(selectedTroops, race, targetVillage.smithy?.upgrades || {}).total;
     const vulnerabilityRatio = outgoingAttackEstimate / Math.max(attackerDefenseEstimate, 1);
 
-    const minVulnerabilityRatio = counterMode === 'counterpressure' ? 0.6 : 0.95;
+    const minVulnerabilityRatio = counterMode === 'counterpressure'
+        ? (doctrine?.counter?.minCounterpressureVulnerability || 0.6)
+        : (doctrine?.counter?.minCounterattackVulnerability || 0.95);
     if (vulnerabilityRatio < minVulnerabilityRatio) {
         return {
             allowed: false,
@@ -631,28 +945,58 @@ function buildCounterTroopPlan({ targetVillage, attackerVillage, race, evaluatio
         };
     }
 
+    const offensiveCoreBefore = CombatFormulas.calculateAttackPoints(
+        getOffensiveCoreTroops(allTroops, race),
+        race,
+        targetVillage.smithy?.upgrades || {},
+    ).total;
+    const offensiveCoreAfter = CombatFormulas.calculateAttackPoints(
+        getOffensiveCoreTroops(remainingTroops, race),
+        race,
+        targetVillage.smithy?.upgrades || {},
+    ).total;
+    const offensiveCoreRetention = offensiveCoreBefore > 0 ? offensiveCoreAfter / offensiveCoreBefore : 1;
+    const minOffensiveCoreRetentionRatio = doctrine?.counter?.minOffensiveCoreRetentionRatio || 0.7;
+
+    if (offensiveCoreRetention < minOffensiveCoreRetentionRatio) {
+        return {
+            allowed: false,
+            reason: 'OFFENSIVE_WINDOW_COMPROMISED',
+            counterMode,
+            offensiveCoreBefore,
+            offensiveCoreAfter,
+            offensiveCoreRetention,
+            minOffensiveCoreRetentionRatio,
+        };
+    }
+
     return {
         allowed: true,
         counterMode,
         troops: selectedTroops,
         residualDefense,
-        requiredResidualDefense,
+        requiredResidualDefense: finalRequiredResidualDefense,
         outgoingAttackEstimate,
         attackerDefenseEstimate,
         vulnerabilityRatio,
+        offensiveCoreRetention,
     };
 }
 
-function evaluateImperialDefense({ targetVillage, gameState, ownerId, gameConfig, attackPower, attackerProportions, movementArrivalTime }) {
+function evaluateImperialDefense({ targetVillage, gameState, ownerId, gameConfig, attackPower, attackerProportions, movementArrivalTime, doctrine, threatType }) {
     const now = Date.now();
     const arrivalTime = movementArrivalTime || now;
     const myOtherVillages = gameState.villages.filter(village => village.ownerId === ownerId && village.id !== targetVillage.id);
+
+    const reinforcementRoles = doctrine?.id === 'germanic_reactive'
+        ? ((threatType === 'conquest_attack' || threatType === 'siege_attack') ? ['defensive', 'versatile'] : ['defensive'])
+        : ['defensive', 'versatile'];
 
     let projectedDefense = 0;
     const reinforcementPlan = [];
 
     for (const village of myOtherVillages) {
-        const defensiveTroops = toTroopSubsetByRoles(village.unitsInVillage || {}, village.race, ['defensive', 'versatile']);
+        const defensiveTroops = toTroopSubsetByRoles(village.unitsInVillage || {}, village.race, reinforcementRoles);
         if (Object.keys(defensiveTroops).length === 0) continue;
 
         const slowestSpeed = getSlowestUnitSpeed(defensiveTroops, village.race);
@@ -695,8 +1039,64 @@ function getLossSeverity(attackPower, defensePower) {
     return 'critical';
 }
 
-function chooseResponse({ threatType, posture, canHoldLocally, canHoldWithReinforcements, shouldPreserveOffense, shouldCounterattack }) {
-    if (threatType === 'conquest_attack' || threatType === 'siege_attack') {
+function chooseResponse({
+    doctrine,
+    threatType,
+    threatLevel,
+    posture,
+    canHoldLocally,
+    canHoldWithReinforcements,
+    shouldPreserveOffense,
+    shouldCounterattack,
+    projectedLossSeverity,
+}) {
+    const isSiegeOrConquest = threatType === 'conquest_attack' || threatType === 'siege_attack';
+
+    if (doctrine?.id === 'egyptian_reactive') {
+        if (canHoldLocally) {
+            if (shouldCounterattack && threatType === 'standard_attack' && projectedLossSeverity === 'low') {
+                return 'counterpressure';
+            }
+            return 'hold';
+        }
+
+        if (canHoldWithReinforcements) {
+            return 'hold_with_reinforcements';
+        }
+
+        if (isSiegeOrConquest && threatLevel === 'critical') {
+            return 'full_dodge';
+        }
+
+        return 'partial_dodge';
+    }
+
+    if (doctrine?.id === 'germanic_reactive') {
+        if (canHoldLocally) {
+            if (shouldCounterattack) {
+                return threatType === 'standard_attack' ? 'counterattack' : 'counterpressure';
+            }
+            if (projectedLossSeverity === 'critical' && shouldPreserveOffense) {
+                return 'partial_dodge';
+            }
+            return 'hold';
+        }
+
+        if (isSiegeOrConquest || threatLevel === 'high' || threatLevel === 'critical') {
+            if (canHoldWithReinforcements && !shouldPreserveOffense) {
+                return 'hold_with_reinforcements';
+            }
+            return shouldPreserveOffense ? 'full_dodge' : 'partial_dodge';
+        }
+
+        if (canHoldWithReinforcements && posture !== 'offensive') {
+            return 'hold_with_reinforcements';
+        }
+
+        return 'partial_dodge';
+    }
+
+    if (isSiegeOrConquest) {
         if (canHoldWithReinforcements) return 'hold_with_reinforcements';
         return shouldPreserveOffense ? 'full_dodge' : 'partial_dodge';
     }
@@ -725,19 +1125,27 @@ function chooseResponse({ threatType, posture, canHoldLocally, canHoldWithReinfo
     return 'partial_dodge';
 }
 
-function buildReactiveCombatContract({ targetVillage, preferredResponse, threatLevel }) {
+function buildReactiveCombatContract({ targetVillage, race, preferredResponse, threatLevel, doctrine, evaluation }) {
     const suppressByResponse = preferredResponse === 'partial_dodge'
         || preferredResponse === 'full_dodge'
         || preferredResponse === 'hold_with_reinforcements'
         || preferredResponse === 'reinforce';
     const suppressByThreat = threatLevel === 'high' || threatLevel === 'critical';
-    const offenseSuppressed = suppressByResponse || suppressByThreat;
+    const suppressByDoctrine = doctrine?.id === 'egyptian_reactive'
+        && preferredResponse === 'hold'
+        && threatLevel !== 'low';
+    const offenseSuppressed = suppressByResponse || suppressByThreat || suppressByDoctrine;
+    const reservedTroops = buildReservedTroopsForReactiveState({
+        targetVillage,
+        race,
+        preferredResponse,
+        doctrine,
+        evaluation,
+    });
 
     return {
         offenseSuppressed,
-        reservedTroops: offenseSuppressed
-            ? toPositiveTroopMap(targetVillage.unitsInVillage || {})
-            : {},
+        reservedTroops,
     };
 }
 
@@ -752,6 +1160,7 @@ export function evaluateThreatAndChooseResponse({
     attackerVillage,
 }) {
     const evaluationTime = Date.now();
+    const doctrine = getReactiveDoctrine(race, archetype);
     const attackerRace = gameState.players.find(player => player.id === movement.ownerId)?.race || 'romans';
     const attackerSmithy = attackerVillage?.smithy?.upgrades || {};
     const attackBreakdown = CombatFormulas.calculateAttackPoints(movement.payload?.troops || {}, attackerRace, attackerSmithy);
@@ -789,6 +1198,8 @@ export function evaluateThreatAndChooseResponse({
         attackPower,
         attackerProportions,
         movementArrivalTime: movement.arrivalTime,
+        doctrine,
+        threatType: threatInfo.threatType,
     });
 
     const imperialDefenseEstimate = localDefenseEstimate + imperialDefenseData.projectedDefense;
@@ -801,33 +1212,67 @@ export function evaluateThreatAndChooseResponse({
     const survivalProbability = clamp01(Math.max(localDefenseEstimate, imperialDefenseEstimate) / Math.max(attackPower, 1));
 
     const offenseWeight = roleScore.offensiveRatio;
-    const doctrinalDefensive = race === 'gauls' || race === 'egyptians';
-    const shouldPreserveOffense = posture === 'offensive' || offenseWeight >= (doctrinalDefensive ? 0.7 : 0.58);
+    const shouldPreserveOffense = posture === 'offensive' || offenseWeight >= (doctrine?.preserveOffenseRatio || 0.62);
+    const counterMinHoldRatio = doctrine?.id === 'egyptian_reactive'
+        ? 1.28
+        : doctrine?.id === 'germanic_reactive'
+            ? 1.06
+            : 1.15;
+    const counterThreatEligible = threatInfo.threatType === 'standard_attack' || threatInfo.threatType === 'light_raid';
     const shouldCounterattack = (
-        threatInfo.threatType === 'standard_attack' &&
-        posture !== 'defensive' &&
+        counterThreatEligible &&
+        (posture !== 'defensive' || doctrine?.id === 'egyptian_reactive') &&
         canHoldLocally &&
         attackPower > 0 &&
-        localDefenseEstimate >= attackPower * (doctrinalDefensive ? 1.2 : 1.05) &&
+        localDefenseEstimate >= attackPower * counterMinHoldRatio &&
+        !threatInfo.hasMultiWave &&
+        !threatInfo.hasConquest &&
+        !(threatInfo.hasSiege && doctrine?.id === 'egyptian_reactive') &&
+        !(doctrine?.id === 'egyptian_reactive' && projectedLossSeverity !== 'low') &&
         Boolean(attackerVillage)
     );
 
     const preferredResponse = chooseResponse({
+        doctrine,
         threatType: threatInfo.threatType,
+        threatLevel: threatInfo.threatLevel,
         posture,
         canHoldLocally,
         canHoldWithReinforcements,
         shouldPreserveOffense,
         shouldCounterattack,
+        projectedLossSeverity,
     });
     const contract = buildReactiveCombatContract({
         targetVillage,
+        race,
         preferredResponse,
         threatLevel: threatInfo.threatLevel,
+        doctrine,
+        evaluation: {
+            threatLevel: threatInfo.threatLevel,
+            shouldPreserveOffense,
+        },
     });
 
     const shouldPauseEconomicConstruction = threatInfo.threatLevel === 'high' || threatInfo.threatLevel === 'critical';
     const shouldBoostEmergencyRecruitment = threatInfo.threatLevel !== 'low';
+    const shouldRescoutAttacker = Boolean(attackerVillage) && (
+        threatInfo.hasMultiWave
+        || threatInfo.hasSiege
+        || threatInfo.hasConquest
+        || threatInfo.threatLevel === 'high'
+        || threatInfo.threatLevel === 'critical'
+        || attackPower >= (localDefenseEstimate * 0.8)
+    );
+    let rescoutReason = null;
+    if (shouldRescoutAttacker) {
+        if (threatInfo.hasConquest) rescoutReason = 'conquest_detected';
+        else if (threatInfo.hasSiege) rescoutReason = 'siege_detected';
+        else if (threatInfo.hasMultiWave) rescoutReason = 'multi_wave_detected';
+        else if (threatInfo.threatLevel === 'high' || threatInfo.threatLevel === 'critical') rescoutReason = 'high_threat_detected';
+        else rescoutReason = 'important_attack_defended';
+    }
 
     return {
         threatType: threatInfo.threatType,
@@ -847,6 +1292,10 @@ export function evaluateThreatAndChooseResponse({
         shouldCounterattack,
         shouldPauseEconomicConstruction,
         shouldBoostEmergencyRecruitment,
+        shouldRescoutAttacker,
+        rescoutReason,
+        doctrine,
+        doctrineId: doctrine.id,
         counterWindowOpen: false,
         counterWindowExpiresAt: null,
         projectedLocalOutcome,
@@ -884,6 +1333,8 @@ function executeDodge({ village, troopsToDodge, gameState, sendCommand, log }) {
         targetCoords: { x: targetOasis.x, y: targetOasis.y },
         troops: troopsToDodge,
         missionType: 'raid',
+    }, {
+        reactiveIntent: 'dodge',
     });
     log('success', village, 'Dodge Maneuver', `Troops sent to raid oasis at (${targetOasis.x}|${targetOasis.y}) to avoid combat.`, { troops: troopsToDodge }, 'military');
 }
@@ -902,6 +1353,8 @@ function manageReinforcements({
     gameState,
     ownerId,
     race,
+    doctrine,
+    threatType,
     gameConfig,
     sendCommand,
     log,
@@ -909,6 +1362,10 @@ function manageReinforcements({
     ignoreTravelTime = false,
 }) {
     const raceUnits = gameData.units[race]?.troops || [];
+    const reinforcementRoles = doctrine?.id === 'germanic_reactive'
+        ? ((threatType === 'conquest_attack' || threatType === 'siege_attack') ? new Set(['defensive', 'versatile']) : new Set(['defensive']))
+        : new Set(['defensive', 'versatile']);
+
     const getDefensiveTroops = units => {
         const defensive = {};
         for (const unitId in units) {
@@ -916,7 +1373,7 @@ function manageReinforcements({
             if (count <= 0) continue;
 
             const role = raceUnits.find(unit => unit.id === unitId)?.role;
-            if (role === 'defensive' || role === 'versatile') {
+            if (reinforcementRoles.has(role)) {
                 defensive[unitId] = count;
             }
         }
@@ -984,6 +1441,8 @@ function manageReinforcements({
                 targetCoords: targetVillage.coords,
                 troops,
                 missionType: 'reinforcement',
+            }, {
+                reactiveIntent: 'reinforce',
             });
         });
 
@@ -1007,14 +1466,16 @@ function launchCounterAction({
     attackerVillage,
     race,
     ownerId,
+    movementId,
     gameState,
     gameConfig,
     evaluation,
+    doctrine,
     villageCombatState,
     sendCommand,
     log,
 }) {
-    const counterConfig = getCounterConfig(gameConfig);
+    const counterConfig = getCounterConfig(gameConfig, doctrine);
 
     if (hasCriticalIncomingThreat({
         gameState,
@@ -1033,7 +1494,11 @@ function launchCounterAction({
         targetVillage,
         attackerVillage,
         race,
+        ownerId,
+        gameState,
+        movementId,
         evaluation,
+        doctrine,
         gameConfig,
     });
 
@@ -1046,11 +1511,17 @@ function launchCounterAction({
         targetCoords: attackerVillage.coords,
         troops: plan.troops,
         missionType: plan.counterMode === 'counterpressure' ? 'raid' : 'attack',
+    }, {
+        reactiveIntent: 'counter',
+        counterMode: plan.counterMode,
     });
 
     villageCombatState?.upsert?.(targetVillage.id, {
         counterWindowOpen: false,
         counterWindowExpiresAt: null,
+        counterDecisionState: 'immediate_executed',
+        counterDecisionReason: `immediate_${plan.counterMode}`,
+        counterDecisionAt: Date.now(),
     }, {
         lastDecisionReason: `counter_${plan.counterMode}_launched`,
     });
@@ -1117,10 +1588,17 @@ export function handleEspionageReact({
     }
 
     const preferredResponse = hasScouts ? 'partial_dodge' : 'full_dodge';
+    const doctrine = getReactiveDoctrine(race, null);
     const contract = buildReactiveCombatContract({
         targetVillage,
+        race,
         preferredResponse,
         threatLevel: 'low',
+        doctrine,
+        evaluation: {
+            threatLevel: 'low',
+            shouldPreserveOffense: true,
+        },
     });
 
     villageCombatState?.upsert?.(targetVillage.id, {
@@ -1141,6 +1619,8 @@ export function handleEspionageReact({
         shouldCounterattack: false,
         shouldPauseEconomicConstruction: false,
         shouldBoostEmergencyRecruitment: false,
+        shouldRescoutAttacker: false,
+        rescoutReason: null,
         counterWindowOpen: false,
         counterWindowExpiresAt: null,
         sourceMovementIds: [movement.id],
@@ -1212,6 +1692,9 @@ export function handleAttackReact({
         shouldPauseEconomicConstruction: evaluation.shouldPauseEconomicConstruction,
         shouldBoostEmergencyRecruitment: evaluation.shouldBoostEmergencyRecruitment,
         attackerVillageId: evaluation.attackerVillageId,
+        shouldRescoutAttacker: evaluation.shouldRescoutAttacker,
+        rescoutReason: evaluation.rescoutReason,
+        doctrineId: evaluation.doctrineId,
         attackerRace: evaluation.attackerRace,
         counterWindowOpen: evaluation.counterWindowOpen,
         counterWindowExpiresAt: evaluation.counterWindowExpiresAt,
@@ -1241,6 +1724,9 @@ export function handleAttackReact({
             lastIntelAt: evaluation.lastIntelAt,
             offenseSuppressed: evaluation.offenseSuppressed,
             reservedTroopsCount: getTroopCount(evaluation.reservedTroops || {}),
+            shouldRescoutAttacker: evaluation.shouldRescoutAttacker,
+            rescoutReason: evaluation.rescoutReason,
+            doctrineId: evaluation.doctrineId,
             analysis: evaluation.analysis,
         },
         'military',
@@ -1259,7 +1745,7 @@ export function handleAttackReact({
             villageCombatState,
             villageId: targetVillage.id,
             movementId: movement.id,
-            ttlMs: getCounterConfig(gameConfig).windowTtlMs,
+            ttlMs: getCounterConfig(gameConfig, evaluation.doctrine).windowTtlMs,
             reason,
         });
     };
@@ -1278,6 +1764,8 @@ export function handleAttackReact({
             gameState,
             ownerId,
             race,
+            doctrine: evaluation.doctrine,
+            threatType: evaluation.threatType,
             gameConfig,
             sendCommand,
             log,
@@ -1291,6 +1779,7 @@ export function handleAttackReact({
                 targetVillage,
                 race,
                 gameConfig,
+                doctrine: evaluation.doctrine,
             });
 
             const fallbackResponse = fullDodgePolicy.allow ? 'full_dodge' : 'partial_dodge';
@@ -1300,6 +1789,7 @@ export function handleAttackReact({
                 posture: evaluation.posture,
                 responseType: fallbackResponse,
                 evaluation,
+                doctrine: evaluation.doctrine,
                 gameConfig,
             });
 
@@ -1320,8 +1810,11 @@ export function handleAttackReact({
             }, 'military');
             const fallbackContract = buildReactiveCombatContract({
                 targetVillage,
+                race,
                 preferredResponse: fallbackResponse,
                 threatLevel: evaluation.threatLevel,
+                doctrine: evaluation.doctrine,
+                evaluation,
             });
             villageCombatState?.upsert?.(targetVillage.id, {
                 preferredResponse: fallbackResponse,
@@ -1347,6 +1840,7 @@ export function handleAttackReact({
             targetVillage,
             race,
             gameConfig,
+            doctrine: evaluation.doctrine,
         });
 
         const effectiveResponse = evaluation.preferredResponse === 'full_dodge' && !fullDodgePolicy.allow
@@ -1359,6 +1853,7 @@ export function handleAttackReact({
             posture: evaluation.posture,
             responseType: effectiveResponse,
             evaluation,
+            doctrine: evaluation.doctrine,
             gameConfig,
         });
 
@@ -1383,8 +1878,11 @@ export function handleAttackReact({
         if (effectiveResponse !== evaluation.preferredResponse) {
             const effectiveContract = buildReactiveCombatContract({
                 targetVillage,
+                race,
                 preferredResponse: effectiveResponse,
                 threatLevel: evaluation.threatLevel,
+                doctrine: evaluation.doctrine,
+                evaluation,
             });
             villageCombatState?.upsert?.(targetVillage.id, {
                 preferredResponse: effectiveResponse,
@@ -1414,6 +1912,14 @@ export function handleAttackReact({
     if (evaluation.preferredResponse === 'counterpressure' || evaluation.preferredResponse === 'counterattack') {
         const inCounterCooldown = cooldowns?.hasCounterattackCooldown?.(targetVillage.id);
         if (inCounterCooldown) {
+            villageCombatState?.upsert?.(targetVillage.id, {
+                counterDecisionState: 'none',
+                counterDecisionReason: 'counter_cooldown_active',
+                counterDecisionAt: Date.now(),
+            }, {
+                sourceMovementIds: [movement.id],
+                lastDecisionReason: 'counter_skipped_cooldown',
+            });
             log('info', targetVillage, 'Counter Reaction', 'Counter action skipped due village cooldown. Holding instead.', null, 'military');
             setBaseLocks();
             return;
@@ -1428,21 +1934,31 @@ export function handleAttackReact({
             attackerVillage,
             race,
             ownerId,
+            movementId: movement.id,
             gameState,
             gameConfig,
             evaluation,
+            doctrine: evaluation.doctrine,
             villageCombatState,
             sendCommand,
             log,
         });
 
         if (!counterResult.launched) {
+            villageCombatState?.upsert?.(targetVillage.id, {
+                counterDecisionState: counterResult.reason === 'COUNTER_WINDOW_CLOSED' ? 'none' : 'deferred_pending',
+                counterDecisionReason: `immediate_counter_blocked:${counterResult.reason}`,
+                counterDecisionAt: Date.now(),
+            }, {
+                sourceMovementIds: [movement.id],
+                lastDecisionReason: `counter_blocked_${counterResult.reason}`,
+            });
             log('warn', targetVillage, 'Counter Reaction', `Counter action blocked (${counterResult.reason}). Holding.`, counterResult.plan || null, 'military');
             setBaseLocks();
             return;
         }
 
-        cooldowns?.setCounterattackCooldown?.(targetVillage.id, getCounterConfig(gameConfig).retaliationCooldownMs, {
+        cooldowns?.setCounterattackCooldown?.(targetVillage.id, getCounterConfig(gameConfig, evaluation.doctrine).retaliationCooldownMs, {
             reason: `counter_${counterResult.plan?.counterMode || 'action'}_launched`,
             sourceMovementId: movement.id,
         });

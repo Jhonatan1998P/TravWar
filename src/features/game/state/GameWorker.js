@@ -314,7 +314,7 @@ function processMovements(currentTime) {
         aiControllers,
         maxReports: MAX_REPORTS,
         postMessage: message => self.postMessage(message),
-        createCombatEngine: () => new CombatEngine(gameState),
+        createCombatEngine: () => new CombatEngine(gameState, gameConfig),
         updateAIProfiles,
         registerOasisAttack: ({ tile, currentTime: attackTime }) => {
             registerOasisAttackStep({
@@ -355,7 +355,15 @@ function handleSettleArrival(movement) {
     originVillage.settlementsFounded = (originVillage.settlementsFounded || 0) + 1;
 
     const factory = new GameStateFactory(gameConfig);
-    const newVillage = factory.createVillageObject(`v_${Date.now()}`, 'Nueva Aldea', originVillage.race, originVillage.ownerId, targetCoords, targetTile.valleyType);
+    const newVillage = factory.createVillageObject(
+        `v_${Date.now()}`,
+        'Nueva Aldea',
+        originVillage.race,
+        originVillage.ownerId,
+        targetCoords,
+        targetTile.valleyType,
+        { startResourcesFromBaseCapacityRatio: 0.9 },
+    );
     
     let bonusToPass = 1;
     let budgetConfig = null;

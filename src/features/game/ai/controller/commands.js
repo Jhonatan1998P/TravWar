@@ -1,3 +1,5 @@
+const MAX_PRIORITY_GOAL = 'MAX_PRIORITY_GOAL';
+
 function getTargetTile(gameState, targetCoords) {
     if (!targetCoords) return null;
     const key = `${targetCoords.x}|${targetCoords.y}`;
@@ -46,6 +48,9 @@ export function executeCommands({ commands, gameState, sendCommand, log }) {
                 else missionType = parametros.mision;
 
                 const militaryIntent = resolveMilitaryIntent(command, gameState, missionType);
+                const strategicPriority = command?.meta?.priority === MAX_PRIORITY_GOAL
+                    ? 'high_value'
+                    : (command?.meta?.strategicTargetType ? 'normal' : null);
 
                 const result = sendCommand('send_movement', {
                     originVillageId: villageId,
@@ -55,6 +60,9 @@ export function executeCommands({ commands, gameState, sendCommand, log }) {
                     catapultTargets: parametros.catapultTargets || [],
                 }, {
                     militaryIntent,
+                    strategicPriority,
+                    strategicTargetType: command?.meta?.strategicTargetType || null,
+                    strategicReason: command?.meta?.reason || null,
                 });
 
                 if (result.success) {

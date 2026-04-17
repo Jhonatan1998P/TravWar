@@ -154,6 +154,8 @@ const BASE_LOCK_DURATIONS_MS = Object.freeze({
     reactionCooldownByMovement: 20000,
     counterattackCooldownByVillage: 45000,
     constructionEmergencyLockByVillage: 30000,
+    strategicCommitmentByVillage: 60000,
+    strategicCommitmentHighValueByVillage: 90000,
 });
 
 const COMMAND_LAYER_PRIORITY = Object.freeze({
@@ -219,8 +221,13 @@ function createDefaultVillageCombatState(villageId, now = Date.now()) {
         shouldPauseEconomicConstruction: false,
         shouldBoostEmergencyRecruitment: false,
         attackerVillageId: null,
+        shouldRescoutAttacker: false,
+        rescoutReason: null,
         counterWindowOpen: false,
         counterWindowExpiresAt: null,
+        counterDecisionState: 'none',
+        counterDecisionReason: null,
+        counterDecisionAt: null,
         expiresAt: now + DEFAULT_COMBAT_STATE_TTL_MS,
         sourceMovementIds: [],
         lastDecisionReason: 'initialized',
@@ -268,14 +275,73 @@ function getPhaseLabel(race, phaseId) {
     return labels[phaseId] || 'Fase no definida';
 }
 
-function getEgyptianPhaseKey(phaseId) {
-    if (phaseId === EGYPTIAN_PHASE_IDS.phase1) return 'phase1';
-    if (phaseId === EGYPTIAN_PHASE_IDS.phase2) return 'phase2';
-    if (phaseId === EGYPTIAN_PHASE_IDS.phase3) return 'phase3';
-    if (phaseId === EGYPTIAN_PHASE_IDS.phase4) return 'phase4';
-    if (phaseId === EGYPTIAN_PHASE_IDS.phase5) return 'phase5';
-    if (phaseId === EGYPTIAN_PHASE_IDS.phase6) return 'phase6';
-    return null;
+const PHASE_KEY_BY_RACE = Object.freeze({
+    germans: Object.freeze({
+        [GERMAN_PHASE_IDS.phase1]: 'phase1',
+        [GERMAN_PHASE_IDS.phase2]: 'phase2',
+        [GERMAN_PHASE_IDS.phase3]: 'phase3',
+        [GERMAN_PHASE_IDS.phase4]: 'phase4',
+        [GERMAN_PHASE_IDS.phase5]: 'phase5',
+    }),
+    egyptians: Object.freeze({
+        [EGYPTIAN_PHASE_IDS.phase1]: 'phase1',
+        [EGYPTIAN_PHASE_IDS.phase2]: 'phase2',
+        [EGYPTIAN_PHASE_IDS.phase3]: 'phase3',
+        [EGYPTIAN_PHASE_IDS.phase4]: 'phase4',
+        [EGYPTIAN_PHASE_IDS.phase5]: 'phase5',
+        [EGYPTIAN_PHASE_IDS.phase6]: 'phase6',
+    }),
+});
+
+const PHASE_DONE_ID_BY_RACE = Object.freeze({
+    germans: GERMAN_PHASE_IDS.phaseDone,
+    egyptians: EGYPTIAN_PHASE_IDS.phaseDone,
+});
+
+const PHASE_CYCLE_STATUS_RESOLVER_BY_RACE = Object.freeze({
+    germans: getGermanPhaseCycleStatus,
+    egyptians: getEgyptianPhaseCycleStatus,
+});
+
+const PHASE_CYCLE_DETAIL_MAP_BY_RACE = Object.freeze({
+    germans: Object.freeze([
+        ['offensiveInfantry', 'ofInf'],
+        ['offensiveCavalry', 'ofCav'],
+        ['defensiveInfantry', 'defInf'],
+        ['scout', 'scout'],
+        ['ram', 'ram'],
+        ['catapult', 'cata'],
+        ['expansion', 'exp'],
+    ]),
+    egyptians: Object.freeze([
+        ['defensiveInfantry', 'defInf'],
+        ['defensiveCavalry', 'defCav'],
+        ['offensiveInfantry', 'ofInf'],
+        ['offensiveCavalry', 'ofCav'],
+        ['scout', 'scout'],
+        ['siege', 'siege'],
+        ['expansion', 'exp'],
+    ]),
+});
+
+const PHASE_CYCLE_SKIP_KEYS_BY_RACE = Object.freeze({
+    germans: Object.freeze(['phase1']),
+    egyptians: Object.freeze([]),
+});
+
+function getPhaseKeyForRace(race, phaseId) {
+    return PHASE_KEY_BY_RACE[race]?.[phaseId] || null;
+}
+
+function shouldSkipPhaseCycleLogForRace(race, phaseKey) {
+    return (PHASE_CYCLE_SKIP_KEYS_BY_RACE[race] || []).includes(phaseKey);
+}
+
+function formatPhaseCycleDetail(cycleStatus, detailMap = []) {
+    return (detailMap || [])
+        .filter(([key]) => (cycleStatus?.targets?.[key] || 0) > 0)
+        .map(([key, label]) => `${label}:${cycleStatus?.cycles?.[key] || 0}/${cycleStatus?.targets?.[key] || 0}`)
+        .join(' | ');
 }
 
 function createDefaultOasisTelemetry() {
@@ -490,6 +556,7 @@ class AIController {
     _reactionCooldownByMovement = new Map();
     _counterattackCooldownByVillage = new Map();
     _constructionEmergencyLockByVillage = new Map();
+    _strategicCommitmentByVillage = new Map();
     _commandWindowByVillage = new Map();
     _lastKnownGameState = null;
     _phaseEngineRollout = resolvePhaseEngineRolloutFlags(null);
@@ -640,6 +707,12 @@ class AIController {
             : 'GoalManager legacy (rollout desactivado)';
     }
 
+    _getPhaseStateMapForRace(race) {
+        if (race === 'germans') return this._germanPhaseStates;
+        if (race === 'egyptians') return this._egyptianPhaseStates;
+        return null;
+    }
+
     handleGameNotification(notification, gameState) {
         this._lastKnownGameState = gameState;
 
@@ -659,52 +732,31 @@ class AIController {
         const village = gameState?.villages?.find(candidate => candidate.id === payload.villageId);
         if (!village) return;
 
-        if (this._race === 'germans') {
-            const phaseState = this._germanPhaseStates.get(village.id);
-            if (!phaseState || !phaseState.activePhaseId) return;
+        const phaseStateMap = this._getPhaseStateMapForRace(this._race);
+        if (!phaseStateMap) return;
 
-            const phaseKey = phaseState.activePhaseId;
-            if (!phaseKey || phaseKey === GERMAN_PHASE_IDS.phaseDone || phaseKey === GERMAN_PHASE_IDS.phase1) return;
-
-            const cycleStatus = getGermanPhaseCycleStatus(phaseState, this._difficulty, phaseKey);
-            const detailMap = [
-                ['offensiveInfantry', 'ofInf'],
-                ['offensiveCavalry', 'ofCav'],
-                ['defensiveInfantry', 'defInf'],
-                ['scout', 'scout'],
-                ['ram', 'ram'],
-                ['catapult', 'cata'],
-                ['expansion', 'exp'],
-            ];
-            const detail = detailMap
-                .filter(([key]) => (cycleStatus.targets?.[key] || 0) > 0)
-                .map(([key, label]) => `${label}:${cycleStatus.cycles?.[key] || 0}/${cycleStatus.targets?.[key] || 0}`)
-                .join(' | ');
-
-            this.log(
-                'info',
-                village,
-                'Macro Reclutamiento',
-                `Ciclos fase actual: ${cycleStatus.completed}/${cycleStatus.max} (${cycleStatus.max > 0 ? ((cycleStatus.completed / cycleStatus.max) * 100).toFixed(1) : '0.0'}%)${detail ? ` | ${detail}` : ''}.`,
-                null,
-                'economic',
-            );
-            return;
-        }
-
-        const phaseState = this._egyptianPhaseStates.get(village.id);
+        const phaseState = phaseStateMap.get(village.id);
         if (!phaseState || !phaseState.activePhaseId) return;
-        if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phaseDone) return;
 
-        const phaseKey = getEgyptianPhaseKey(phaseState.activePhaseId);
-        if (!phaseKey) return;
+        if (phaseState.activePhaseId === PHASE_DONE_ID_BY_RACE[this._race]) return;
 
-        const cycleStatus = getEgyptianPhaseCycleStatus(phaseState, this._difficulty, phaseKey);
+        const phaseKey = getPhaseKeyForRace(this._race, phaseState.activePhaseId);
+        if (!phaseKey || shouldSkipPhaseCycleLogForRace(this._race, phaseKey)) return;
+
+        const statusResolver = PHASE_CYCLE_STATUS_RESOLVER_BY_RACE[this._race];
+        if (typeof statusResolver !== 'function') return;
+
+        const cycleStatus = statusResolver(phaseState, this._difficulty, phaseKey);
+        const detail = formatPhaseCycleDetail(cycleStatus, PHASE_CYCLE_DETAIL_MAP_BY_RACE[this._race]);
+        const percent = cycleStatus.max > 0
+            ? ((cycleStatus.completed / cycleStatus.max) * 100).toFixed(1)
+            : '0.0';
+
         this.log(
             'info',
             village,
             'Macro Reclutamiento',
-            `Ciclos fase actual: ${cycleStatus.completed}/${cycleStatus.max} (${cycleStatus.max > 0 ? ((cycleStatus.completed / cycleStatus.max) * 100).toFixed(1) : '0.0'}%).`,
+            `Ciclos fase actual: ${cycleStatus.completed}/${cycleStatus.max} (${percent}%)${detail ? ` | ${detail}` : ''}.`,
             null,
             'economic',
         );
@@ -802,6 +854,7 @@ class AIController {
         this._reactionCooldownByMovement = this._hydrateTimedFlagMap(aiPlayerState.reactionCooldownByMovement);
         this._counterattackCooldownByVillage = this._hydrateTimedFlagMap(aiPlayerState.counterattackCooldownByVillage);
         this._constructionEmergencyLockByVillage = this._hydrateTimedFlagMap(aiPlayerState.constructionEmergencyLockByVillage);
+        this._strategicCommitmentByVillage = this._hydrateTimedFlagMap(aiPlayerState.strategicCommitmentByVillage);
 
         if (this._race === 'germans') {
             const persistedPhaseState = aiPlayerState.germanPhaseState || {};
@@ -852,6 +905,7 @@ class AIController {
             reactionCooldownByMovement: Array.from(this._reactionCooldownByMovement.entries()),
             counterattackCooldownByVillage: Array.from(this._counterattackCooldownByVillage.entries()),
             constructionEmergencyLockByVillage: Array.from(this._constructionEmergencyLockByVillage.entries()),
+            strategicCommitmentByVillage: Array.from(this._strategicCommitmentByVillage.entries()),
             phaseEngineRollout: { ...this._phaseEngineRollout },
         };
     }
@@ -1042,6 +1096,18 @@ class AIController {
         return Boolean(this.getConstructionEmergencyLockForVillage(villageId));
     }
 
+    setStrategicCommitmentForVillage(villageId, durationMs = BASE_LOCK_DURATIONS_MS.strategicCommitmentByVillage, metadata = {}) {
+        return this._setTimedFlag(this._strategicCommitmentByVillage, villageId, durationMs, metadata);
+    }
+
+    getStrategicCommitmentForVillage(villageId) {
+        return this._getActiveTimedFlag(this._strategicCommitmentByVillage, villageId);
+    }
+
+    hasStrategicCommitmentForVillage(villageId) {
+        return Boolean(this.getStrategicCommitmentForVillage(villageId));
+    }
+
     _expireReactiveCoordinationState() {
         const now = Date.now();
 
@@ -1055,6 +1121,7 @@ class AIController {
         this._cleanupTimedFlagMap(this._reactionCooldownByMovement, now);
         this._cleanupTimedFlagMap(this._counterattackCooldownByVillage, now);
         this._cleanupTimedFlagMap(this._constructionEmergencyLockByVillage, now);
+        this._cleanupTimedFlagMap(this._strategicCommitmentByVillage, now);
 
         for (const [villageId, windowState] of this._commandWindowByVillage.entries()) {
             if (!windowState || !Number.isFinite(windowState.expiresAt) || windowState.expiresAt <= now) {
@@ -1095,8 +1162,53 @@ class AIController {
         return OFFENSIVE_MISSION_TYPES.has(missionType);
     }
 
+    _resolveMovementIntent(commandType, payload = {}, context = {}) {
+        if (commandType !== 'send_movement') return 'none';
+
+        const missionType = payload?.missionType;
+        const sourceLayer = context.sourceLayer || 'macro';
+
+        if (missionType === 'reinforcement') {
+            return sourceLayer === 'reactive' ? 'reactive_reinforce' : 'macro_reinforce';
+        }
+
+        if (!this._isOffensiveMovementCommand(commandType, payload)) {
+            return 'neutral_movement';
+        }
+
+        if (sourceLayer === 'reactive') {
+            if (context.reactiveIntent === 'dodge') return 'reactive_dodge';
+            if (context.reactiveIntent === 'counter') return 'reactive_counter';
+            if (context.reactiveIntent === 'reinforce') return 'reactive_reinforce';
+            return 'reactive_offense';
+        }
+
+        if (sourceLayer === 'military') {
+            return context.militaryIntent === 'farming'
+                ? 'strategic_farming'
+                : 'strategic_attack';
+        }
+
+        return 'macro_offense';
+    }
+
     _hasReservedTroops(villageCombatState) {
         return countTroopsInMap(villageCombatState?.reservedTroops || {}) > 0;
+    }
+
+    _countReservedTroopsCommitted(outgoingTroops = {}, reservedTroops = {}) {
+        let overlap = 0;
+        for (const [unitId, count] of Object.entries(outgoingTroops || {})) {
+            if (!reservedTroops || !reservedTroops[unitId]) continue;
+            overlap += Math.min(Math.max(0, Number(count) || 0), Math.max(0, Number(reservedTroops[unitId]) || 0));
+        }
+        return overlap;
+    }
+
+    _isCriticalReactiveThreat(combatState) {
+        if (!combatState) return false;
+        if (combatState.threatLevel === 'critical') return true;
+        return combatState.threatType === 'conquest_attack' || combatState.threatType === 'siege_attack';
     }
 
     _buildVillageCombatContractSnapshot(villageIds = []) {
@@ -1117,6 +1229,8 @@ class AIController {
                 reservedTroops: { ...(state.reservedTroops || {}) },
                 counterWindowOpen: Boolean(state.counterWindowOpen),
                 attackerVillageId: state.attackerVillageId || null,
+                shouldRescoutAttacker: Boolean(state.shouldRescoutAttacker),
+                rescoutReason: state.rescoutReason || null,
             };
         });
 
@@ -1195,17 +1309,66 @@ class AIController {
         return COMMAND_LAYER_PRIORITY[priorityLayer] >= COMMAND_LAYER_PRIORITY.macro_emergency;
     }
 
-    _isCommandCompatibleWithWindow(villageId, nextCategory, nextPriorityScore, now) {
+    _isCommandCompatibleWithWindow(villageId, commandType, payload, context, nextCategory, nextPriorityScore, now) {
         const windowState = this._commandWindowByVillage.get(villageId);
-        if (!windowState || windowState.expiresAt <= now) return true;
+        if (!windowState || windowState.expiresAt <= now) {
+            return {
+                compatible: true,
+                reason: 'no_active_window',
+                currentIntent: null,
+                nextIntent: null,
+            };
+        }
 
         const sameCategory = windowState.category === nextCategory;
-        if (!sameCategory) return true;
+        if (!sameCategory) {
+            return {
+                compatible: true,
+                reason: 'different_category',
+                currentIntent: windowState.movementIntent || null,
+                nextIntent: null,
+            };
+        }
 
-        return nextPriorityScore >= windowState.priorityScore;
+        if (nextCategory === 'movement') {
+            const nextIntent = this._resolveMovementIntent(commandType, payload, context);
+            const currentIntent = windowState.movementIntent || 'unknown';
+            const sameLayer = windowState.sourceLayer === (context.sourceLayer || 'macro');
+
+            const sameIntent = currentIntent === nextIntent;
+            const compatibleStrategicBurst = sameLayer
+                && currentIntent === 'strategic_attack'
+                && nextIntent === 'strategic_attack';
+            const compatibleReactiveDefenseChain = sameLayer
+                && currentIntent === 'reactive_reinforce'
+                && nextIntent === 'reactive_reinforce';
+
+            if (sameIntent || compatibleStrategicBurst || compatibleReactiveDefenseChain) {
+                return {
+                    compatible: true,
+                    reason: sameIntent ? 'same_movement_intent' : 'compatible_movement_intent',
+                    currentIntent,
+                    nextIntent,
+                };
+            }
+
+            return {
+                compatible: false,
+                reason: 'movement_intent_conflict',
+                currentIntent,
+                nextIntent,
+            };
+        }
+
+        return {
+            compatible: nextPriorityScore >= windowState.priorityScore,
+            reason: 'priority_check',
+            currentIntent: windowState.movementIntent || null,
+            nextIntent: null,
+        };
     }
 
-    _setCommandWindow(villageId, category, priorityScore, layerPriority, sourceLayer) {
+    _setCommandWindow(villageId, category, priorityScore, layerPriority, sourceLayer, movementIntent = null, targetCoords = null) {
         if (!villageId || !category) return;
         const now = Date.now();
         this._commandWindowByVillage.set(villageId, {
@@ -1213,6 +1376,8 @@ class AIController {
             priorityScore,
             layerPriority,
             sourceLayer,
+            movementIntent,
+            targetCoords,
             createdAt: now,
             expiresAt: now + COMMAND_WINDOW_TTL_MS,
         });
@@ -1226,6 +1391,7 @@ class AIController {
         const layerPriority = this._resolveLayerPriority(villageId, context);
         const priorityScore = COMMAND_LAYER_PRIORITY[layerPriority] || COMMAND_LAYER_PRIORITY.macro_normal;
         const category = this._classifyCommandCategory(commandType);
+        const movementIntent = this._resolveMovementIntent(commandType, payload, context);
         const now = Date.now();
 
         if (category === 'movement' && villageId && sourceLayer !== 'reactive' && this._isOffensiveMovementCommand(commandType, payload)) {
@@ -1235,13 +1401,16 @@ class AIController {
             const movementLock = this.getMovementLockForVillage(villageId);
             const hasHighThreat = combatState?.threatLevel === 'high' || combatState?.threatLevel === 'critical';
             const hasReservedTroops = this._hasReservedTroops(combatState);
+            const reservedTroopsCommitted = this._countReservedTroopsCommitted(payload?.troops || {}, combatState?.reservedTroops || {});
             const offenseSuppressed = Boolean(combatState?.offenseSuppressed);
+            const counterWindowOpen = Boolean(combatState?.counterWindowOpen);
 
-            if (hasPendingDodge || movementLock || hasHighThreat || hasReservedTroops || offenseSuppressed) {
+            if (hasPendingDodge || movementLock || hasHighThreat || offenseSuppressed || counterWindowOpen || reservedTroopsCommitted > 0) {
                 this.log('warn', village, 'Arbitraje Central', 'Comando ofensivo bloqueado por contrato de combate reactivo.', {
                     villageId,
                     commandType,
                     missionType: payload?.missionType || null,
+                    movementIntent,
                     layerPriority,
                     sourceLayer,
                     hasPendingDodge,
@@ -1249,6 +1418,9 @@ class AIController {
                     threatLevel: combatState?.threatLevel || 'none',
                     preferredResponse: combatState?.preferredResponse || 'hold',
                     offenseSuppressed,
+                    counterWindowOpen,
+                    reservedTroopsPresent: hasReservedTroops,
+                    reservedTroopsCommitted,
                     reservedTroopsCount: countTroopsInMap(combatState?.reservedTroops || {}),
                 }, 'military');
                 return {
@@ -1258,6 +1430,7 @@ class AIController {
                         villageId,
                         commandType,
                         missionType: payload?.missionType || null,
+                        movementIntent,
                         layerPriority,
                         sourceLayer,
                         hasPendingDodge,
@@ -1265,7 +1438,50 @@ class AIController {
                         threatLevel: combatState?.threatLevel || 'none',
                         preferredResponse: combatState?.preferredResponse || 'hold',
                         offenseSuppressed,
+                        counterWindowOpen,
+                        reservedTroopsPresent: hasReservedTroops,
+                        reservedTroopsCommitted,
                         reservedTroopsCount: countTroopsInMap(combatState?.reservedTroops || {}),
+                    },
+                };
+            }
+        }
+
+        if (category === 'movement' && villageId && sourceLayer === 'reactive' && this._isOffensiveMovementCommand(commandType, payload) && context.reactiveIntent === 'counter') {
+            const village = this._lastKnownGameState?.villages?.find(candidate => candidate.id === villageId) || null;
+            const strategicCommitment = this.getStrategicCommitmentForVillage(villageId);
+            const combatState = this.getVillageCombatState(villageId);
+            const criticalThreat = this._isCriticalReactiveThreat(combatState);
+
+            if (strategicCommitment && !criticalThreat) {
+                this.log('warn', village, 'Arbitraje Central', 'Counter reactivo bloqueado por compromiso ofensivo estrategico activo.', {
+                    villageId,
+                    commandType,
+                    missionType: payload?.missionType || null,
+                    movementIntent,
+                    layerPriority,
+                    sourceLayer,
+                    reactiveIntent: context.reactiveIntent || null,
+                    strategicCommitReason: strategicCommitment.reason || null,
+                    strategicCommitExpiresAt: strategicCommitment.expiresAt || null,
+                    threatLevel: combatState?.threatLevel || 'none',
+                    threatType: combatState?.threatType || 'mixed',
+                }, 'military');
+                return {
+                    success: false,
+                    reason: 'AI_ARBITRATION_COUNTER_BLOCKED_BY_STRATEGIC_COMMIT',
+                    details: {
+                        villageId,
+                        commandType,
+                        missionType: payload?.missionType || null,
+                        movementIntent,
+                        layerPriority,
+                        sourceLayer,
+                        reactiveIntent: context.reactiveIntent || null,
+                        strategicCommitReason: strategicCommitment.reason || null,
+                        strategicCommitExpiresAt: strategicCommitment.expiresAt || null,
+                        threatLevel: combatState?.threatLevel || 'none',
+                        threatType: combatState?.threatType || 'mixed',
                     },
                 };
             }
@@ -1286,25 +1502,61 @@ class AIController {
             };
         }
 
-        if (villageId && !this._isCommandCompatibleWithWindow(villageId, category, priorityScore, now)) {
+        const windowCompatibility = villageId
+            ? this._isCommandCompatibleWithWindow(villageId, commandType, payload, context, category, priorityScore, now)
+            : { compatible: true };
+
+        if (villageId && !windowCompatibility.compatible) {
             const village = this._lastKnownGameState?.villages?.find(candidate => candidate.id === villageId) || null;
-            this.log('warn', village, 'Arbitraje Central', 'Comando bloqueado: prioridad inferior en ventana activa.', {
+            this.log('warn', village, 'Arbitraje Central', 'Comando bloqueado por conflicto en ventana tactica activa.', {
                 villageId,
                 commandType,
                 layerPriority,
                 sourceLayer,
                 category,
+                movementIntent,
+                windowReason: windowCompatibility.reason || 'unknown',
+                currentIntent: windowCompatibility.currentIntent || null,
+                nextIntent: windowCompatibility.nextIntent || null,
             }, 'military');
             return {
                 success: false,
                 reason: 'AI_ARBITRATION_PRIORITY_SUPERSEDED',
-                details: { villageId, commandType, layerPriority, sourceLayer, category },
+                details: {
+                    villageId,
+                    commandType,
+                    layerPriority,
+                    sourceLayer,
+                    category,
+                    movementIntent,
+                    windowReason: windowCompatibility.reason || 'unknown',
+                    currentIntent: windowCompatibility.currentIntent || null,
+                    nextIntent: windowCompatibility.nextIntent || null,
+                },
             };
         }
 
         const result = this._sendCommandRaw(commandType, payload);
         if (result?.success && villageId) {
-            this._setCommandWindow(villageId, category, priorityScore, layerPriority, sourceLayer);
+            this._setCommandWindow(villageId, category, priorityScore, layerPriority, sourceLayer, movementIntent, payload?.targetCoords || null);
+
+            if (
+                category === 'movement'
+                && sourceLayer === 'military'
+                && this._isOffensiveMovementCommand(commandType, payload)
+                && context.militaryIntent !== 'farming'
+                && (payload?.missionType === 'attack' || payload?.missionType === 'conquest')
+            ) {
+                const strategicDurationMs = context.strategicPriority === 'high_value'
+                    ? BASE_LOCK_DURATIONS_MS.strategicCommitmentHighValueByVillage
+                    : BASE_LOCK_DURATIONS_MS.strategicCommitmentByVillage;
+                this.setStrategicCommitmentForVillage(villageId, strategicDurationMs, {
+                    reason: context.strategicPriority === 'high_value'
+                        ? 'strategic_high_value_commit'
+                        : `strategic_attack_commit:${context.strategicTargetType || 'generic'}`,
+                    sourceMovementId: null,
+                });
+            }
         }
 
         return result;
@@ -1355,7 +1607,7 @@ class AIController {
     }
 
     _processCounterWindows(gameState) {
-        const sender = this._getCommandSender({ sourceLayer: 'reactive', layerPriority: 'reactive_counterattack' });
+        const sender = this._getCommandSender({ sourceLayer: 'reactive', layerPriority: 'reactive_counterattack', reactiveIntent: 'counter' });
         const myVillages = gameState.villages.filter(village => village.ownerId === this._ownerId);
 
         for (const village of myVillages) {
@@ -1365,6 +1617,9 @@ class AIController {
                 this.upsertVillageCombatState(village.id, {
                     counterWindowOpen: false,
                     counterWindowExpiresAt: null,
+                    counterDecisionState: 'none',
+                    counterDecisionReason: 'counter_window_expired',
+                    counterDecisionAt: Date.now(),
                 }, {
                     lastDecisionReason: 'counter_window_expired',
                 });
@@ -1390,9 +1645,24 @@ class AIController {
                 targetCoords: { ...attackerVillage.coords },
                 troops,
                 missionType: 'raid',
+            }, {
+                reactiveIntent: 'counter',
             });
 
-            if (!result?.success) continue;
+            if (!result?.success) {
+                if (result?.reason === 'AI_ARBITRATION_COUNTER_BLOCKED_BY_STRATEGIC_COMMIT') {
+                    this.upsertVillageCombatState(village.id, {
+                        counterWindowOpen: false,
+                        counterWindowExpiresAt: null,
+                        counterDecisionState: 'none',
+                        counterDecisionReason: 'deferred_blocked_by_strategic_commit',
+                        counterDecisionAt: Date.now(),
+                    }, {
+                        lastDecisionReason: 'deferred_counter_blocked_by_strategic_commit',
+                    });
+                }
+                continue;
+            }
 
             this.setCounterattackCooldownForVillage(village.id, 90000, {
                 reason: 'deferred_counterwindow_launch',
@@ -1405,6 +1675,9 @@ class AIController {
             this.upsertVillageCombatState(village.id, {
                 counterWindowOpen: false,
                 counterWindowExpiresAt: null,
+                counterDecisionState: 'deferred_executed',
+                counterDecisionReason: 'deferred_counterwindow_executed',
+                counterDecisionAt: Date.now(),
             }, {
                 lastDecisionReason: 'deferred_counterwindow_executed',
             });

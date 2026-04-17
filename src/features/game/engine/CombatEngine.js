@@ -3,14 +3,17 @@ import { gameData, NON_TARGETABLE_BUILDINGS } from '../core/GameData.js';
 import { CombatFormulas } from '../core/CombatFormulas.js';
 import { MemoryManager } from '../ai/index.js';
 import { calculateBeastBountyValue } from '../core/OasisEconomy.js';
+import { getScaledCrannyCapacity } from '../core/capacityScaling.js';
 
 export class CombatEngine {
     _gameState;
+    _gameConfig;
     _movement;
     _results;
 
-    constructor(gameState) {
+    constructor(gameState, gameConfig = null) {
         this._gameState = gameState;
+        this._gameConfig = gameConfig;
     }
 
     processMovement(movement) {
@@ -477,10 +480,12 @@ export class CombatEngine {
             let totalHidingCapacity = 0;
             const crannies = defenderVillage.buildings.filter(b => b.type === 'cranny' && b.level > 0);
             if (crannies.length > 0) {
+                const gameSpeed = this._gameConfig?.gameSpeed || 1;
                 totalHidingCapacity = crannies.reduce((sum, cranny) => {
-                    return sum + gameData.buildings.cranny.levels[cranny.level - 1].attribute.hidingCapacity;
+                    const levelData = gameData.buildings.cranny.levels[cranny.level - 1];
+                    const baseHidingCapacity = levelData?.attribute?.hidingCapacity || 0;
+                    return sum + getScaledCrannyCapacity(baseHidingCapacity, defenderVillage.race, gameSpeed);
                 }, 0);
-                if (defenderVillage.race === 'gauls') totalHidingCapacity *= 2;
                 if (attackerInfo.race === 'germans') totalHidingCapacity *= 0.8;
             }
 

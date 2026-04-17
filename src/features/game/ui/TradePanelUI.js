@@ -1,5 +1,7 @@
 import gameManager from '@game/state/GameManager.js';
 import { gameData } from '../core/GameData.js';
+import GameConfig from '../state/GameConfig.js';
+import { getScaledMerchantCapacityPerUnit } from '../core/capacityScaling.js';
 import { formatNumber } from '@shared/lib/formatters.js';
 import toastUI from './ToastUI.js';
 
@@ -17,11 +19,13 @@ class TradePanelUI {
     #targetTile = null;
     #gameState = null;
     #activeVillage = null;
+    #gameConfig = null;
     #merchantCapacity = 0;
     #availableMerchants = 0;
 
     constructor() {
         this.#mainContainer = document.getElementById('village-container');
+        this.#gameConfig = new GameConfig().getSettings();
         if (!this.#mainContainer) return;
         this._createPanelHTML();
         this.#panelElement = document.getElementById('trade-panel');
@@ -78,6 +82,7 @@ class TradePanelUI {
     show(targetTile, gameState) {
         this.#targetTile = targetTile;
         this.#gameState = gameState;
+        this.#gameConfig = new GameConfig().getSettings();
         this.#activeVillage = this.#gameState.villages.find(v => v.id === this.#gameState.activeVillageId);
         if (!this.#activeVillage) return;
 
@@ -119,19 +124,22 @@ class TradePanelUI {
         const inputsContainer = this.#panelElement.querySelector('#trade-panel-inputs');
         
         const marketplace = this.#activeVillage.buildings.find(b => b.type === 'marketplace');
-
-        // --- INICIO DE LA CORRECCIÓN ---
-        const ownerPlayer = this.#gameState.players.find(p => p.id === this.#activeVillage.ownerId);
-        if (!ownerPlayer) return;
-        const merchantUnit = gameData.units[ownerPlayer.race].troops.find(t => t.type === 'merchant');
-        // --- FIN DE LA CORRECCIÓN ---
+        const merchantUnit = gameData.units[this.#activeVillage.race].troops.find(t => t.type === 'merchant');
+        const merchantCapacityPerUnit = getScaledMerchantCapacityPerUnit(
+            this.#activeVillage.race,
+            this.#gameConfig?.gameSpeed || 1,
+            merchantUnit?.stats.capacity || 0,
+        );
         
         this.#availableMerchants = marketplace ? gameData.buildings.marketplace.levels[marketplace.level - 1].attribute.merchantCapacity : 0;
-        this.#merchantCapacity = this.#availableMerchants * (merchantUnit?.stats.capacity || 0);
+        this.#merchantCapacity = this.#availableMerchants * merchantCapacityPerUnit;
 
         merchantsContainer.innerHTML = `
             <div class="flex items-center gap-2">${ICONS.merchant} <span class="font-semibold">${this.#availableMerchants} Mercaderes</span></div>
-            <div class="text-sm font-mono">Capacidad Total: <span class="font-bold text-white">${formatNumber(this.#merchantCapacity)}</span></div>
+            <div class="text-right">
+                <div class="text-xs text-gray-400">Cap. por mercader: <span class="font-mono text-white">${formatNumber(merchantCapacityPerUnit)}</span></div>
+                <div class="text-sm font-mono">Capacidad Total: <span class="font-bold text-white">${formatNumber(this.#merchantCapacity)}</span></div>
+            </div>
         `;
 
         const resources = ['wood', 'stone', 'iron', 'food'];

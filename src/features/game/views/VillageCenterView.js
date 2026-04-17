@@ -14,20 +14,8 @@ import { formatNumber } from '@shared/lib/formatters.js';
 import uiRenderScheduler from '../ui/UIRenderScheduler.js';
 import { perfCollector } from '@shared/lib/perf.js';
 
-let buildingInfoUILoadPromise = null;
-
-async function getBuildingInfoUI() {
-    if (!buildingInfoUILoadPromise) {
-        buildingInfoUILoadPromise = import('../ui/BuildingInfoUI.js')
-            .then(module => module.default);
-    }
-
-    return buildingInfoUILoadPromise;
-}
-
 class VillageCenterView {
     #populationDisplay;
-    #wallSlot;
     #gameState;
     #lastVillageRenderSignature = '';
     #activityModalUI;
@@ -45,13 +33,12 @@ class VillageCenterView {
         this._handleRecruitmentFinished = this._handleRecruitmentFinished.bind(this);
         this._handleResearchFinished = this._handleResearchFinished.bind(this);
         this._handleSmithyFinished = this._handleSmithyFinished.bind(this);
-        this._handleWallSlotClick = this._handleWallSlotClick.bind(this);
     }
 
     get html() {
         return `
             <div class="absolute inset-x-0 top-0 flex items-center justify-center min-h-full py-4" id="mainViewContainer">
-                <div id="mainView" class="relative w-[380px] h-[380px]">
+                <div id="mainView" class="relative w-[92vw] h-[92vw] max-w-[380px] max-h-[380px]">
                 </div>
             </div>
         `;
@@ -62,7 +49,6 @@ class VillageCenterView {
         perfCollector.markStart('view.villageCenter.firstMeaningfulPaint');
 
         this.#populationDisplay = document.getElementById('population-display');
-        this.#wallSlot = document.querySelector('[data-slot-id="v_wall"]');
 
         this.#activityModalUI = new ActivityModalUI();
         this.#constructionQueueUI = new ConstructionQueueUI('construction-queue-container');
@@ -86,10 +72,6 @@ class VillageCenterView {
         document.removeEventListener('notify:recruitment_finished', this._handleRecruitmentFinished);
         document.removeEventListener('notify:research_finished', this._handleResearchFinished);
         document.removeEventListener('notify:smithy_finished', this._handleSmithyFinished);
-        
-        if (this.#wallSlot) {
-            this.#wallSlot.removeEventListener('click', this._handleWallSlotClick);
-        }
     }
 
     initializeEventListeners() {
@@ -98,15 +80,6 @@ class VillageCenterView {
         document.addEventListener('notify:recruitment_finished', this._handleRecruitmentFinished);
         document.addEventListener('notify:research_finished', this._handleResearchFinished);
         document.addEventListener('notify:smithy_finished', this._handleSmithyFinished);
-        
-        if (this.#wallSlot) {
-            this.#wallSlot.addEventListener('click', this._handleWallSlotClick);
-        }
-    }
-
-    async _handleWallSlotClick() {
-        const buildingInfoUI = await getBuildingInfoUI();
-        buildingInfoUI.show('v_wall');
     }
 
     _handleGameStateUpdate(gameStatePayload) {

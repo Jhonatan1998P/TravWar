@@ -43,12 +43,32 @@ class ResearchQueueUI {
         unitName.className = 'font-semibold text-white';
         content.appendChild(unitName);
 
-        const timer = document.createElement('div');
-        timer.className = 'font-mono text-yellow-300 w-24 text-center';
+        const timerBlock = document.createElement('div');
+        timerBlock.className = 'flex flex-col items-end w-32 text-right';
 
-        item.append(content, timer);
-        item.__refs = { unitName, timer };
+        const timerLabel = document.createElement('span');
+        timerLabel.className = 'text-[11px] text-gray-400 leading-tight';
+        timerLabel.textContent = 'Termina en:';
+
+        const timer = document.createElement('div');
+        timer.className = 'font-mono text-yellow-300 leading-tight';
+
+        const finishAt = document.createElement('span');
+        finishAt.className = 'text-[11px] text-gray-500 font-mono tabular-nums leading-tight';
+
+        timerBlock.append(timerLabel, timer, finishAt);
+
+        item.append(content, timerBlock);
+        item.__refs = { unitName, timer, finishAt };
         return item;
+    }
+
+    #formatClockTime(timestamp) {
+        const date = new Date(timestamp);
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        return `${hours}:${minutes}:${seconds}`;
     }
 
     #updateJobNode(node, job, activeVillage) {
@@ -58,6 +78,7 @@ class ResearchQueueUI {
         refs.unitName.textContent = unitData?.name || job.unitId;
         refs.timer.dataset.timerFor = job.jobId;
         refs.timer.textContent = formatTime((job.endTime - Date.now()) / 1000);
+        refs.finishAt.textContent = `Fin estimado: ${this.#formatClockTime(job.endTime)}`;
     }
 
     #subscribeCountdown(job, nextCountdownKeys) {

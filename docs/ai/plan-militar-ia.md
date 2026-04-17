@@ -1,5 +1,14 @@
 # Plan militar IA
 
+## Estado actual (abr 2026)
+- Fase 1: ✅ Cerrada en codigo.
+- Fase 2: ✅ Cerrada en codigo.
+- Fase 3: ✅ Cerrada en codigo.
+- Fase 4: ✅ Cerrada en codigo.
+- Fase 5: ✅ Cerrada en codigo.
+- Fase 6: 🔄 Abierta (solo pruebas reales y ajustes finos).
+- Alcance pendiente: no quedan redisenos grandes; solo validar en juego, medir, y afinar parametros doctrinales.
+
 ## Marco
 - El enfoque correcto, usado en RTS/MMO de guerra persistente que funcionan, es este: `StrategicAI` como **planner ofensivo**, `reactive` como **controlador tactico/defensivo**, y un **contrato unico de combate** para que ambos decidan con la misma verdad.
 - La regla madre debe ser: **ningun ataque PVP importante sin inteligencia fresca**.
@@ -11,6 +20,7 @@
 - **Egipcio**: defensiva, scouting mas disciplinado, refuerzo imperial, evita ataques inciertos, contraataca menos y prefiere `counterpressure` antes que `all-in`.
 
 ## Fase 1: Contrato Unico de Combate
+- Estado: ✅ Cerrada en codigo. Pendiente solo validacion final en juego dentro de Fase 6.
 - Objetivo: separar responsabilidades y eliminar contradicciones entre motor ofensivo y motor reactivo.
 - `StrategicAI.js` debe ser dueno solo de: scouting ofensivo, scoring de objetivos, seleccion de fuerza, commit de ataque, cancelacion por riesgo.
 - `reactive.js` debe ser dueno solo de: evaluacion de amenaza entrante, hold, reinforce, dodge, counterpressure, counterattack puntual.
@@ -21,6 +31,7 @@
 - Criterio de salida: ningun movimiento ofensivo debe salir desde una aldea con `dodge` pendiente, `movementLock`, amenaza alta o tropas reservadas.
 
 ## Fase 2: Inteligencia Fresca y Ciclo de Scouts
+- Estado: ✅ Cerrada en codigo. Pendiente solo validacion final en juego dentro de Fase 6.
 - Objetivo: convertir la inteligencia en requisito obligatorio de decision militar contra aldeas de jugadores/IA.
 - Regla central: no se ataca una aldea enemiga si no existe reporte de espionaje fresco.
 - La frescura no debe ser unica para todo. Debe tener TTL por contexto.
@@ -33,6 +44,7 @@
 - Criterio de salida: toda decision ofensiva PVP debe mostrar en log el `lastIntelAt`, el TTL aplicado y el motivo de validez o bloqueo.
 
 ## Fase 3: Rediseno del Motor Ofensivo en `StrategicAI.js`
+- Estado: ✅ Cerrada en codigo. Pendiente solo validacion final en juego dentro de Fase 6.
 - Objetivo: que el ataque no sea solo “puedo ganar”, sino “debo atacar este objetivo, con esta tribu, con esta certeza, y sin desprotegerme”.
 - El scoring ofensivo debe separar tipos de objetivo: `nemesis`, `punish_exposed_army`, `economic_village`, `military_village`, `expansion_village`, `high_value_siege_target`.
 - El motor debe usar el mismo estimador de combate que el defensivo. Hoy eso no esta alineado y es una fuente real de incoherencia.
@@ -55,6 +67,7 @@
 - Criterio de salida: se debe ver asimetria real entre tribus y caida visible de ataques “ciegos” o inutiles.
 
 ## Fase 4: Rediseno del Motor Defensivo y de Reaccion en `reactive.js`
+- Estado: ✅ Cerrada en codigo. Pendiente solo validacion final en juego dentro de Fase 6.
 - Objetivo: que la defensa no solo “aguante”, sino que preserve el activo correcto segun tribu y contexto.
 - La evaluacion debe seguir este orden: clasificar amenaza, estimar defensa local, estimar defensa imperial, decidir hold/reinforce/dodge/counter, reservar tropas.
 - Germano debe defender asi:
@@ -74,6 +87,7 @@
 - Criterio de salida: Germanos preservan mejor ofensiva; Egipcios sostienen mejor con refuerzos y esquivan menos en amenazas medias.
 
 ## Fase 5: Coordinacion y Arbitraje Entre Ambos Motores
+- Estado: ✅ Cerrada en codigo. Pendiente solo validacion final en juego dentro de Fase 6.
 - Objetivo: que `StrategicAI` y `reactive` no compitan por las mismas tropas ni por la misma aldea.
 - `reactive.js` debe poder marcar `reservedTroops` por aldea.
 - `StrategicAI.js` debe consumir solo tropas libres, nunca tropas reservadas.
@@ -88,19 +102,27 @@
 
 ## Fase 6: Balance por Tribu y Pruebas Reales en Juego
 - Objetivo: estabilizar comportamiento con partidas reales, no con harnesses.
-- La bateria de pruebas debe hacerse en juego en estas situaciones:
-- Germano vs Egipcio early 1v1.
-- Germano atacando con intel fresca contra defensor pasivo.
-- Egipcio bajo multi-wave con refuerzo imperial.
-- Ataque siege/conquest contra ambas tribus.
-- Ataque con intel vieja para confirmar bloqueo ofensivo.
-- Scout fallido y reintento de scout.
-- Contraataque tras defensa exitosa.
-- Pueblo con nucleo ofensivo valioso bajo amenaza inminente.
-- Los ajustes deben hacerse por rangos doctrinales, no por parches puntuales.
-- Lo que se debe afinar primero es: TTL de intel, margen minimo de commit, reserva minima local, severidad para full dodge, agresividad de counter.
-- Validacion real: revisar repeticiones y logs de 10-20 partidas cortas por matchup relevante.
-- Criterio de salida: la IA deja de parecer aleatoria y empieza a mostrar “personalidad militar” consistente por tribu.
+- Estado: 🔄 Abierta. Esta fase es la unica pendiente.
+- Bateria obligatoria de pruebas en juego (orden recomendado):
+- 1) Intel fresca obligatoria: intentar ataque PVP con intel vieja; debe bloquear ataque y scoutear primero.
+- 2) Contrato reactivo vs ofensiva: provocar ataque entrante cuando la IA iba a salir ofensiva; ofensiva debe frenarse si defensa lo exige.
+- 3) No contradicciones por aldea: generar oportunidad ofensiva y amenaza entrante casi simultanea; la IA debe emitir una sola prioridad coherente.
+- 4) Asimetria doctrinal early/mid: Germano vs Egipcio 1v1; Germano debe presionar mas, Egipcio atacar menos pero con mayor certeza.
+- 5) Matriz defensiva completa: lanzar raid, standard attack, siege y conquest contra ambas tribus; deben responder distinto y de forma comprensible.
+- 6) Counter seguro: tras defensa exitosa, verificar que el counter solo sale si mantiene defensa residual doctrinal.
+- 7) Commit estrategico vs counter oportunista: si hay ataque estrategico de alto valor desde una aldea, `reactive` no debe contraatacar desde esa misma aldea salvo amenaza critica.
+- Donde poner especial atencion en logs:
+- `INTEL-GATE`: `lastIntelAt`, TTL aplicado, motivo de validez/bloqueo.
+- `Arbitraje Central`: bloqueos por `offenseSuppressed`, `reservedTroops`, `counterWindowOpen`, `movementLock`, conflicto de ventana tactica.
+- `Counter Action` / `Counter Reaction`: razones de bloqueo, defensa residual requerida, vulnerabilidad del objetivo.
+- Ajustes finos (solo por rangos doctrinales, no parches puntuales):
+- TTL de intel por contexto.
+- Margen minimo de commit ofensivo.
+- Reserva minima local por tribu.
+- Severidad de `full_dodge`.
+- Agresividad y umbral de seguridad de counter.
+- Volumen minimo recomendado: 10-20 partidas cortas por matchup relevante con revision de repeticiones y logs.
+- Criterio de salida: la IA deja de parecer aleatoria y muestra personalidad militar consistente por tribu.
 
 ## Checklist Final
 - [ ] Ninguna aldea enemiga de jugador/IA es atacada sin reporte de scout fresco.

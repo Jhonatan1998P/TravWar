@@ -1,5 +1,6 @@
 // RUTA: js/engine/VillageProcessor.js
 import { gameData } from '../core/GameData.js';
+import { getCapacitySpeedMultiplier } from '../core/capacityScaling.js';
 
 const CONSTRUCTION_CANCEL_REFUND_PERCENT = 0.45;
 const BASE_PRODUCTION = 12;
@@ -675,7 +676,7 @@ export class VillageProcessor {
             foodCapacity += granaryBonus;
         }
 
-        const speedMultiplier = Math.max(1, Math.floor(this.#config.gameSpeed / 20));
+        const speedMultiplier = getCapacitySpeedMultiplier(this.#config.gameSpeed);
         
         this.#village.resources.wood.capacity = generalCapacity * speedMultiplier;
         this.#village.resources.stone.capacity = generalCapacity * speedMultiplier;

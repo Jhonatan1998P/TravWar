@@ -60,28 +60,34 @@ export default class StrategicAI {
             const totalCombatTroops = { ...totalTroops };
             this._filterNonCombatTroops(totalCombatTroops, race);
 
-            const siegeTroopsAtHome = this._extractSiegeTroops(troopsAtHome, race);
             const combatContract = this._resolveVillageCombatContract(village.id, combatContractByVillage);
+            const freeCombatTroops = this._subtractTroops(combatTroopsAtHome, combatContract.reservedTroops || {});
+            const reservedCombatTroops = this._subtractTroops(combatTroopsAtHome, freeCombatTroops);
+            const siegeTroopsAtHome = this._extractSiegeTroops(freeCombatTroops, race);
+            const reservedScoutCount = scoutId ? Math.max(0, Number(combatContract.reservedTroops?.[scoutId] || 0)) : 0;
+            const scoutCountFree = Math.max(0, scoutCountAtHome - reservedScoutCount);
             const offenseGate = this._resolveVillageOffenseGate(combatContract);
 
             const powerAtHome = CombatFormulas.calculateAttackPoints(combatTroopsAtHome, race, village.smithy.upgrades).total;
+            const freePowerAtHome = CombatFormulas.calculateAttackPoints(freeCombatTroops, race, village.smithy.upgrades).total;
             const totalPower = CombatFormulas.calculateAttackPoints(totalCombatTroops, race, village.smithy.upgrades).total;
             const isArmyBusy = powerAtHome < totalPower * 0.8;
 
-            if (totalPower > 0 || totalScoutCount > 0) {
+            if (freePowerAtHome > 0 || scoutCountFree > 0) {
                 availableForces.push({
                     village,
                     troops: troopsAtHome,
                     totalTroops,
-                    combatTroops: combatTroopsAtHome,
+                    combatTroops: freeCombatTroops,
                     siegeTroops: siegeTroopsAtHome,
-                    scoutCount: scoutCountAtHome,
+                    scoutCount: scoutCountFree,
                     scoutId,
-                    power: powerAtHome,
+                    power: freePowerAtHome,
                     totalPower,
                     isArmyBusy,
                     needs: this._analyzeVillageNeeds(village),
                     combatContract,
+                    reservedCombatTroops,
                     offenseBlocked: offenseGate.blocked,
                     offenseBlockedReasons: offenseGate.reasons,
                 });
@@ -124,14 +130,22 @@ export default class StrategicAI {
             };
         }
 
+        const priorityIntelTargetIds = this._collectPriorityIntelTargetIds(combatContractByVillage);
+        if (priorityIntelTargetIds.length > 0) {
+            reasoningLog.push(`[INTEL] Re-scout reactivo prioritario activado para ${priorityIntelTargetIds.length} atacante(s) reciente(s).`);
+        }
+
         const nemesisId = this._manageNemesis(gameState, ownerId, aiState, reasoningLog);
 
         const targets = this._scanAndClassifyTargets(
             gameState,
             offensiveReadyForces,
             ownerId,
+            race,
+            gameSpeed,
             nemesisId,
             reasoningLog,
+            priorityIntelTargetIds,
             NEMESIS_SPY_INTERVAL,
             GENERAL_SPY_INTERVAL,
         );
@@ -156,6 +170,9 @@ export default class StrategicAI {
                             'Intel Némesis',
                             nemesisTarget.spyStatus === 'failed',
                             nemesisTarget.lastSpyCount,
+                            {
+                                retryMultiplier: race === 'germans' || race === 'huns' ? 3 : 2,
+                            },
                         );
                         if (spyCmd) commands.push(spyCmd);
                     } else if (nemesisTarget.intel) {
@@ -188,7 +205,15 @@ export default class StrategicAI {
             }
         }
 
-        const spyResults = this._performGeneralIntelligence(offensiveReadyForces, targets.unknown, nemesisId);
+        const spyResults = this._performGeneralIntelligence(
+            offensiveReadyForces,
+            targets.unknown,
+            nemesisId,
+            {
+                race,
+                priorityIntelTargetIds,
+            },
+        );
         commands.push(...spyResults.commands);
         if (spyResults.logs.length > 0) reasoningLog.push(...spyResults.logs);
 
@@ -202,9 +227,40 @@ export default class StrategicAI {
             return true;
         });
 
+        const doctrine = this._resolveOffensiveDoctrine(race, archetype);
+        const strategicPvpTargets = safeKnownTargets.filter(target =>
+            target.type === 'village'
+            && target.ownerId !== 'nature'
+            && Boolean(target.intel)
+            && target.intelGate?.intelFresh !== false,
+        );
+
+        let strategicAttackIssued = false;
+        if (!isMusteringForWar && !hasMaxPriorityGoal && strategicPvpTargets.length > 0) {
+            const strategicOffense = this._planDoctrinalStrategicOffense({
+                forces: offensiveReadyForces,
+                targets: strategicPvpTargets,
+                gameState,
+                ownerId,
+                race,
+                nemesisId,
+                doctrine,
+                log: reasoningLog,
+            });
+
+            if (strategicOffense.commands.length > 0) {
+                commands.push(...strategicOffense.commands);
+                strategicAttackIssued = true;
+            }
+            if (strategicOffense.logs.length > 0) {
+                reasoningLog.push(...strategicOffense.logs);
+            }
+        }
+
         if (!isMusteringForWar) {
-            if (hasMaxPriorityGoal) {
-                reasoningLog.push('[FARMEO ROI] farm bloqueado por prioridad máxima.');
+            if (hasMaxPriorityGoal || strategicAttackIssued) {
+                const blockReason = hasMaxPriorityGoal ? 'prioridad máxima' : 'ataque estratégico activo';
+                reasoningLog.push(`[FARMEO ROI] farm bloqueado por ${blockReason}.`);
             } else {
                 const farmingResults = this._performOptimizedFarming(
                     offensiveReadyForces,
@@ -231,11 +287,13 @@ export default class StrategicAI {
                 militaryGate: {
                     hasMaxPriorityGoal,
                     isMusteringForWar,
-                    farmEvaluationExecuted: !hasMaxPriorityGoal && !isMusteringForWar,
+                    farmEvaluationExecuted: !hasMaxPriorityGoal && !strategicAttackIssued && !isMusteringForWar,
                     farmBlockedByMaxPriorityGoal: hasMaxPriorityGoal && !isMusteringForWar,
+                    farmBlockedByStrategicAttack: strategicAttackIssued && !isMusteringForWar,
                     offensiveSuppressedByReactive: blockedForces.length > 0,
                     blockedVillagesCount: blockedForces.length,
                     offensiveReadyVillages: offensiveReadyForces.length,
+                    strategicAttackIssued,
                 },
             },
         };
@@ -252,26 +310,24 @@ export default class StrategicAI {
         }));
     }
 
-    _calculateEstimatedDefense(target) {
-        const intel = target.intel || {};
-        const estimatedDefenseTroops = intel.payload?.troops || {};
-        const wallLevel = intel.payload?.buildings?.wallLevel || 0;
+    _calculateEstimatedDefense(target, attackerProportions = { infantry: 0.5, cavalry: 0.5 }) {
+        const contingents = this._buildIntelDefendingContingents(target);
+        const wallLevel = target.intel?.payload?.buildings?.wallLevel || 0;
+        const palaceLevel = target.intel?.payload?.buildings?.residenceLevel || 0;
         return CombatFormulas.calculateDefensePoints(
-            [{ troops: estimatedDefenseTroops, race: target.data.race, smithyUpgrades: {} }],
-            { infantry: 0.5, cavalry: 0.5 },
+            contingents,
+            attackerProportions,
             target.data.race,
             wallLevel,
-            0,
+            palaceLevel,
         );
     }
 
     _planNemesisDestruction(bestForce, target, race, archetype, log) {
         if (!bestForce) return [];
 
-        const intel = target.intel || {};
-        const estimatedDefenseTroops = intel.payload?.troops || {};
-        const wallLevel = intel.payload?.buildings?.wallLevel || 0;
-        const defPower = this._calculateEstimatedDefense(target);
+        const attackerPreview = CombatFormulas.calculateAttackPoints(bestForce.combatTroops || {}, race, bestForce.village?.smithy?.upgrades || {});
+        const defPower = this._calculateEstimatedDefense(target, this._getAttackerProportions(attackerPreview));
 
         if (defPower < 100) {
             const siegeCmds = this._planSiegeTrain(bestForce, target, log);
@@ -279,7 +335,7 @@ export default class StrategicAI {
         }
 
         const fullAttack = { ...bestForce.combatTroops };
-        const sim = this._simulateCombat(fullAttack, estimatedDefenseTroops, target.data.race, race, wallLevel, 'attack');
+        const sim = this._simulateCombatAgainstTarget(fullAttack, target, race, 'attack', bestForce.village?.smithy?.upgrades || {});
 
         if (sim.winner === 'attacker') {
             const totalMyTroops = Object.values(fullAttack).reduce((a, b) => a + b, 0);
@@ -336,25 +392,663 @@ export default class StrategicAI {
         return best;
     }
 
-    _scanAndClassifyTargets(gameState, forces, myOwnerId, nemesisId, log, nemesisInterval, generalInterval) {
+    _scanAndClassifyTargets(gameState, forces, myOwnerId, race, gameSpeed, nemesisId, log, priorityIntelTargetIds, nemesisInterval, generalInterval) {
         return scanAndClassifyTargets({
             gameState,
             forces,
             myOwnerId,
+            race,
+            gameSpeed,
             nemesisId,
             log,
+            priorityIntelTargetIds,
             nemesisInterval,
             generalInterval,
             searchRadius,
         });
     }
 
-    _dispatchSpies(forces, target, baseCount, log, reason, isRetry = false, lastCount = 0) {
-        return dispatchSpies(forces, target, baseCount, log, reason, isRetry, lastCount);
+    _dispatchSpies(forces, target, baseCount, log, reason, isRetry = false, lastCount = 0, options = {}) {
+        return dispatchSpies(forces, target, baseCount, log, reason, isRetry, lastCount, options);
     }
 
-    _performGeneralIntelligence(forces, unknownTargets, nemesisId) {
-        return performGeneralIntelligence(forces, unknownTargets, nemesisId, scoutsPerMission);
+    _performGeneralIntelligence(forces, unknownTargets, nemesisId, options = {}) {
+        return performGeneralIntelligence(forces, unknownTargets, nemesisId, scoutsPerMission, options);
+    }
+
+    _collectPriorityIntelTargetIds(combatContractByVillage = {}) {
+        const targetIds = new Set();
+
+        Object.values(combatContractByVillage || {}).forEach(combatState => {
+            if (!combatState || !combatState.attackerVillageId) return;
+
+            const severeThreat = Boolean(combatState.shouldRescoutAttacker)
+                || combatState.threatLevel === 'high'
+                || combatState.threatLevel === 'critical'
+                || combatState.threatType === 'multi_wave_attack'
+                || combatState.threatType === 'siege_attack'
+                || combatState.threatType === 'conquest_attack';
+
+            if (severeThreat) {
+                targetIds.add(combatState.attackerVillageId);
+            }
+        });
+
+        return [...targetIds];
+    }
+
+    _resolveOffensiveDoctrine(race, archetype) {
+        const isGermanic = race === 'germans' || race === 'huns' || archetype === 'rusher';
+        const isEgyptian = race === 'egyptians' || archetype === 'turtle';
+
+        if (isGermanic) {
+            return {
+                doctrineId: 'germanic_pressure',
+                reserveDefensiveRatio: 0.30,
+                reserveOffensiveRatio: 0.12,
+                minDefenseReservePoints: 180,
+                minAttackPower: 220,
+                maxStrategicAttacksPerCycle: 2,
+                maxDistance: 45,
+                requireIsolatedTarget: false,
+                allowMultiWave: true,
+                multiWaveMinMargin: 1.45,
+                baseCommitRatio: 0.68,
+                maxLossPercent: 0.62,
+                minVictoryMargin: 1.05,
+                targetWeights: {
+                    nemesis: 170,
+                    punish_exposed_army: 135,
+                    high_value_siege_target: 108,
+                    economic_village: 96,
+                    military_village: 90,
+                    expansion_village: 88,
+                },
+                commitRatioByType: {
+                    nemesis: 0.82,
+                    punish_exposed_army: 0.76,
+                    high_value_siege_target: 0.74,
+                    economic_village: 0.70,
+                    military_village: 0.68,
+                    expansion_village: 0.66,
+                },
+                minMarginByType: {
+                    nemesis: 1.08,
+                    punish_exposed_army: 1.02,
+                    high_value_siege_target: 1.12,
+                    economic_village: 1.05,
+                    military_village: 1.12,
+                    expansion_village: 1.10,
+                },
+                maxLossByType: {
+                    punish_exposed_army: 0.68,
+                    high_value_siege_target: 0.62,
+                    nemesis: 0.65,
+                },
+            };
+        }
+
+        if (isEgyptian) {
+            return {
+                doctrineId: 'egyptian_guarded_pressure',
+                reserveDefensiveRatio: 0.56,
+                reserveOffensiveRatio: 0.28,
+                minDefenseReservePoints: 340,
+                minAttackPower: 260,
+                maxStrategicAttacksPerCycle: 1,
+                maxDistance: 32,
+                requireIsolatedTarget: true,
+                allowMultiWave: false,
+                multiWaveMinMargin: 99,
+                baseCommitRatio: 0.48,
+                maxLossPercent: 0.38,
+                minVictoryMargin: 1.28,
+                targetWeights: {
+                    nemesis: 150,
+                    punish_exposed_army: 90,
+                    high_value_siege_target: 108,
+                    economic_village: 92,
+                    military_village: 84,
+                    expansion_village: 104,
+                },
+                commitRatioByType: {
+                    nemesis: 0.60,
+                    punish_exposed_army: 0.44,
+                    high_value_siege_target: 0.58,
+                    economic_village: 0.46,
+                    military_village: 0.42,
+                    expansion_village: 0.54,
+                },
+                minMarginByType: {
+                    nemesis: 1.32,
+                    punish_exposed_army: 1.30,
+                    high_value_siege_target: 1.34,
+                    economic_village: 1.28,
+                    military_village: 1.30,
+                    expansion_village: 1.34,
+                },
+                maxLossByType: {
+                    nemesis: 0.40,
+                    high_value_siege_target: 0.36,
+                    expansion_village: 0.34,
+                },
+            };
+        }
+
+        return {
+            doctrineId: 'balanced_offense',
+            reserveDefensiveRatio: 0.42,
+            reserveOffensiveRatio: 0.20,
+            minDefenseReservePoints: 240,
+            minAttackPower: 240,
+            maxStrategicAttacksPerCycle: 1,
+            maxDistance: 36,
+            requireIsolatedTarget: false,
+            allowMultiWave: false,
+            multiWaveMinMargin: 99,
+            baseCommitRatio: 0.56,
+            maxLossPercent: 0.50,
+            minVictoryMargin: 1.16,
+            targetWeights: {
+                nemesis: 150,
+                punish_exposed_army: 110,
+                high_value_siege_target: 104,
+                economic_village: 96,
+                military_village: 92,
+                expansion_village: 98,
+            },
+            commitRatioByType: {},
+            minMarginByType: {},
+            maxLossByType: {},
+        };
+    }
+
+    _planDoctrinalStrategicOffense({
+        forces,
+        targets,
+        gameState,
+        ownerId,
+        race,
+        nemesisId,
+        doctrine,
+        log,
+    }) {
+        const commands = [];
+        const logs = [];
+        const usedVillages = new Set();
+        const maxCommands = Math.max(0, doctrine.maxStrategicAttacksPerCycle || 0);
+
+        const candidateTargets = targets
+            .filter(target => !this._hasActiveAttack(gameState, target.id, ownerId))
+            .filter(target => !this._isTargetUnderProtection(gameState, target.ownerId))
+            .map(target => {
+                const targetType = this._classifyStrategicTargetType(target, nemesisId);
+                const baseScore = this._scoreStrategicTarget({
+                    target,
+                    targetType,
+                    doctrine,
+                    gameState,
+                    ownerId,
+                    race,
+                });
+                return {
+                    target,
+                    targetType,
+                    baseScore,
+                };
+            })
+            .sort((a, b) => b.baseScore - a.baseScore);
+
+        for (const candidate of candidateTargets) {
+            if (commands.length >= maxCommands) break;
+
+            const bestPlan = this._buildBestForcePlanForTarget({
+                forces,
+                usedVillages,
+                target: candidate.target,
+                targetType: candidate.targetType,
+                targetBaseScore: candidate.baseScore,
+                race,
+                doctrine,
+                gameState,
+            });
+
+            if (!bestPlan) continue;
+
+            commands.push(bestPlan.command);
+            if (bestPlan.followUpCommand) {
+                commands.push(bestPlan.followUpCommand);
+            }
+            usedVillages.add(bestPlan.force.village.id);
+
+            this._consumeTroops(bestPlan.force, bestPlan.troopsCommitted);
+            if (bestPlan.followUpTroopsCommitted) {
+                this._consumeTroops(bestPlan.force, bestPlan.followUpTroopsCommitted);
+            }
+
+            logs.push(
+                `[OFENSIVA-${doctrine.doctrineId}] ${bestPlan.force.village.name} -> ${candidate.target.data.name} ` +
+                `tipo=${candidate.targetType} margen=${bestPlan.victoryMargin.toFixed(2)} ` +
+                `loss=${(bestPlan.lossPercent * 100).toFixed(0)}% power=${Math.round(bestPlan.attackPower)}.`
+            );
+        }
+
+        if (candidateTargets.length > 0 && commands.length === 0) {
+            logs.push(`[OFENSIVA-${doctrine.doctrineId}] Sin ataques estratégicos válidos por certeza doctrinal/reserva defensiva.`);
+        }
+
+        return {
+            commands,
+            logs,
+        };
+    }
+
+    _buildBestForcePlanForTarget({ forces, usedVillages, target, targetType, targetBaseScore, race, doctrine, gameState }) {
+        let best = null;
+
+        forces.forEach(force => {
+            if (!force || usedVillages.has(force.village.id)) return;
+
+            const plan = this._buildForceAttackPlan({
+                force,
+                target,
+                targetType,
+                targetBaseScore,
+                race,
+                doctrine,
+                gameState,
+            });
+            if (!plan) return;
+
+            if (!best || plan.finalScore > best.finalScore) {
+                best = plan;
+            }
+        });
+
+        return best;
+    }
+
+    _buildForceAttackPlan({ force, target, targetType, targetBaseScore, race, doctrine, gameState }) {
+        const distance = Math.hypot(
+            target.coords.x - force.village.coords.x,
+            target.coords.y - force.village.coords.y,
+        );
+
+        if (distance > doctrine.maxDistance && targetType !== 'nemesis') {
+            return null;
+        }
+
+        const reservePlan = this._buildDefenseReservePlan(force, race, doctrine);
+        const attackReadyTroops = reservePlan.attackReadyTroops;
+        const readyPower = CombatFormulas.calculateAttackPoints(attackReadyTroops, race, force.village.smithy?.upgrades || {}).total;
+        if (readyPower < doctrine.minAttackPower) return null;
+
+        const commitRatio = doctrine.commitRatioByType[targetType] || doctrine.baseCommitRatio;
+        const troopsToSend = this._selectTroopsForAttack({
+            troops: attackReadyTroops,
+            race,
+            targetType,
+            commitRatio,
+        });
+
+        const attackPower = CombatFormulas.calculateAttackPoints(troopsToSend, race, force.village.smithy?.upgrades || {}).total;
+        if (attackPower < doctrine.minAttackPower) return null;
+
+        const sim = this._simulateCombatAgainstTarget(troopsToSend, target, race, 'attack', force.village?.smithy?.upgrades || {});
+        const totalSent = this._countTroops(troopsToSend);
+        const totalLost = this._countTroops(sim.losses);
+        const lossPercent = totalSent > 0 ? totalLost / totalSent : 1;
+
+        const attackerBreakdown = CombatFormulas.calculateAttackPoints(troopsToSend, race, force.village.smithy?.upgrades || {});
+        const attackerProportions = this._getAttackerProportions(attackerBreakdown);
+        const estimatedDefense = this._calculateEstimatedDefense(target, attackerProportions);
+        const victoryMargin = attackPower / Math.max(estimatedDefense, 1);
+
+        const minMargin = doctrine.minMarginByType[targetType] || doctrine.minVictoryMargin;
+        const maxLoss = doctrine.maxLossByType[targetType] || doctrine.maxLossPercent;
+        if (sim.winner !== 'attacker') return null;
+        if (victoryMargin < minMargin) return null;
+        if (lossPercent > maxLoss) return null;
+        if (doctrine.requireIsolatedTarget && this._countNearbyEnemyVillages(gameState, target, 16) > 2) return null;
+
+        const command = {
+            comando: 'ATTACK',
+            villageId: force.village.id,
+            parametros: {
+                targetCoords: target.coords,
+                tropas: troopsToSend,
+                mision: 'attack',
+                catapultTargets: this._resolveCatapultTargetsByType(targetType),
+            },
+            meta: {
+                strategicTargetType: targetType,
+                doctrine: doctrine.doctrineId,
+                confidence: Number(victoryMargin.toFixed(3)),
+                estimatedLossPercent: Number(lossPercent.toFixed(3)),
+            },
+        };
+
+        const finalScore = targetBaseScore
+            + (victoryMargin * 35)
+            - (lossPercent * 28)
+            - (distance * 0.55)
+            + (reservePlan.reservedDefense >= doctrine.minDefenseReservePoints ? 8 : 0);
+
+        let followUpCommand = null;
+        let followUpTroopsCommitted = null;
+        if (doctrine.allowMultiWave && victoryMargin >= doctrine.multiWaveMinMargin) {
+            const remaining = this._subtractTroops(attackReadyTroops, troopsToSend);
+            const followUpTroops = this._selectTroopsForAttack({
+                troops: remaining,
+                race,
+                targetType,
+                commitRatio: 0.42,
+            });
+            const followUpPower = CombatFormulas.calculateAttackPoints(followUpTroops, race, force.village.smithy?.upgrades || {}).total;
+            if (followUpPower >= doctrine.minAttackPower * 0.5) {
+                followUpCommand = {
+                    comando: 'ATTACK',
+                    villageId: force.village.id,
+                    parametros: {
+                        targetCoords: target.coords,
+                        tropas: followUpTroops,
+                        mision: 'attack',
+                        catapultTargets: this._resolveCatapultTargetsByType(targetType),
+                    },
+                    meta: {
+                        strategicTargetType: targetType,
+                        doctrine: doctrine.doctrineId,
+                        wave: 'follow_up',
+                    },
+                };
+                followUpTroopsCommitted = followUpTroops;
+            }
+        }
+
+        return {
+            force,
+            command,
+            followUpCommand,
+            troopsCommitted: troopsToSend,
+            followUpTroopsCommitted,
+            victoryMargin,
+            lossPercent,
+            attackPower,
+            finalScore,
+        };
+    }
+
+    _classifyStrategicTargetType(target, nemesisId) {
+        if (target.ownerId === nemesisId) return 'nemesis';
+
+        const intel = target.intel?.payload || {};
+        const troops = intel.troops || {};
+        const troopCount = this._countTroops(troops);
+        const population = Number(target.data?.population?.current || target.population?.current || 0);
+        const wallLevel = Number(intel.buildings?.wallLevel || 0);
+        const residenceLevel = Number(intel.buildings?.residenceLevel || 0);
+        const defensePower = Number(intel.poder_defensivo_calculado || 0);
+        const resources = intel.resources || {};
+        const resourceTotal = (resources.wood || 0) + (resources.stone || 0) + (resources.iron || 0) + (resources.food || 0);
+
+        const hasExpansionSignal = residenceLevel >= 10 || this._hasConquestTroops(troops, target.data?.race);
+        const hasHighSiegeValue = wallLevel >= 14 || (target.data?.buildings || []).some(building =>
+            (building.type === 'academy' && building.level >= 12)
+            || (building.type === 'workshop' && building.level >= 8)
+            || (building.type === 'palace' && building.level >= 10),
+        );
+        const hasMilitarySignal = defensePower >= 700 || (target.data?.buildings || []).some(building =>
+            (building.type === 'barracks' && building.level >= 14)
+            || (building.type === 'stable' && building.level >= 10)
+            || (building.type === 'cityWall' && building.level >= 12),
+        );
+
+        if (troopCount <= 45 && population >= 320) return 'punish_exposed_army';
+        if (hasHighSiegeValue) return 'high_value_siege_target';
+        if (hasExpansionSignal) return 'expansion_village';
+        if (hasMilitarySignal) return 'military_village';
+        if (resourceTotal >= 1500) return 'economic_village';
+        return 'economic_village';
+    }
+
+    _scoreStrategicTarget({ target, targetType, doctrine, gameState, ownerId, race }) {
+        const intel = target.intel?.payload || {};
+        const resources = intel.resources || {};
+        const troopCount = this._countTroops(intel.troops || {});
+        const resourceTotal = (resources.wood || 0) + (resources.stone || 0) + (resources.iron || 0) + (resources.food || 0);
+        const defensePower = Number(intel.poder_defensivo_calculado || 0);
+        const wallLevel = Number(intel.buildings?.wallLevel || 0);
+        const base = doctrine.targetWeights[targetType] || 80;
+
+        let score = base;
+        if (targetType === 'economic_village') {
+            score += resourceTotal / 260;
+            score += Math.max(0, 120 - defensePower) / 9;
+        }
+        if (targetType === 'punish_exposed_army') {
+            const pop = Number(target.data?.population?.current || 0);
+            score += Math.max(0, pop - troopCount) / 5;
+            score += Math.max(0, 10 - wallLevel) * 2.4;
+        }
+        if (targetType === 'high_value_siege_target') {
+            score += wallLevel * 1.6;
+            score += Math.max(0, defensePower - 400) / 25;
+        }
+        if (targetType === 'expansion_village') {
+            score += Math.max(0, (intel.buildings?.residenceLevel || 0) - 7) * 3;
+        }
+        if (targetType === 'military_village') {
+            score += Math.max(0, defensePower - 500) / 40;
+        }
+
+        const ownerVillagesNearby = this._countNearbyEnemyVillages(gameState, target, 16);
+        if (race === 'egyptians') {
+            score += Math.max(0, 3 - ownerVillagesNearby) * 8;
+            score -= ownerVillagesNearby * 5;
+        }
+        if (race === 'germans' || race === 'huns') {
+            score += Math.max(0, 12 - wallLevel) * 2.2;
+            score += Math.max(0, 140 - troopCount) / 6;
+        }
+
+        if (target.intelGate?.context === 'recent_attacker') {
+            score += 12;
+        }
+        if (target.intelGate?.context === 'dangerous_neighbor' && race === 'egyptians') {
+            score += 10;
+        }
+
+        if (this._isTargetUnderProtection(gameState, target.ownerId)) {
+            score -= 1000;
+        }
+        if (target.ownerId === ownerId || target.ownerId === 'nature') {
+            score -= 1000;
+        }
+
+        return score;
+    }
+
+    _buildDefenseReservePlan(force, race, doctrine) {
+        const baseTroops = { ...(force.combatTroops || {}) };
+        const reservedTroops = {};
+        const attackReadyTroops = {};
+        const smithyUpgrades = force.village?.smithy?.upgrades || {};
+
+        Object.entries(baseTroops).forEach(([unitId, count]) => {
+            const available = Math.max(0, Number(count) || 0);
+            if (available <= 0) return;
+
+            const unitData = this._findUnitDataById(race, unitId);
+            const isDefensiveRole = unitData?.role === 'defensive' || unitData?.role === 'versatile';
+            const keepRatio = isDefensiveRole ? doctrine.reserveDefensiveRatio : doctrine.reserveOffensiveRatio;
+            const reserveCount = Math.min(available, Math.floor(available * keepRatio));
+            const freeCount = Math.max(0, available - reserveCount);
+
+            if (reserveCount > 0) reservedTroops[unitId] = reserveCount;
+            if (freeCount > 0) attackReadyTroops[unitId] = freeCount;
+        });
+
+        let reservedDefense = this._estimateVillageDefenseWithTroops(force.village, reservedTroops, race, smithyUpgrades);
+        if (reservedDefense < doctrine.minDefenseReservePoints) {
+            const movable = Object.entries(attackReadyTroops)
+                .map(([unitId, count]) => ({
+                    unitId,
+                    count,
+                    unitData: this._findUnitDataById(race, unitId),
+                }))
+                .filter(entry => entry.count > 0 && entry.unitData)
+                .sort((a, b) => this._getUnitDefenseWeight(b.unitData) - this._getUnitDefenseWeight(a.unitData));
+
+            movable.forEach(entry => {
+                if (reservedDefense >= doctrine.minDefenseReservePoints) return;
+
+                const perUnitDefense = this._getUnitDefenseWeight(entry.unitData);
+                if (perUnitDefense <= 0) return;
+
+                const deficit = doctrine.minDefenseReservePoints - reservedDefense;
+                const toReserve = Math.min(entry.count, Math.max(1, Math.ceil(deficit / perUnitDefense)));
+                if (toReserve <= 0) return;
+
+                attackReadyTroops[entry.unitId] -= toReserve;
+                if (attackReadyTroops[entry.unitId] <= 0) delete attackReadyTroops[entry.unitId];
+                reservedTroops[entry.unitId] = (reservedTroops[entry.unitId] || 0) + toReserve;
+                reservedDefense = this._estimateVillageDefenseWithTroops(force.village, reservedTroops, race, smithyUpgrades);
+            });
+        }
+
+        return {
+            reservedTroops,
+            attackReadyTroops,
+            reservedDefense,
+        };
+    }
+
+    _selectTroopsForAttack({ troops, race, targetType, commitRatio }) {
+        const source = { ...(troops || {}) };
+        const totalUnits = this._countTroops(source);
+        if (totalUnits <= 0) return {};
+
+        const targetUnits = Math.max(20, Math.floor(totalUnits * Math.max(0.1, Math.min(0.95, commitRatio))));
+        const selected = {};
+        const preference = this._getTargetTypeRolePreference(targetType);
+
+        const ranked = Object.entries(source)
+            .map(([unitId, count]) => ({
+                unitId,
+                count,
+                unitData: this._findUnitDataById(race, unitId),
+            }))
+            .filter(entry => entry.count > 0 && entry.unitData)
+            .sort((a, b) => {
+                const aRoleRank = preference.indexOf(a.unitData.role);
+                const bRoleRank = preference.indexOf(b.unitData.role);
+                const aRank = aRoleRank === -1 ? 99 : aRoleRank;
+                const bRank = bRoleRank === -1 ? 99 : bRoleRank;
+                if (aRank !== bRank) return aRank - bRank;
+
+                const aAttack = Number(a.unitData.stats?.attack || 0);
+                const bAttack = Number(b.unitData.stats?.attack || 0);
+                return bAttack - aAttack;
+            });
+
+        let picked = 0;
+        ranked.forEach(entry => {
+            if (picked >= targetUnits) return;
+            const take = Math.min(entry.count, targetUnits - picked);
+            if (take <= 0) return;
+            selected[entry.unitId] = take;
+            picked += take;
+        });
+
+        return selected;
+    }
+
+    _getTargetTypeRolePreference(targetType) {
+        if (targetType === 'high_value_siege_target' || targetType === 'nemesis') {
+            return ['catapult', 'ram', 'offensive', 'versatile', 'defensive'];
+        }
+        if (targetType === 'military_village') {
+            return ['offensive', 'catapult', 'ram', 'versatile', 'defensive'];
+        }
+        if (targetType === 'expansion_village') {
+            return ['offensive', 'versatile', 'catapult', 'ram', 'defensive'];
+        }
+        if (targetType === 'punish_exposed_army') {
+            return ['offensive', 'versatile', 'ram', 'catapult', 'defensive'];
+        }
+        return ['offensive', 'versatile', 'catapult', 'ram', 'defensive'];
+    }
+
+    _resolveCatapultTargetsByType(targetType) {
+        if (targetType === 'high_value_siege_target' || targetType === 'nemesis') {
+            return ['mainBuilding', 'granary'];
+        }
+        if (targetType === 'expansion_village') {
+            return ['residence', 'mainBuilding'];
+        }
+        if (targetType === 'military_village') {
+            return ['barracks', 'stable'];
+        }
+        return [];
+    }
+
+    _countNearbyEnemyVillages(gameState, target, radius) {
+        return gameState.villages.filter(village => {
+            if (!village || village.ownerId !== target.ownerId) return false;
+            if (village.id === target.id) return false;
+            const dist = Math.hypot(village.coords.x - target.coords.x, village.coords.y - target.coords.y);
+            return dist <= radius;
+        }).length;
+    }
+
+    _hasConquestTroops(troops = {}, race) {
+        const raceUnits = gameData.units[race]?.troops || [];
+        for (const unitId in troops) {
+            if ((troops[unitId] || 0) <= 0) continue;
+            const unitData = raceUnits.find(unit => unit.id === unitId);
+            if (!unitData) continue;
+            if (unitData.role === 'conquest' || unitData.type === 'chief' || unitData.type === 'settler') {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    _isTargetUnderProtection(gameState, ownerId) {
+        if (!ownerId || ownerId === 'nature') return false;
+        const player = gameState.players.find(candidate => candidate.id === ownerId);
+        return Boolean(player?.isUnderProtection);
+    }
+
+    _estimateVillageDefenseWithTroops(village, troops, race, smithyUpgrades = {}) {
+        const wallLevel = village.buildings?.find(building => building.type === 'cityWall')?.level || 0;
+        const palaceLevel = village.buildings?.find(building => building.type === 'palace' || building.type === 'residence')?.level || 0;
+        return CombatFormulas.calculateDefensePoints(
+            [{ troops, race, smithyUpgrades }],
+            { infantry: 0.5, cavalry: 0.5 },
+            race,
+            wallLevel,
+            palaceLevel,
+        );
+    }
+
+    _findUnitDataById(race, unitId) {
+        return gameData.units[race]?.troops?.find(unit => unit.id === unitId) || null;
+    }
+
+    _getUnitDefenseWeight(unitData) {
+        if (!unitData || !unitData.stats?.defense) return 0;
+        return ((Number(unitData.stats.defense.infantry || 0) * 0.5) + (Number(unitData.stats.defense.cavalry || 0) * 0.5));
+    }
+
+    _subtractTroops(baseTroops = {}, toSubtract = {}) {
+        const result = {};
+        const unitIds = new Set([...Object.keys(baseTroops), ...Object.keys(toSubtract)]);
+        unitIds.forEach(unitId => {
+            const remaining = (baseTroops[unitId] || 0) - (toSubtract[unitId] || 0);
+            if (remaining > 0) result[unitId] = remaining;
+        });
+        return result;
     }
 
     _manageNemesis(gameState, myOwnerId, aiState, log) {
@@ -451,6 +1145,8 @@ export default class StrategicAI {
             reservedTroops: { ...(state.reservedTroops || {}) },
             counterWindowOpen: Boolean(state.counterWindowOpen),
             attackerVillageId: state.attackerVillageId || null,
+            shouldRescoutAttacker: Boolean(state.shouldRescoutAttacker),
+            rescoutReason: state.rescoutReason || null,
         };
     }
 
@@ -470,8 +1166,8 @@ export default class StrategicAI {
         if (combatContract?.offenseSuppressed) {
             reasons.push('offenseSuppressed=true');
         }
-        if (reservedTroopsCount > 0) {
-            reasons.push(`reservedTroops=${reservedTroopsCount}`);
+        if (combatContract?.counterWindowOpen) {
+            reasons.push('counterWindowOpen=true');
         }
         if (preferredResponse === 'partial_dodge' || preferredResponse === 'full_dodge' || preferredResponse === 'hold_with_reinforcements' || preferredResponse === 'reinforce') {
             reasons.push(`preferredResponse=${preferredResponse}`);
@@ -479,21 +1175,73 @@ export default class StrategicAI {
 
         return {
             blocked: reasons.length > 0,
-            reasons,
+            reasons: reservedTroopsCount > 0
+                ? [...reasons, `reservedTroops=${reservedTroopsCount}`]
+                : reasons,
         };
     }
 
-    _simulateCombat(attackTroops, defenseTroops, defRace, attRace, wallLevel, type) {
-        const attPoints = CombatFormulas.calculateAttackPoints(attackTroops, attRace, {});
-        const defContingent = [{ troops: defenseTroops, race: defRace, smithyUpgrades: {} }];
+    _buildIntelDefendingContingents(target) {
+        const primaryTroops = target.intel?.payload?.troops || {};
+        const contingents = [{
+            troops: primaryTroops,
+            race: target.data.race,
+            smithyUpgrades: {},
+        }];
+
+        const reinforcements = target.intel?.payload?.refuerzos_vistos || [];
+        reinforcements.forEach(reinforcement => {
+            if (!reinforcement?.troops || this._countTroops(reinforcement.troops) <= 0) return;
+            contingents.push({
+                troops: reinforcement.troops,
+                race: reinforcement.race || target.data.race,
+                smithyUpgrades: reinforcement.smithyUpgradesSnapshot || {},
+            });
+        });
+
+        return contingents;
+    }
+
+    _getAttackerProportions(attackBreakdown) {
+        const inf = Number(attackBreakdown?.infantry || 0);
+        const cav = Number(attackBreakdown?.cavalry || 0);
+        const total = inf + cav;
+        if (total <= 0) {
+            return { infantry: 0.5, cavalry: 0.5 };
+        }
+
+        return {
+            infantry: inf / total,
+            cavalry: cav / total,
+        };
+    }
+
+    _simulateCombatAgainstTarget(attackTroops, target, attRace, type, attackerSmithyUpgrades = {}) {
+        const attackBreakdown = CombatFormulas.calculateAttackPoints(attackTroops, attRace, attackerSmithyUpgrades);
+        const attackerProportions = this._getAttackerProportions(attackBreakdown);
+        const defContingent = this._buildIntelDefendingContingents(target);
+        const wallLevel = target.intel?.payload?.buildings?.wallLevel || 0;
+        const palaceLevel = target.intel?.payload?.buildings?.residenceLevel || 0;
+        const defRace = target.data.race;
+
         const defPoints = CombatFormulas.calculateDefensePoints(
             defContingent,
-            { infantry: 0.5, cavalry: 0.5 },
+            attackerProportions,
             defRace,
             wallLevel,
-            0,
+            palaceLevel,
         );
 
+        return this._calculateCombatOutcome({
+            attackTroops,
+            defenseTroops: target.intel?.payload?.troops || {},
+            attackPower: attackBreakdown.total,
+            defensePower: defPoints,
+            type,
+        });
+    }
+
+    _calculateCombatOutcome({ attackTroops, defenseTroops, attackPower, defensePower, type }) {
         const calculateLossesByRatio = (troops, ratio) => {
             const losses = {};
             for (const unitId in troops) {
@@ -509,27 +1257,48 @@ export default class StrategicAI {
         let defenderLossPercent = 0;
 
         if (type === 'raid') {
-            if (attPoints.total > defPoints) {
-                attackerLossPercent = CombatFormulas.calculateRaidWinnerLosses(attPoints.total, defPoints);
+            if (attackPower > defensePower) {
+                attackerLossPercent = CombatFormulas.calculateRaidWinnerLosses(attackPower, defensePower);
                 defenderLossPercent = 1.0 - attackerLossPercent;
             } else {
-                attackerLossPercent = 1.0 - CombatFormulas.calculateRaidWinnerLosses(defPoints, attPoints.total);
+                attackerLossPercent = 1.0 - CombatFormulas.calculateRaidWinnerLosses(defensePower, attackPower);
                 defenderLossPercent = 1.0 - attackerLossPercent;
             }
         } else {
-            if (attPoints.total > defPoints) {
-                attackerLossPercent = CombatFormulas.calculateLosses(attPoints.total, defPoints);
+            if (attackPower > defensePower) {
+                attackerLossPercent = CombatFormulas.calculateLosses(attackPower, defensePower);
                 defenderLossPercent = 1.0;
             } else {
                 attackerLossPercent = 1.0;
-                defenderLossPercent = CombatFormulas.calculateLosses(defPoints, attPoints.total);
+                defenderLossPercent = CombatFormulas.calculateLosses(defensePower, attackPower);
             }
         }
 
         return {
-            winner: attPoints.total > defPoints ? 'attacker' : 'defender',
+            winner: attackPower > defensePower ? 'attacker' : 'defender',
             losses: calculateLossesByRatio(attackTroops, attackerLossPercent),
             defenderLosses: calculateLossesByRatio(defenseTroops, defenderLossPercent),
         };
+    }
+
+    _simulateCombat(attackTroops, defenseTroops, defRace, attRace, wallLevel, type) {
+        const attPoints = CombatFormulas.calculateAttackPoints(attackTroops, attRace, {});
+        const attackerProportions = this._getAttackerProportions(attPoints);
+        const defContingent = [{ troops: defenseTroops, race: defRace, smithyUpgrades: {} }];
+        const defPoints = CombatFormulas.calculateDefensePoints(
+            defContingent,
+            attackerProportions,
+            defRace,
+            wallLevel,
+            0,
+        );
+
+        return this._calculateCombatOutcome({
+            attackTroops,
+            defenseTroops,
+            attackPower: attPoints.total,
+            defensePower: defPoints,
+            type,
+        });
     }
 }

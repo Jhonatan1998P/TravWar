@@ -1,5 +1,6 @@
 import gameManager from '@game/state/GameManager.js';
 import { gameData } from '../core/GameData.js';
+import { getScaledCrannyCapacity, getScaledMerchantCapacityPerUnit, scaleCapacityByGameSpeed } from '../core/capacityScaling.js';
 import GameConfig from '../state/GameConfig.js';
 import { formatNumber, formatTime } from '@shared/lib/formatters.js';
 import toastUI from './ToastUI.js';
@@ -37,6 +38,7 @@ class BuildingInfoUI {
     #gameConfig = null;
     #showAllBuildings = false;
     #showAllUnits = false;
+    #lastOpenedAt = 0;
 
     constructor() {
         this.#mainContainer = document.getElementById('village-container');
@@ -133,6 +135,12 @@ class BuildingInfoUI {
 
     _handleUpgradeClick() {
         if (!this.#currentSlotId || !this.#viewingType) return;
+
+        const timeSinceOpen = Date.now() - this.#lastOpenedAt;
+        if (timeSinceOpen < 500) {
+            return;
+        }
+
         gameManager.sendCommand('upgrade_building', {
             buildingId: this.#currentSlotId,
             buildingType: this.#viewingType
@@ -244,6 +252,8 @@ class BuildingInfoUI {
     show(slotId) {
         if (!this.#currentGameState) return;
         document.getElementById('building-tooltip').classList.add('hidden');
+
+        this.#lastOpenedAt = Date.now();
         
         this.#panelElement.classList.remove('panel-hidden');
         this.#panelElement.classList.add('panel-visible');
@@ -413,7 +423,7 @@ class BuildingInfoUI {
         }
     }
 
-    _getBenefitText(attribute, currentValue, nextValue) {
+    _getBenefitText(attribute, currentValue, nextValue, context = {}) {
         if (!attribute) return '';
         const formatBenefit = (label, current, next, unit = '') => 
             `<li>${label}: <span class="font-mono text-gray-300">${current}${unit}</span> -> <span class="font-mono text-green-400">${next}${unit}</span></li>`;
@@ -441,7 +451,16 @@ class BuildingInfoUI {
             return formatBenefit('Bono de defensa', `${currentValue}%`, `${nextValue}%`);
         }
         if (attribute.merchantCapacity) {
-            return formatBenefit('Mercaderes', currentValue, nextValue);
+            const currentPerMerchant = Math.max(0, Number(context.currentPerMerchant) || 0);
+            const nextPerMerchant = Math.max(0, Number(context.nextPerMerchant) || 0);
+            const currentTotalCapacity = currentValue * currentPerMerchant;
+            const nextTotalCapacity = nextValue * nextPerMerchant;
+
+            return [
+                formatBenefit('Mercaderes', currentValue, nextValue),
+                formatBenefit('Cap. por mercader', formatNumber(currentPerMerchant), formatNumber(nextPerMerchant)),
+                formatBenefit('Capacidad total', formatNumber(currentTotalCapacity), formatNumber(nextTotalCapacity)),
+            ].join('');
         }
         if (attribute.memberSlots) {
             return formatBenefit('Miembros de alianza', currentValue, nextValue);
@@ -455,11 +474,13 @@ class BuildingInfoUI {
         return '';
     }
 
-    _getBenefitsHTML(buildingData, currentLevel, nextLevelData) {
+    _getBenefitsHTML(buildingData, currentLevel, nextLevelData, activeVillage) {
         if (!nextLevelData) return '';
     
         const currentLevelData = currentLevel > 0 ? buildingData.levels[currentLevel - 1] : null;
         let benefitsList = '';
+        const activeRace = activeVillage?.race || '';
+        const gameSpeed = this.#gameConfig?.gameSpeed || 1;
     
         if (nextLevelData.production) {
             const resType = Object.keys(nextLevelData.production)[0];
@@ -475,9 +496,32 @@ class BuildingInfoUI {
         if (nextLevelData.attribute) {
             for (const key in nextLevelData.attribute) {
                 const isFactor = key.includes('Factor');
-                const currentValue = currentLevelData?.attribute?.[key] || (isFactor ? 1.0 : 0);
-                const nextValue = nextLevelData.attribute[key];
-                benefitsList += this._getBenefitText({ [key]: true }, currentValue, nextValue);
+                const rawCurrentValue = currentLevelData?.attribute?.[key] || (isFactor ? 1.0 : 0);
+                const rawNextValue = nextLevelData.attribute[key];
+                let currentValue = rawCurrentValue;
+                let nextValue = rawNextValue;
+                let context = {};
+
+                if (key === 'storageCapacity') {
+                    currentValue = scaleCapacityByGameSpeed(rawCurrentValue, gameSpeed);
+                    nextValue = scaleCapacityByGameSpeed(rawNextValue, gameSpeed);
+                } else if (key === 'hidingCapacity') {
+                    currentValue = getScaledCrannyCapacity(rawCurrentValue, activeRace, gameSpeed);
+                    nextValue = getScaledCrannyCapacity(rawNextValue, activeRace, gameSpeed);
+                } else if (key === 'merchantCapacity') {
+                    const merchantUnit = gameData.units[activeRace]?.troops.find(unit => unit.type === 'merchant');
+                    const perMerchantCapacity = getScaledMerchantCapacityPerUnit(
+                        activeRace,
+                        gameSpeed,
+                        merchantUnit?.stats?.capacity || 0,
+                    );
+                    context = {
+                        currentPerMerchant: perMerchantCapacity,
+                        nextPerMerchant: perMerchantCapacity,
+                    };
+                }
+
+                benefitsList += this._getBenefitText({ [key]: true }, currentValue, nextValue, context);
             }
         }
     
@@ -539,7 +583,7 @@ class BuildingInfoUI {
 
         const benefitsContainer = upgradeInfoContainer.querySelector('#benefits-container');
         if (benefitsContainer) {
-            benefitsContainer.innerHTML = this._getBenefitsHTML(buildingStaticData, effectiveCurrentLevel, nextLevelData);
+            benefitsContainer.innerHTML = this._getBenefitsHTML(buildingStaticData, effectiveCurrentLevel, nextLevelData, activeVillage);
         }
 
         const costs = { ...nextLevelData.cost, time: this._getFinalBuildTime(nextLevelData.buildTime), population: nextLevelData.population };

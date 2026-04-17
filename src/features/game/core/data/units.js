@@ -131,7 +131,7 @@ export const units = {
                   type: 'merchant',
                   role: 'trade',
                   upkeep: 2,
-                  stats: { speed: 16, capacity: 500 },
+                  stats: { speed: 16, capacity: 1500 },
               }
           ]
       },
@@ -399,7 +399,7 @@ export const units = {
                   type: 'merchant',
                   role: 'trade',
                   upkeep: 2,
-                  stats: { speed: 24, capacity: 750 },
+                  stats: { speed: 24, capacity: 2000 },
               }
           ]
       },
@@ -667,7 +667,7 @@ export const units = {
                   type: 'merchant',
                   role: 'trade',
                   upkeep: 2,
-                  stats: { speed: 16, capacity: 750 },
+                  stats: { speed: 16, capacity: 3000 },
               }
           ]
       },

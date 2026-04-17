@@ -5,11 +5,13 @@ import {
     getOasisSpeedMultiplier,
     isUnderBeginnerProtectionByPopulation,
 } from '../core/data/constants.js';
+import { scaleCapacityByGameSpeed } from '../core/capacityScaling.js';
 
 const MAP_SIZE = 25;
 const MIN_VILLAGE_DISTANCE = 5;
 const PLAYER_SPAWN_RADIUS = 5;
 const OASIS_DENSITY = 0.10;
+const STARTING_RESOURCES_BASE_CAPACITY_RATIO = 0.9;
 
 function getInitialOasisBeastAmount(spawnMin, gameSpeed) {
     const speedMultiplier = getOasisSpeedMultiplier(gameSpeed);
@@ -49,7 +51,15 @@ export class GameStateFactory {
         const { x: playerX, y: playerY, tileIndex: playerTileIndex, valleyType: playerValleyType } = this.#findValidSpawnPoint(mapData, spatialIndex, random, PLAYER_SPAWN_RADIUS);
         
         const playerVillageId = `v_${Date.now()}`;
-        allVillages.push(this.createVillageObject(playerVillageId, 'Nueva Aldea', this.#config.playerRace, 'player', { x: playerX, y: playerY }, '4-4-4-6'));
+        allVillages.push(this.createVillageObject(
+            playerVillageId,
+            'Nueva Aldea',
+            this.#config.playerRace,
+            'player',
+            { x: playerX, y: playerY },
+            '4-4-4-6',
+            { startResourcesFromBaseCapacityRatio: STARTING_RESOURCES_BASE_CAPACITY_RATIO },
+        ));
         
         mapData[playerTileIndex] = { x: playerX, y: playerY, type: 'village', villageId: playerVillageId, ownerId: 'player', race: this.#config.playerRace };
         spatialIndex.set(`${playerX}|${playerY}`, mapData[playerTileIndex]);
@@ -64,7 +74,15 @@ export class GameStateFactory {
             
             const finalValleyType = (ownerId === 'ai_0') ? '4-4-4-6' : randomValleyType;
             
-            allVillages.push(this.createVillageObject(aiVillageId, `Aldea IA ${i + 1}`, aiRace, ownerId, { x: aiX, y: aiY }, finalValleyType));
+            allVillages.push(this.createVillageObject(
+                aiVillageId,
+                `Aldea IA ${i + 1}`,
+                aiRace,
+                ownerId,
+                { x: aiX, y: aiY },
+                finalValleyType,
+                { startResourcesFromBaseCapacityRatio: STARTING_RESOURCES_BASE_CAPACITY_RATIO },
+            ));
             mapData[aiTileIndex] = { x: aiX, y: aiY, type: 'village', villageId: aiVillageId, ownerId: ownerId, race: aiRace };
             spatialIndex.set(`${aiX}|${aiY}`, mapData[aiTileIndex]);
         }
@@ -197,7 +215,19 @@ export class GameStateFactory {
         return index;
     }
 
-    createVillageObject(id, name, race, ownerId, coords, villageType) {
+    createVillageObject(id, name, race, ownerId, coords, villageType, options = {}) {
+        const ratio = Number.isFinite(options.startResourcesFromBaseCapacityRatio)
+            ? Math.max(0, Math.min(1, options.startResourcesFromBaseCapacityRatio))
+            : STARTING_RESOURCES_BASE_CAPACITY_RATIO;
+        const baseWarehouseCapacity = gameData.config.initialStorage.warehouse;
+        const baseGranaryCapacity = gameData.config.initialStorage.granary;
+        const scaledBaseWarehouseCapacity = scaleCapacityByGameSpeed(baseWarehouseCapacity, this.#config.gameSpeed);
+        const scaledBaseGranaryCapacity = scaleCapacityByGameSpeed(baseGranaryCapacity, this.#config.gameSpeed);
+        const startingWood = Math.floor(scaledBaseWarehouseCapacity * ratio);
+        const startingStone = Math.floor(scaledBaseWarehouseCapacity * ratio);
+        const startingIron = Math.floor(scaledBaseWarehouseCapacity * ratio);
+        const startingFood = Math.floor(scaledBaseGranaryCapacity * ratio);
+
         const buildings = [];
         const resourceLayout = generateLayout(villageType);
         const typeMap = { 'Wood': 'woodcutter', 'Clay': 'clayPit', 'Iron': 'ironMine', 'Wheat': 'cropland' };
@@ -214,10 +244,10 @@ export class GameStateFactory {
         const village = {
             id, name, race, ownerId, coords, villageType, settlementsFounded: 0, buildings,
             resources: {
-                wood: { current: gameData.config.initialResources.wood, production: 0, capacity: 0 },
-                stone: { current: gameData.config.initialResources.stone, production: 0, capacity: 0 },
-                iron: { current: gameData.config.initialResources.iron, production: 0, capacity: 0 },
-                food: { current: gameData.config.initialResources.food, production: 0, capacity: 0 }
+                wood: { current: startingWood, production: 0, capacity: 0 },
+                stone: { current: startingStone, production: 0, capacity: 0 },
+                iron: { current: startingIron, production: 0, capacity: 0 },
+                food: { current: startingFood, production: 0, capacity: 0 }
             },
             population: { current: 2, foodConsumption: 2 }, unitsInVillage: {}, reinforcements: [], recruitmentQueue: [],
             constructionQueue: [], maxConstructionSlots: race === 'romans' ? 3 : 2,

@@ -147,12 +147,15 @@ class RecruitmentQueueUI {
 
         const timerLabel = document.createElement('span');
         timerLabel.className = 'text-xs text-gray-400 mb-0.5';
-        timerLabel.textContent = 'Siguiente en:';
+        timerLabel.textContent = 'Termina en:';
 
         const timer = document.createElement('div');
         timer.className = 'font-mono text-lg text-blue-300 font-bold tabular-nums';
 
-        right.append(timerLabel, timer);
+        const finishAt = document.createElement('span');
+        finishAt.className = 'text-[11px] text-gray-500 mt-0.5 font-mono tabular-nums';
+
+        right.append(timerLabel, timer, finishAt);
         header.append(left, right);
 
         const toggleButton = document.createElement('button');
@@ -196,6 +199,7 @@ class RecruitmentQueueUI {
             unitName,
             batchInfo,
             timer,
+            finishAt,
             toggleButton,
             toggleText,
             toggleIcon,
@@ -207,6 +211,36 @@ class RecruitmentQueueUI {
         return card;
     }
 
+    #getRemainingCount(job) {
+        return Math.max(0, Number(job.remainingCount ?? job.count ?? 0));
+    }
+
+    #getJobCompletionTime(job) {
+        const endTime = Number(job.endTime) || Date.now();
+        const remainingCount = this.#getRemainingCount(job);
+        const timePerUnit = Math.max(0, Number(job.timePerUnit) || 0);
+
+        if (remainingCount <= 1 || timePerUnit <= 0) {
+            return endTime;
+        }
+
+        return endTime + ((remainingCount - 1) * timePerUnit);
+    }
+
+    #getQueueCompletionTime(entry) {
+        return entry.jobs.reduce((latestEndTime, job) => {
+            return Math.max(latestEndTime, this.#getJobCompletionTime(job));
+        }, Date.now());
+    }
+
+    #formatClockTime(timestamp) {
+        const date = new Date(timestamp);
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+        const seconds = String(date.getSeconds()).padStart(2, '0');
+        return `${hours}:${minutes}:${seconds}`;
+    }
+
     #updateGroupNode(node, entry, ownerRace) {
         const refs = node.__refs;
         const currentJob = entry.jobs[0];
@@ -215,11 +249,12 @@ class RecruitmentQueueUI {
             return;
         }
 
-        const currentCount = currentJob.remainingCount !== undefined ? currentJob.remainingCount : currentJob.count;
+        const currentCount = this.#getRemainingCount(currentJob);
         const totalBatchCount = currentJob.totalCount || currentCount;
         const progressPercent = totalBatchCount > 0
             ? ((totalBatchCount - currentCount) / totalBatchCount) * 100
             : 0;
+        const queueEndTime = this.#getQueueCompletionTime(entry);
 
         const queueId = `queue-${entry.buildingId}`;
         const hasMoreJobs = entry.jobs.length > 1;
@@ -233,8 +268,9 @@ class RecruitmentQueueUI {
             ? `Lote: ${formatNumber(totalBatchCount)} total`
             : '';
 
-        refs.timer.dataset.timerFor = currentJob.jobId;
-        refs.timer.textContent = formatTime((currentJob.endTime - Date.now()) / 1000);
+        refs.timer.dataset.timerFor = queueId;
+        refs.timer.textContent = formatTime((queueEndTime - Date.now()) / 1000);
+        refs.finishAt.textContent = `Fin estimado: ${this.#formatClockTime(queueEndTime)}`;
 
         refs.toggleButton.dataset.toggleQueue = queueId;
         refs.toggleIcon.dataset.toggleIcon = queueId;
@@ -256,7 +292,7 @@ class RecruitmentQueueUI {
                 () => this.#createPendingRow(),
                 (row, job) => {
                     const pendingUnit = gameData.units[ownerRace]?.troops.find(unit => unit.id === job.unitId);
-                    const pendingCount = job.remainingCount !== undefined ? job.remainingCount : job.count;
+                    const pendingCount = this.#getRemainingCount(job);
                     row.__refs.label.textContent = `${formatNumber(pendingCount)} x ${pendingUnit?.name || job.unitId}`;
                 }
             );
@@ -266,16 +302,18 @@ class RecruitmentQueueUI {
         }
     }
 
-    #subscribeCountdown(job, nextCountdownKeys) {
-        const countdownKey = `${this.#countdownScope}:${job.jobId}`;
+    #subscribeCountdown(entry, nextCountdownKeys) {
+        const queueId = `queue-${entry.buildingId}`;
+        const queueEndTime = this.#getQueueCompletionTime(entry);
+        const countdownKey = `${this.#countdownScope}:${queueId}`;
         nextCountdownKeys.add(countdownKey);
 
-        const timerElement = this.#groupsContainer.querySelector(`[data-timer-for="${job.jobId}"]`);
+        const timerElement = this.#groupsContainer.querySelector(`[data-timer-for="${queueId}"]`);
         if (!timerElement) return;
 
         countdownService.subscribe({
             id: countdownKey,
-            endTime: job.endTime,
+            endTime: queueEndTime,
             onTick: (remainingSeconds) => {
                 if (!timerElement.isConnected) {
                     return;
@@ -359,7 +397,7 @@ class RecruitmentQueueUI {
 
         const nextCountdownKeys = new Set();
         for (const entry of sortedEntries) {
-            this.#subscribeCountdown(entry.jobs[0], nextCountdownKeys);
+            this.#subscribeCountdown(entry, nextCountdownKeys);
         }
         this.#syncCountdownSubscriptions(nextCountdownKeys);
     }

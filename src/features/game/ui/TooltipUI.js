@@ -37,16 +37,7 @@ class TooltipUI {
         const target = event.target.closest('[data-tooltip-text]');
         if (!target) return;
 
-        const text = target.dataset.tooltipText;
-        this.#tooltipElement.textContent = text;
-
-        this._positionTooltip();
-        
-        this.#tooltipElement.classList.remove('hidden');
-
-        this.#hideTimeoutId = setTimeout(() => {
-            this.hide();
-        }, 3000);
+        this.showForElement(target);
     }
 
     _handleMouseLeave() {
@@ -63,6 +54,21 @@ class TooltipUI {
         }, { once: true });
     }
 
+    showForElement(targetElement, durationMs = 3000) {
+        if (!targetElement) return;
+        const text = targetElement.dataset?.tooltipText;
+        if (!text) return;
+
+        clearTimeout(this.#hideTimeoutId);
+        this.#tooltipElement.textContent = text;
+        this._positionTooltip();
+        this.#tooltipElement.classList.remove('hidden');
+
+        this.#hideTimeoutId = setTimeout(() => {
+            this.hide();
+        }, Math.max(300, Number(durationMs) || 3000));
+    }
+
     _positionTooltip() {
         const resourceBar = document.getElementById('resource-bar');
         if (!resourceBar) return;
@@ -74,7 +80,7 @@ class TooltipUI {
         const tooltipRect = this.#tooltipElement.getBoundingClientRect();
 
         // Position relative to the resource bar, but within the main container
-        const top = (resourceBarRect.bottom - containerRect.top) + 8;
+        const top = (resourceBarRect.bottom - containerRect.top) + 23;
         
         let left = (resourceBarRect.left - containerRect.left) + (resourceBarRect.width / 2) - (tooltipRect.width / 2);
 

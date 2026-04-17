@@ -2,6 +2,7 @@ import {
     BEGINNER_PROTECTION_POPULATION_THRESHOLD,
     isUnderBeginnerProtectionByPopulation,
 } from '../../core/data/constants.js';
+import { getScaledMerchantCapacityPerUnit } from '../../core/capacityScaling.js';
 
 const HOSTILE_MISSION_TYPES = new Set(['attack', 'raid', 'espionage']);
 
@@ -200,7 +201,12 @@ export function handleSendMerchantsCommand({ payload, gameState, gameConfig, gam
     if (!merchantData) return { success: false, reason: 'NO_MERCHANT_UNIT_FOR_RACE' };
 
     const merchantCount = gameData.buildings.marketplace.levels[marketplace.level - 1].attribute.merchantCapacity;
-    const totalCapacity = merchantCount * merchantData.stats.capacity;
+    const merchantCapacityPerUnit = getScaledMerchantCapacityPerUnit(
+        village.race,
+        gameConfig?.gameSpeed || 1,
+        merchantData.stats.capacity,
+    );
+    const totalCapacity = merchantCount * merchantCapacityPerUnit;
     const totalSent = Object.values(resources).reduce((sum, value) => sum + value, 0);
 
     if (totalSent > totalCapacity) {
@@ -253,7 +259,7 @@ export function handleSendMerchantsCommand({ payload, gameState, gameConfig, gam
         targetCoords,
         payload: {
             resources,
-            merchants: Math.ceil(totalSent / merchantData.stats.capacity),
+            merchants: Math.ceil(totalSent / Math.max(merchantCapacityPerUnit, 1)),
         },
         startTime,
         arrivalTime: startTime + travelTimeMs,
