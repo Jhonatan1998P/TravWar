@@ -725,6 +725,22 @@ function chooseResponse({ threatType, posture, canHoldLocally, canHoldWithReinfo
     return 'partial_dodge';
 }
 
+function buildReactiveCombatContract({ targetVillage, preferredResponse, threatLevel }) {
+    const suppressByResponse = preferredResponse === 'partial_dodge'
+        || preferredResponse === 'full_dodge'
+        || preferredResponse === 'hold_with_reinforcements'
+        || preferredResponse === 'reinforce';
+    const suppressByThreat = threatLevel === 'high' || threatLevel === 'critical';
+    const offenseSuppressed = suppressByResponse || suppressByThreat;
+
+    return {
+        offenseSuppressed,
+        reservedTroops: offenseSuppressed
+            ? toPositiveTroopMap(targetVillage.unitsInVillage || {})
+            : {},
+    };
+}
+
 export function evaluateThreatAndChooseResponse({
     movement,
     gameState,
@@ -735,11 +751,14 @@ export function evaluateThreatAndChooseResponse({
     targetVillage,
     attackerVillage,
 }) {
+    const evaluationTime = Date.now();
     const attackerRace = gameState.players.find(player => player.id === movement.ownerId)?.race || 'romans';
     const attackerSmithy = attackerVillage?.smithy?.upgrades || {};
     const attackBreakdown = CombatFormulas.calculateAttackPoints(movement.payload?.troops || {}, attackerRace, attackerSmithy);
     const attackPower = attackBreakdown.total;
     const attackerProportions = getAttackerProportions(attackBreakdown);
+    const intelFresh = Object.keys(movement.payload?.troops || {}).length > 0;
+    const lastIntelAt = intelFresh ? evaluationTime : null;
 
     const threatInfo = classifyThreat({
         movement,
@@ -801,6 +820,11 @@ export function evaluateThreatAndChooseResponse({
         shouldPreserveOffense,
         shouldCounterattack,
     });
+    const contract = buildReactiveCombatContract({
+        targetVillage,
+        preferredResponse,
+        threatLevel: threatInfo.threatLevel,
+    });
 
     const shouldPauseEconomicConstruction = threatInfo.threatLevel === 'high' || threatInfo.threatLevel === 'critical';
     const shouldBoostEmergencyRecruitment = threatInfo.threatLevel !== 'low';
@@ -808,8 +832,12 @@ export function evaluateThreatAndChooseResponse({
     return {
         threatType: threatInfo.threatType,
         threatLevel: threatInfo.threatLevel,
+        intelFresh,
+        lastIntelAt,
         posture,
         preferredResponse,
+        offenseSuppressed: contract.offenseSuppressed,
+        reservedTroops: contract.reservedTroops,
         attackPowerEstimate: attackPower,
         localDefenseEstimate,
         imperialDefenseEstimate,
@@ -1088,11 +1116,22 @@ export function handleEspionageReact({
         });
     }
 
+    const preferredResponse = hasScouts ? 'partial_dodge' : 'full_dodge';
+    const contract = buildReactiveCombatContract({
+        targetVillage,
+        preferredResponse,
+        threatLevel: 'low',
+    });
+
     villageCombatState?.upsert?.(targetVillage.id, {
         threatLevel: 'low',
         threatType: 'espionage',
+        intelFresh: true,
+        lastIntelAt: Date.now(),
         posture: 'hybrid',
-        preferredResponse: hasScouts ? 'partial_dodge' : 'full_dodge',
+        preferredResponse,
+        offenseSuppressed: contract.offenseSuppressed,
+        reservedTroops: contract.reservedTroops,
         attackPowerEstimate: 0,
         localDefenseEstimate: 0,
         imperialDefenseEstimate: 0,
@@ -1157,8 +1196,12 @@ export function handleAttackReact({
     villageCombatState?.upsert?.(targetVillage.id, {
         threatLevel: evaluation.threatLevel,
         threatType: evaluation.threatType,
+        intelFresh: evaluation.intelFresh,
+        lastIntelAt: evaluation.lastIntelAt,
         posture: evaluation.posture,
         preferredResponse: evaluation.preferredResponse,
+        offenseSuppressed: evaluation.offenseSuppressed,
+        reservedTroops: evaluation.reservedTroops,
         attackPowerEstimate: evaluation.attackPowerEstimate,
         localDefenseEstimate: evaluation.localDefenseEstimate,
         imperialDefenseEstimate: evaluation.imperialDefenseEstimate,
@@ -1194,6 +1237,10 @@ export function handleAttackReact({
             projectedEmpireOutcome: evaluation.projectedEmpireOutcome,
             projectedLossSeverity: evaluation.projectedLossSeverity,
             survivalProbability: Number(evaluation.survivalProbability.toFixed(3)),
+            intelFresh: evaluation.intelFresh,
+            lastIntelAt: evaluation.lastIntelAt,
+            offenseSuppressed: evaluation.offenseSuppressed,
+            reservedTroopsCount: getTroopCount(evaluation.reservedTroops || {}),
             analysis: evaluation.analysis,
         },
         'military',
@@ -1271,7 +1318,17 @@ export function handleAttackReact({
                 acceptableStrategicLoss: fullDodgePolicy.acceptableStrategicLoss,
                 dodgeTroops: fallbackTroops,
             }, 'military');
-            villageCombatState?.upsert?.(targetVillage.id, { preferredResponse: fallbackResponse, lastDecisionReason: `fallback_${fallbackResponse}_after_failed_reinforce` }, {
+            const fallbackContract = buildReactiveCombatContract({
+                targetVillage,
+                preferredResponse: fallbackResponse,
+                threatLevel: evaluation.threatLevel,
+            });
+            villageCombatState?.upsert?.(targetVillage.id, {
+                preferredResponse: fallbackResponse,
+                offenseSuppressed: fallbackContract.offenseSuppressed,
+                reservedTroops: fallbackContract.reservedTroops,
+                lastDecisionReason: `fallback_${fallbackResponse}_after_failed_reinforce`,
+            }, {
                 sourceMovementIds: [movement.id],
                 lastDecisionReason: `fallback_${fallbackResponse}_after_failed_reinforce`,
             });
@@ -1324,8 +1381,15 @@ export function handleAttackReact({
         });
 
         if (effectiveResponse !== evaluation.preferredResponse) {
+            const effectiveContract = buildReactiveCombatContract({
+                targetVillage,
+                preferredResponse: effectiveResponse,
+                threatLevel: evaluation.threatLevel,
+            });
             villageCombatState?.upsert?.(targetVillage.id, {
                 preferredResponse: effectiveResponse,
+                offenseSuppressed: effectiveContract.offenseSuppressed,
+                reservedTroops: effectiveContract.reservedTroops,
                 lastDecisionReason: 'full_dodge_blocked_by_policy',
             }, {
                 sourceMovementIds: [movement.id],

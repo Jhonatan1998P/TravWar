@@ -5,16 +5,16 @@ import { resolveUnitIdForRace } from '../utils/AIUnitUtils.js';
 import {
     buildPrerequisiteResolverStepFromBlock,
     clonePhaseStep,
-    createSharedPhaseOneCycleTargets,
     createPhaseTransition,
-    evaluateSharedPhaseOneInfrastructure,
-    evaluateSharedPhaseTwoInfrastructure,
+    evaluatePhaseInfrastructureTargets,
     getAverageResourceFieldLevel,
     getCompletedTrainingCycles,
     getPhaseStepSignature,
     createOrRefreshPhaseSubGoal,
     isPhaseQueueAvailable,
+    isPhaseResearchRequirementMet,
     isPhaseResearchStepCompleted,
+    isPhaseUpgradeRequirementMet,
     getQueuedTrainingMs,
     getConstructionMicroStepsForVillage,
     handleCommonPhaseActionResult,
@@ -48,70 +48,92 @@ export const EGYPTIAN_PHASE_IDS = Object.freeze({
 
 const PHASE_TEMPLATE_BY_DIFFICULTY = Object.freeze({
     Pesadilla: {
-        phase1: { ratio: { econ: 0.7, mil: 0.3 } },
+        phase1: { ratio: { econ: 0.65, mil: 0.35 } },
         phase2: { ratio: { econ: 0.65, mil: 0.35 } },
-        phase3: { ratio: { econ: 0.56, mil: 0.44 } },
-        phase4: { ratio: { econ: 0.48, mil: 0.52 } },
-        phase5: { ratio: { econ: 0.45, mil: 0.55 } },
+        phase3: { ratio: { econ: 0.65, mil: 0.35 } },
+        phase4: { ratio: { econ: 0.65, mil: 0.35 } },
+        phase5: { ratio: { econ: 0.65, mil: 0.35 } },
         phase6: { ratio: { econ: 0.4, mil: 0.6 } },
     },
 });
 
-const PHASE_ONE_EXIT = Object.freeze({
+const PHASE_ONE_INFRASTRUCTURE_TARGETS = Object.freeze({
     resourceFieldsLevel: 4,
     buildingLevels: Object.freeze({
         mainBuilding: 5,
-        cranny: 5,
-        barracks: 3,
-        academy: 3,
-        warehouse: 10,
-        granary: 10,
+        barracks: 5,
+        academy: 5,
+        smithy: 3,
+        warehouse: 8,
+        granary: 8,
+        marketplace: 3,
+        embassy: 1,
         cityWall: 5,
     }),
 });
 
-const PHASE_TWO_EXIT = Object.freeze({
-    resourceFieldsLevel: 5,
+const PHASE_TWO_INFRASTRUCTURE_TARGETS = Object.freeze({
+    resourceFieldsLevel: 6,
     buildingLevels: Object.freeze({
         mainBuilding: 10,
-        cranny: 10,
-        barracks: 7,
-        academy: 7,
-        stable: 7,
-        smithy: 7,
+        barracks: 8,
+        academy: 10,
+        smithy: 5,
+        stable: 3,
+        warehouse: 12,
+        granary: 12,
+        marketplace: 5,
+        embassy: 3,
+        cityWall: 8,
+    }),
+});
+
+const PHASE_THREE_INFRASTRUCTURE_TARGETS = Object.freeze({
+    resourceFieldsLevel: 8,
+    buildingLevels: Object.freeze({
+        barracks: 12,
+        academy: 15,
+        smithy: 10,
+        stable: 10,
+        warehouse: 15,
+        granary: 15,
+        marketplace: 10,
+        embassy: 5,
+        palace: 10,
         cityWall: 10,
     }),
 });
 
-const PHASE_THREE_EXIT = Object.freeze({
-    minAverageResourceFieldLevel: 7,
-    minWallLevel: 8,
-    minAcademyLevel: 4,
-    minSmithyLevel: 4,
-    minDefensiveCoreUnits: 70,
-    minScouts: 8,
+const PHASE_FOUR_INFRASTRUCTURE_TARGETS = Object.freeze({
+    resourceFieldsLevel: 9,
+    buildingLevels: Object.freeze({
+        cityWall: 12,
+    }),
 });
 
-const PHASE_FOUR_EXIT = Object.freeze({
-    minWallLevel: 10,
-    minMarketplaceLevel: 6,
-    minStableLevel: 3,
-    minScouts: 12,
-    minExpansionReadinessScore: 80,
-    maxStoragePressure: 0.9,
-    minDefenseReadinessScore: 95,
+const PHASE_FIVE_INFRASTRUCTURE_TARGETS = Object.freeze({
+    resourceFieldsLevel: 10,
+    buildingLevels: Object.freeze({
+        cityWall: 15,
+    }),
 });
 
-const PHASE_FIVE_EXIT = Object.freeze({
-    minVillagesAfterExpansion: 2,
+const PHASE_FOUR_UPGRADE_TARGETS = Object.freeze({
+    defensiveInfantry: 8,
+    defensiveCavalry: 5,
+});
+
+const PHASE_FIVE_UPGRADE_TARGETS = Object.freeze({
+    defensiveInfantry: 12,
+    defensiveCavalry: 8,
 });
 
 const PHASE_EXIT_CYCLE_TARGETS = Object.freeze({
-    phase1: createSharedPhaseOneCycleTargets('defensiveInfantry', 2, 0),
-    phase2: createSharedPhaseOneCycleTargets('defensiveInfantry', 15, 5),
-    phase3: { total: 5, defensiveInfantry: 2, defensiveCavalry: 2, scout: 1 },
-    phase4: { total: 5, defensiveInfantry: 1, defensiveCavalry: 1, offensiveInfantry: 2, scout: 1 },
-    phase5: { total: 5, defensiveInfantry: 2, defensiveCavalry: 2, offensiveCavalry: 1 },
+    phase1: { total: 0 },
+    phase2: { total: 4, defensiveInfantry: 3, scout: 1 },
+    phase3: { total: 21, defensiveInfantry: 12, defensiveCavalry: 6, scout: 3 },
+    phase4: { total: 31, defensiveInfantry: 20, scout: 1, defensiveCavalry: 10 },
+    phase5: { total: 60, defensiveInfantry: 40, defensiveCavalry: 20 },
     phase6: { total: 8, defensiveInfantry: 2, defensiveCavalry: 2, offensiveCavalry: 2, siege: 1, scout: 1 },
 });
 
@@ -418,6 +440,14 @@ function isBuildingStepCompleted(village, step) {
 
 function isResearchStepCompleted(village, step) {
     return isPhaseResearchStepCompleted(village, step);
+}
+
+function isUpgradeStepCompleted(village, step) {
+    if (!step || step.type !== 'upgrade') return true;
+    const targetLevel = Math.max(0, Number(step.level) || 0);
+    if (targetLevel <= 0) return true;
+
+    return isPhaseUpgradeRequirementMet(village, step.unitType || step.unitId, targetLevel);
 }
 
 function getResourcePoolForStep(village, step) {
@@ -804,6 +834,16 @@ function tryResearchPriority({ actionExecutor, village, gameState, options, shou
     });
 }
 
+function tryUpgradePriority({ actionExecutor, village, gameState, options, shouldAttemptStep = null }) {
+    return runPriorityStepList({
+        steps: options,
+        executeStep: step => tryStep(actionExecutor, village, gameState, step),
+        noActionReason: 'NO_ACTION',
+        shouldAttemptStep,
+        stopOnRecoverableBlock: true,
+    });
+}
+
 function shouldThrottleIdleLog(phaseState, now) {
     if (!Number.isFinite(phaseState.lastIdleLogAt)) return false;
     return (now - phaseState.lastIdleLogAt) < PHASE_IDLE_LOG_MS;
@@ -892,14 +932,15 @@ function runThreatEmergencyBlock({ actionExecutor, village, gameState, phaseStat
 }
 
 function evaluatePhaseOneExit(village, phaseState) {
-    const infraGate = evaluateSharedPhaseOneInfrastructure({
+    const infraGate = evaluatePhaseInfrastructureTargets({
         village,
         getAverageResourceFieldLevel,
         getEffectiveBuildingLevel,
-        targets: PHASE_ONE_EXIT,
+        targets: PHASE_ONE_INFRASTRUCTURE_TARGETS,
     });
     const cycleGate = evaluateCycleTargets(phaseState, 'phase1');
-    return infraGate.ready && cycleGate.ready;
+    const researchReady = isPhaseResearchRequirementMet(village, 'defensive_infantry');
+    return infraGate.ready && cycleGate.ready && researchReady;
 }
 
 function updatePhaseTwoQueueTelemetry(phaseState, village) {
@@ -921,59 +962,83 @@ function updatePhaseThreeQueueTelemetry(phaseState, village) {
 }
 
 function evaluatePhaseTwoExit(village, phaseState) {
-    const infraGate = evaluateSharedPhaseTwoInfrastructure({
+    const infraGate = evaluatePhaseInfrastructureTargets({
         village,
         getAverageResourceFieldLevel,
         getEffectiveBuildingLevel,
-        targets: PHASE_TWO_EXIT,
+        targets: PHASE_TWO_INFRASTRUCTURE_TARGETS,
     });
     const cycleGate = evaluateCycleTargets(phaseState, 'phase2');
+    const researchReady = isPhaseResearchRequirementMet(village, 'scout');
 
-    return infraGate.ready && cycleGate.ready;
+    return infraGate.ready && cycleGate.ready && researchReady;
 }
 
 function evaluatePhaseThreeExit(village, phaseState) {
-    const avgFields = getAverageResourceFieldLevel(village);
-    const wall = getEffectiveBuildingLevel(village, 'cityWall');
-    const academy = getEffectiveBuildingLevel(village, 'academy');
-    const smithy = getEffectiveBuildingLevel(village, 'smithy');
-    const defensiveCore = countDefensiveCoreUnits(village);
-    const scouts = getScoutsCount(village);
+    const infraGate = evaluatePhaseInfrastructureTargets({
+        village,
+        getAverageResourceFieldLevel,
+        getEffectiveBuildingLevel,
+        targets: PHASE_THREE_INFRASTRUCTURE_TARGETS,
+    });
     const cycleGate = evaluateCycleTargets(phaseState, 'phase3');
+    const researchReady = isPhaseResearchRequirementMet(village, 'defensive_cavalry');
 
-    return avgFields >= PHASE_THREE_EXIT.minAverageResourceFieldLevel
-        && wall >= PHASE_THREE_EXIT.minWallLevel
-        && academy >= PHASE_THREE_EXIT.minAcademyLevel
-        && smithy >= PHASE_THREE_EXIT.minSmithyLevel
-        && defensiveCore >= PHASE_THREE_EXIT.minDefensiveCoreUnits
-        && scouts >= PHASE_THREE_EXIT.minScouts
-        && cycleGate.ready;
+    return infraGate.ready && cycleGate.ready && researchReady;
 }
 
 function evaluatePhaseFourExit(village, phaseState) {
-    const wall = getEffectiveBuildingLevel(village, 'cityWall');
-    const marketplace = getEffectiveBuildingLevel(village, 'marketplace');
-    const stable = getEffectiveBuildingLevel(village, 'stable');
-    const scouts = getScoutsCount(village);
-    const latestPressure = phaseState.storagePressureHistory?.[phaseState.storagePressureHistory.length - 1]?.value || 0;
-
+    const infraGate = evaluatePhaseInfrastructureTargets({
+        village,
+        getAverageResourceFieldLevel,
+        getEffectiveBuildingLevel,
+        targets: PHASE_FOUR_INFRASTRUCTURE_TARGETS,
+    });
     const cycleGate = evaluateCycleTargets(phaseState, 'phase4');
+    const researchReady = isPhaseResearchRequirementMet(village, 'ram');
+    const infantryUpgradeReady = isPhaseUpgradeRequirementMet(
+        village,
+        'defensive_infantry',
+        PHASE_FOUR_UPGRADE_TARGETS.defensiveInfantry,
+    );
+    const cavalryUpgradeReady = isPhaseUpgradeRequirementMet(
+        village,
+        'defensive_cavalry',
+        PHASE_FOUR_UPGRADE_TARGETS.defensiveCavalry,
+    );
 
-    return wall >= PHASE_FOUR_EXIT.minWallLevel
-        && marketplace >= PHASE_FOUR_EXIT.minMarketplaceLevel
-        && stable >= PHASE_FOUR_EXIT.minStableLevel
-        && scouts >= PHASE_FOUR_EXIT.minScouts
-        && latestPressure <= PHASE_FOUR_EXIT.maxStoragePressure
-        && (phaseState.defenseReadinessScore || 0) >= PHASE_FOUR_EXIT.minDefenseReadinessScore
-        && (phaseState.expansionReadinessScore || 0) >= PHASE_FOUR_EXIT.minExpansionReadinessScore
-        && cycleGate.ready;
+    return infraGate.ready
+        && cycleGate.ready
+        && researchReady
+        && infantryUpgradeReady
+        && cavalryUpgradeReady;
 }
 
-function evaluatePhaseFiveExit(village, gameState, phaseState) {
+function evaluatePhaseFiveExit(village, phaseState) {
+    const infraGate = evaluatePhaseInfrastructureTargets({
+        village,
+        getAverageResourceFieldLevel,
+        getEffectiveBuildingLevel,
+        targets: PHASE_FIVE_INFRASTRUCTURE_TARGETS,
+    });
     const cycleGate = evaluateCycleTargets(phaseState, 'phase5');
-    const myVillageCount = gameState.villages.filter(candidate => candidate.ownerId === village.ownerId).length;
-    if (myVillageCount >= PHASE_FIVE_EXIT.minVillagesAfterExpansion) return cycleGate.ready;
-    return cycleGate.ready && gameState.movements.some(movement => movement.ownerId === village.ownerId && movement.type === 'settle');
+    const researchReady = isPhaseResearchRequirementMet(village, 'catapult');
+    const infantryUpgradeReady = isPhaseUpgradeRequirementMet(
+        village,
+        'defensive_infantry',
+        PHASE_FIVE_UPGRADE_TARGETS.defensiveInfantry,
+    );
+    const cavalryUpgradeReady = isPhaseUpgradeRequirementMet(
+        village,
+        'defensive_cavalry',
+        PHASE_FIVE_UPGRADE_TARGETS.defensiveCavalry,
+    );
+
+    return infraGate.ready
+        && cycleGate.ready
+        && researchReady
+        && infantryUpgradeReady
+        && cavalryUpgradeReady;
 }
 
 function evaluatePhaseSixExit(village, gameState, phaseState) {
@@ -1083,14 +1148,16 @@ function runPhaseOne({ village, gameState, actionExecutor, phaseState, threatCon
                         laneId: 'phase1_priority_construction',
                         shouldAttemptStep: constructionFilter,
                         options: [
-                            { type: 'resource_fields_level', level: PHASE_ONE_EXIT.resourceFieldsLevel },
-                            { type: 'building', buildingType: 'mainBuilding', level: PHASE_ONE_EXIT.buildingLevels.mainBuilding },
-                            { type: 'building', buildingType: 'cranny', level: PHASE_ONE_EXIT.buildingLevels.cranny },
-                            { type: 'building', buildingType: 'barracks', level: PHASE_ONE_EXIT.buildingLevels.barracks },
-                            { type: 'building', buildingType: 'academy', level: PHASE_ONE_EXIT.buildingLevels.academy },
-                            { type: 'building', buildingType: 'warehouse', level: PHASE_ONE_EXIT.buildingLevels.warehouse },
-                            { type: 'building', buildingType: 'granary', level: PHASE_ONE_EXIT.buildingLevels.granary },
-                            { type: 'building', buildingType: 'cityWall', level: PHASE_ONE_EXIT.buildingLevels.cityWall },
+                            { type: 'resource_fields_level', level: PHASE_ONE_INFRASTRUCTURE_TARGETS.resourceFieldsLevel },
+                            { type: 'building', buildingType: 'mainBuilding', level: PHASE_ONE_INFRASTRUCTURE_TARGETS.buildingLevels.mainBuilding },
+                            { type: 'building', buildingType: 'barracks', level: PHASE_ONE_INFRASTRUCTURE_TARGETS.buildingLevels.barracks },
+                            { type: 'building', buildingType: 'academy', level: PHASE_ONE_INFRASTRUCTURE_TARGETS.buildingLevels.academy },
+                            { type: 'building', buildingType: 'smithy', level: PHASE_ONE_INFRASTRUCTURE_TARGETS.buildingLevels.smithy },
+                            { type: 'building', buildingType: 'warehouse', level: PHASE_ONE_INFRASTRUCTURE_TARGETS.buildingLevels.warehouse },
+                            { type: 'building', buildingType: 'granary', level: PHASE_ONE_INFRASTRUCTURE_TARGETS.buildingLevels.granary },
+                            { type: 'building', buildingType: 'marketplace', level: PHASE_ONE_INFRASTRUCTURE_TARGETS.buildingLevels.marketplace },
+                            { type: 'building', buildingType: 'embassy', level: PHASE_ONE_INFRASTRUCTURE_TARGETS.buildingLevels.embassy },
+                            { type: 'building', buildingType: 'cityWall', level: PHASE_ONE_INFRASTRUCTURE_TARGETS.buildingLevels.cityWall },
                         ],
                     }));
 
@@ -1131,18 +1198,7 @@ function runPhaseOne({ village, gameState, actionExecutor, phaseState, threatCon
             {
                 id: 'recruitment',
                 source: 'egyptian_phase1_lane_recruitment',
-                execute: () => tryRecruitmentPriority({
-                    actionExecutor,
-                    village,
-                    gameState,
-                    phaseState,
-                    phaseId: EGYPTIAN_PHASE_IDS.phase1,
-                    laneId: 'phase1_priority_recruitment',
-                    shouldAttemptStep: recruitmentFilter,
-                    options: [
-                        createCycleMicroRecruitmentStep('defensive_infantry'),
-                    ],
-                }),
+                execute: () => ({ success: false, reason: 'NO_ACTION' }),
             },
         ],
     });
@@ -1170,14 +1226,17 @@ function runPhaseTwo({ village, gameState, actionExecutor, phaseState, threatCon
                             laneId: 'phase2_priority_construction',
                             shouldAttemptStep: constructionFilter,
                             options: [
-                                { type: 'resource_fields_level', level: PHASE_TWO_EXIT.resourceFieldsLevel },
-                                { type: 'building', buildingType: 'cranny', level: PHASE_TWO_EXIT.buildingLevels.cranny },
-                                { type: 'building', buildingType: 'barracks', level: PHASE_TWO_EXIT.buildingLevels.barracks },
-                                { type: 'building', buildingType: 'academy', level: PHASE_TWO_EXIT.buildingLevels.academy },
-                                { type: 'building', buildingType: 'stable', level: PHASE_TWO_EXIT.buildingLevels.stable },
-                                { type: 'building', buildingType: 'smithy', level: PHASE_TWO_EXIT.buildingLevels.smithy },
-                                { type: 'building', buildingType: 'mainBuilding', level: PHASE_TWO_EXIT.buildingLevels.mainBuilding },
-                                { type: 'building', buildingType: 'cityWall', level: PHASE_TWO_EXIT.buildingLevels.cityWall },
+                                { type: 'resource_fields_level', level: PHASE_TWO_INFRASTRUCTURE_TARGETS.resourceFieldsLevel },
+                                { type: 'building', buildingType: 'mainBuilding', level: PHASE_TWO_INFRASTRUCTURE_TARGETS.buildingLevels.mainBuilding },
+                                { type: 'building', buildingType: 'barracks', level: PHASE_TWO_INFRASTRUCTURE_TARGETS.buildingLevels.barracks },
+                                { type: 'building', buildingType: 'academy', level: PHASE_TWO_INFRASTRUCTURE_TARGETS.buildingLevels.academy },
+                                { type: 'building', buildingType: 'smithy', level: PHASE_TWO_INFRASTRUCTURE_TARGETS.buildingLevels.smithy },
+                                { type: 'building', buildingType: 'stable', level: PHASE_TWO_INFRASTRUCTURE_TARGETS.buildingLevels.stable },
+                                { type: 'building', buildingType: 'warehouse', level: PHASE_TWO_INFRASTRUCTURE_TARGETS.buildingLevels.warehouse },
+                                { type: 'building', buildingType: 'granary', level: PHASE_TWO_INFRASTRUCTURE_TARGETS.buildingLevels.granary },
+                                { type: 'building', buildingType: 'marketplace', level: PHASE_TWO_INFRASTRUCTURE_TARGETS.buildingLevels.marketplace },
+                                { type: 'building', buildingType: 'embassy', level: PHASE_TWO_INFRASTRUCTURE_TARGETS.buildingLevels.embassy },
+                                { type: 'building', buildingType: 'cityWall', level: PHASE_TWO_INFRASTRUCTURE_TARGETS.buildingLevels.cityWall },
                             ],
                         }),
                     ];
@@ -1191,7 +1250,7 @@ function runPhaseTwo({ village, gameState, actionExecutor, phaseState, threatCon
                             phaseId: EGYPTIAN_PHASE_IDS.phase2,
                             laneId: 'phase2_high_threat_construction',
                             shouldAttemptStep: constructionFilter,
-                            options: [{ type: 'building', buildingType: 'cityWall', level: PHASE_TWO_EXIT.buildingLevels.cityWall }],
+                            options: [{ type: 'building', buildingType: 'cityWall', level: 10 }],
                         }));
                     }
 
@@ -1257,21 +1316,32 @@ function runPhaseThree({ village, gameState, actionExecutor, phaseState, constru
                     laneId: 'phase3_priority_construction',
                     shouldAttemptStep: constructionFilter,
                     options: [
-                        { type: 'building', buildingType: 'warehouse', level: 10 },
-                        { type: 'building', buildingType: 'granary', level: 10 },
-                        { type: 'building', buildingType: 'cityWall', level: 8 },
-                        { type: 'building', buildingType: 'barracks', level: 6 },
-                        { type: 'building', buildingType: 'academy', level: 4 },
-                        { type: 'building', buildingType: 'smithy', level: 4 },
-                        { type: 'building', buildingType: 'stable', level: 3 },
-                        { type: 'resource_fields_level', level: 7 },
+                        { type: 'resource_fields_level', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.resourceFieldsLevel },
+                        { type: 'building', buildingType: 'barracks', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.barracks },
+                        { type: 'building', buildingType: 'academy', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.academy },
+                        { type: 'building', buildingType: 'smithy', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.smithy },
+                        { type: 'building', buildingType: 'stable', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.stable },
+                        { type: 'building', buildingType: 'warehouse', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.warehouse },
+                        { type: 'building', buildingType: 'granary', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.granary },
+                        { type: 'building', buildingType: 'marketplace', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.marketplace },
+                        { type: 'building', buildingType: 'embassy', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.embassy },
+                        { type: 'building', buildingType: 'palace', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.palace },
+                        { type: 'building', buildingType: 'cityWall', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.cityWall },
                     ],
                 }),
             },
             {
                 id: 'research',
                 source: 'egyptian_phase3_lane_research',
-                execute: () => ({ success: false, reason: 'NO_ACTION' }),
+                execute: () => tryResearchPriority({
+                    actionExecutor,
+                    village,
+                    gameState,
+                    shouldAttemptStep: step => !isResearchStepCompleted(village, step),
+                    options: [
+                        { type: 'research', unitType: 'defensive_cavalry' },
+                    ],
+                }),
             },
             {
                 id: 'upgrade',
@@ -1293,7 +1363,6 @@ function runPhaseThree({ village, gameState, actionExecutor, phaseState, constru
                         createCycleMicroRecruitmentStep('defensive_infantry'),
                         createCycleMicroRecruitmentStep('scout'),
                         createCycleMicroRecruitmentStep('defensive_cavalry'),
-                        createCycleMicroRecruitmentStep('offensive_infantry'),
                     ],
                 }),
             },
@@ -1321,26 +1390,37 @@ function runPhaseFour({ village, gameState, actionExecutor, phaseState, construc
                     laneId: 'phase4_priority_construction',
                     shouldAttemptStep: constructionFilter,
                     options: [
-                        { type: 'building', buildingType: 'cityWall', level: 10 },
-                        { type: 'building', buildingType: 'stable', level: 5 },
-                        { type: 'building', buildingType: 'marketplace', level: 8 },
-                        { type: 'building', buildingType: 'warehouse', level: 12 },
-                        { type: 'building', buildingType: 'granary', level: 12 },
-                        { type: 'building', buildingType: 'mainBuilding', level: 10 },
-                        { type: 'building', buildingType: 'smithy', level: 6 },
-                        { type: 'building', buildingType: 'academy', level: 8 },
+                        { type: 'resource_fields_level', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.resourceFieldsLevel },
+                        { type: 'building', buildingType: 'cityWall', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.cityWall },
                     ],
                 }),
             },
             {
                 id: 'research',
                 source: 'egyptian_phase4_lane_research',
-                execute: () => ({ success: false, reason: 'NO_ACTION' }),
+                execute: () => tryResearchPriority({
+                    actionExecutor,
+                    village,
+                    gameState,
+                    shouldAttemptStep: step => !isResearchStepCompleted(village, step),
+                    options: [
+                        { type: 'research', unitType: 'ram' },
+                    ],
+                }),
             },
             {
                 id: 'upgrade',
                 source: 'egyptian_phase4_lane_upgrade',
-                execute: () => ({ success: false, reason: 'NO_ACTION' }),
+                execute: () => tryUpgradePriority({
+                    actionExecutor,
+                    village,
+                    gameState,
+                    shouldAttemptStep: step => !isUpgradeStepCompleted(village, step),
+                    options: [
+                        { type: 'upgrade', unitType: 'defensive_infantry', level: PHASE_FOUR_UPGRADE_TARGETS.defensiveInfantry },
+                        { type: 'upgrade', unitType: 'defensive_cavalry', level: PHASE_FOUR_UPGRADE_TARGETS.defensiveCavalry },
+                    ],
+                }),
             },
             {
                 id: 'recruitment',
@@ -1355,9 +1435,8 @@ function runPhaseFour({ village, gameState, actionExecutor, phaseState, construc
                     shouldAttemptStep: recruitmentFilter,
                     options: [
                         createCycleMicroRecruitmentStep('defensive_infantry'),
-                        createCycleMicroRecruitmentStep('defensive_cavalry'),
                         createCycleMicroRecruitmentStep('scout'),
-                        createCycleMicroRecruitmentStep('offensive_infantry'),
+                        createCycleMicroRecruitmentStep('defensive_cavalry'),
                     ],
                 }),
             },
@@ -1365,25 +1444,6 @@ function runPhaseFour({ village, gameState, actionExecutor, phaseState, construc
     });
 
     return matrix.handled ? matrix.result : { success: false, reason: 'NO_ACTION' };
-}
-
-function shouldEnableContextualOffense({ phaseState, threatContext, gameState, village }) {
-    if (threatContext.threatLevel !== 'none' && threatContext.threatLevel !== 'low') return false;
-    const myVillageCount = gameState.villages.filter(candidate => candidate.ownerId === village.ownerId).length;
-    return myVillageCount >= 2 && (phaseState.defenseReadinessScore || 0) >= 110;
-}
-
-function shouldEnableContextualSiege({ phaseState, threatContext, gameState, village }) {
-    if (threatContext.threatLevel !== 'none' && threatContext.threatLevel !== 'low') return false;
-    const myVillageCount = gameState.villages.filter(candidate => candidate.ownerId === village.ownerId).length;
-    return myVillageCount >= 3 && (phaseState.defenseReadinessScore || 0) >= 130;
-}
-
-function shouldPreferConquestExpansion({ phaseState, threatContext, gameState, village }) {
-    if (threatContext.threatLevel !== 'none' && threatContext.threatLevel !== 'low') return false;
-    const myVillageCount = gameState.villages.filter(candidate => candidate.ownerId === village.ownerId).length;
-    const palaceLevel = getEffectiveBuildingLevel(village, 'palace');
-    return myVillageCount >= 2 && palaceLevel >= 12 && (phaseState.defenseReadinessScore || 0) >= 115;
 }
 
 function canAttemptSafeExpansion({ threatContext, phaseState, village }) {
@@ -1408,8 +1468,6 @@ function runPhaseFive({
     gameState,
     actionExecutor,
     phaseState,
-    now,
-    threatContext,
     constructionFilter,
     recruitmentFilter,
 }) {
@@ -1430,97 +1488,59 @@ function runPhaseFive({
                     laneId: 'phase5_priority_construction',
                     shouldAttemptStep: constructionFilter,
                     options: [
-                        { type: 'building', buildingType: 'embassy', level: 1 },
-                        { type: 'building', buildingType: 'palace', level: 10 },
-                        { type: 'building', buildingType: 'marketplace', level: 10 },
-                        { type: 'building', buildingType: 'warehouse', level: 14 },
-                        { type: 'building', buildingType: 'granary', level: 14 },
-                        { type: 'building', buildingType: 'cityWall', level: 12 },
-                        { type: 'building', buildingType: 'academy', level: 10 },
-                        { type: 'building', buildingType: 'stable', level: 7 },
-                        { type: 'building', buildingType: 'barracks', level: 8 },
+                        { type: 'resource_fields_level', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.resourceFieldsLevel },
+                        { type: 'building', buildingType: 'cityWall', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.cityWall },
                     ],
                 }),
             },
             {
                 id: 'research',
                 source: 'egyptian_phase5_lane_research',
-                execute: () => ({ success: false, reason: 'NO_ACTION' }),
+                execute: () => tryResearchPriority({
+                    actionExecutor,
+                    village,
+                    gameState,
+                    shouldAttemptStep: step => !isResearchStepCompleted(village, step),
+                    options: [
+                        { type: 'research', unitType: 'catapult' },
+                    ],
+                }),
             },
             {
                 id: 'upgrade',
                 source: 'egyptian_phase5_lane_upgrade',
-                execute: () => ({ success: false, reason: 'NO_ACTION' }),
+                execute: () => tryUpgradePriority({
+                    actionExecutor,
+                    village,
+                    gameState,
+                    shouldAttemptStep: step => !isUpgradeStepCompleted(village, step),
+                    options: [
+                        { type: 'upgrade', unitType: 'defensive_infantry', level: PHASE_FIVE_UPGRADE_TARGETS.defensiveInfantry },
+                        { type: 'upgrade', unitType: 'defensive_cavalry', level: PHASE_FIVE_UPGRADE_TARGETS.defensiveCavalry },
+                    ],
+                }),
             },
             {
                 id: 'recruitment',
                 source: 'egyptian_phase5_lane_recruitment',
-                execute: () => {
-                    const recruitmentOptions = [
+                execute: () => tryRecruitmentPriority({
+                    actionExecutor,
+                    village,
+                    gameState,
+                    phaseState,
+                    phaseId: EGYPTIAN_PHASE_IDS.phase5,
+                    laneId: 'phase5_priority_recruitment',
+                    shouldAttemptStep: recruitmentFilter,
+                    options: [
                         createCycleMicroRecruitmentStep('defensive_infantry'),
                         createCycleMicroRecruitmentStep('defensive_cavalry'),
-                    ];
-
-                    if (shouldPreferConquestExpansion({ phaseState, threatContext, gameState, village })) {
-                        recruitmentOptions.push(createCycleMicroRecruitmentStep('chief'));
-                        recruitmentOptions.push(createCycleMicroRecruitmentStep('settler'));
-                    } else {
-                        recruitmentOptions.push(createCycleMicroRecruitmentStep('settler'));
-                        recruitmentOptions.push(createCycleMicroRecruitmentStep('chief'));
-                    }
-
-                    if (shouldEnableContextualOffense({ phaseState, threatContext, gameState, village })) {
-                        recruitmentOptions.push(
-                            createCycleMicroRecruitmentStep('chief'),
-                            createCycleMicroRecruitmentStep('offensive_cavalry'),
-                        );
-                    }
-
-                    if (shouldEnableContextualSiege({ phaseState, threatContext, gameState, village })) {
-                        recruitmentOptions.push(
-                            createCycleMicroRecruitmentStep('ram'),
-                            createCycleMicroRecruitmentStep('catapult'),
-                        );
-                    }
-
-                    return tryRecruitmentPriority({
-                        actionExecutor,
-                        village,
-                        gameState,
-                        phaseState,
-                        phaseId: EGYPTIAN_PHASE_IDS.phase5,
-                        laneId: 'phase5_priority_recruitment',
-                        shouldAttemptStep: recruitmentFilter,
-                        options: recruitmentOptions,
-                    });
-                },
+                    ],
+                }),
             },
         ],
     });
 
-    if (matrix.handled) {
-        return matrix.result;
-    }
-
-    if ((now - phaseState.lastSafeExpansionCheckAt) >= EXPANSION_CHECK_MS) {
-        phaseState.kpiExpansionAttempts = Math.max(0, phaseState.kpiExpansionAttempts || 0) + 1;
-
-        if (threatContext.threatLevel === 'high' || threatContext.threatLevel === 'critical') {
-            phaseState.kpiExpansionBlockedByThreat = Math.max(0, phaseState.kpiExpansionBlockedByThreat || 0) + 1;
-        }
-
-        if (canAttemptSafeExpansion({ threatContext, phaseState, village })) {
-            const villages = gameState.villages.filter(candidate => candidate.ownerId === village.ownerId);
-            actionExecutor.executeGoalAction({ type: 'settle_new_village' }, villages, gameState);
-            phaseState.lastSafeExpansionCheckAt = now;
-            phaseState.kpiExpansionLaunches = Math.max(0, phaseState.kpiExpansionLaunches || 0) + 1;
-            return { success: true, reason: 'EXPANSION_ATTEMPTED' };
-        }
-
-        phaseState.lastSafeExpansionCheckAt = now;
-    }
-
-    return { success: false, reason: 'NO_ACTION' };
+    return matrix.handled ? matrix.result : { success: false, reason: 'NO_ACTION' };
 }
 
 function runPhaseSix({ village, gameState, actionExecutor, phaseState, now, threatContext, constructionFilter, recruitmentFilter }) {
@@ -1999,7 +2019,7 @@ export function runEgyptianEconomicPhaseCycle({
     }
 
     if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase5) {
-        if (evaluatePhaseFiveExit(village, gameState, phaseState)) {
+        if (evaluatePhaseFiveExit(village, phaseState)) {
             transitionTo(phaseState, EGYPTIAN_PHASE_IDS.phase5, EGYPTIAN_PHASE_IDS.phase6, now, 'PHASE_5_EXIT_CRITERIA_MET', log, village, difficulty);
         }
         if (phaseState.activePhaseId === EGYPTIAN_PHASE_IDS.phase5) {
@@ -2008,8 +2028,6 @@ export function runEgyptianEconomicPhaseCycle({
                 gameState,
                 actionExecutor,
                 phaseState,
-                now,
-                threatContext,
                 constructionFilter,
                 recruitmentFilter,
             });

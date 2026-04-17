@@ -157,14 +157,20 @@ const BASE_LOCK_DURATIONS_MS = Object.freeze({
 });
 
 const COMMAND_LAYER_PRIORITY = Object.freeze({
-    reactive_critical: 50,
-    reactive_high: 40,
-    macro_emergency: 30,
-    macro_normal: 20,
-    reactive_low: 10,
+    reactive_dodge_reinforce: 60,
+    reactive_local_defense: 50,
+    reactive_counterattack: 40,
+    strategic_attack: 30,
+    strategic_farming: 20,
+    macro_emergency: 35,
+    macro_normal: 25,
+    reactive_critical: 60,
+    reactive_high: 60,
+    reactive_low: 40,
 });
 
 const COMMAND_WINDOW_TTL_MS = 12000;
+const OFFENSIVE_MISSION_TYPES = new Set(['attack', 'raid', 'espionage', 'conquest']);
 
 const DECISION_SPEED_MIN = 1;
 const ECONOMIC_INTERVAL_MIN_MS = 1000;
@@ -197,8 +203,12 @@ function createDefaultVillageCombatState(villageId, now = Date.now()) {
         villageId,
         threatLevel: 'none',
         threatType: 'mixed',
+        intelFresh: false,
+        lastIntelAt: null,
         posture: 'hybrid',
         preferredResponse: 'hold',
+        offenseSuppressed: false,
+        reservedTroops: {},
         attackPowerEstimate: 0,
         localDefenseEstimate: 0,
         imperialDefenseEstimate: 0,
@@ -208,6 +218,7 @@ function createDefaultVillageCombatState(villageId, now = Date.now()) {
         shouldCounterattack: false,
         shouldPauseEconomicConstruction: false,
         shouldBoostEmergencyRecruitment: false,
+        attackerVillageId: null,
         counterWindowOpen: false,
         counterWindowExpiresAt: null,
         expiresAt: now + DEFAULT_COMBAT_STATE_TTL_MS,
@@ -226,6 +237,11 @@ function mapEntriesFromPersistedMap(persistedMap) {
 function sanitizeSourceMovementIds(sourceMovementIds) {
     if (!Array.isArray(sourceMovementIds)) return [];
     return [...new Set(sourceMovementIds.filter(Boolean))];
+}
+
+function countTroopsInMap(troops = {}) {
+    if (!troops || typeof troops !== 'object') return 0;
+    return Object.values(troops).reduce((sum, count) => sum + Math.max(0, Number(count) || 0), 0);
 }
 
 function formatDuration(ms) {
@@ -1048,7 +1064,7 @@ class AIController {
     }
 
     _getCommandSender(context = {}) {
-        return (commandType, payload) => this._sendCommand(commandType, payload, context);
+        return (commandType, payload, overrideContext = {}) => this._sendCommand(commandType, payload, { ...context, ...overrideContext });
     }
 
     _inferVillageIdFromCommand(commandType, payload = {}) {
@@ -1073,6 +1089,40 @@ class AIController {
         return 'other';
     }
 
+    _isOffensiveMovementCommand(commandType, payload = {}) {
+        if (commandType !== 'send_movement') return false;
+        const missionType = payload?.missionType;
+        return OFFENSIVE_MISSION_TYPES.has(missionType);
+    }
+
+    _hasReservedTroops(villageCombatState) {
+        return countTroopsInMap(villageCombatState?.reservedTroops || {}) > 0;
+    }
+
+    _buildVillageCombatContractSnapshot(villageIds = []) {
+        const contract = {};
+        const uniqueIds = [...new Set((villageIds || []).filter(Boolean))];
+
+        uniqueIds.forEach(villageId => {
+            const state = this.getVillageCombatState(villageId);
+            if (!state) return;
+
+            contract[villageId] = {
+                threatLevel: state.threatLevel || 'none',
+                threatType: state.threatType || 'mixed',
+                intelFresh: Boolean(state.intelFresh),
+                lastIntelAt: Number.isFinite(Number(state.lastIntelAt)) ? Number(state.lastIntelAt) : null,
+                preferredResponse: state.preferredResponse || 'hold',
+                offenseSuppressed: Boolean(state.offenseSuppressed),
+                reservedTroops: { ...(state.reservedTroops || {}) },
+                counterWindowOpen: Boolean(state.counterWindowOpen),
+                attackerVillageId: state.attackerVillageId || null,
+            };
+        });
+
+        return contract;
+    }
+
     _resolveLayerPriority(villageId, context = {}) {
         if (context.layerPriority && COMMAND_LAYER_PRIORITY[context.layerPriority]) {
             return context.layerPriority;
@@ -1081,10 +1131,24 @@ class AIController {
         const sourceLayer = context.sourceLayer || 'macro';
         if (sourceLayer === 'reactive') {
             const combatState = villageId ? this.getVillageCombatState(villageId) : null;
-            if (!combatState) return 'reactive_low';
-            if (combatState.threatLevel === 'critical') return 'reactive_critical';
-            if (combatState.threatLevel === 'high') return 'reactive_high';
-            return 'reactive_low';
+            if (!combatState) return 'reactive_counterattack';
+
+            const response = combatState.preferredResponse;
+            if (response === 'partial_dodge' || response === 'full_dodge' || response === 'hold_with_reinforcements' || response === 'reinforce') {
+                return 'reactive_dodge_reinforce';
+            }
+            if (response === 'hold') {
+                return 'reactive_local_defense';
+            }
+            if (response === 'counterattack' || response === 'counterpressure') {
+                return 'reactive_counterattack';
+            }
+
+            if (combatState.threatLevel === 'critical' || combatState.threatLevel === 'high') {
+                return 'reactive_dodge_reinforce';
+            }
+
+            return 'reactive_counterattack';
         }
 
         if (sourceLayer === 'macro') {
@@ -1099,7 +1163,9 @@ class AIController {
         }
 
         if (sourceLayer === 'military') {
-            return 'reactive_low';
+            return context.militaryIntent === 'farming'
+                ? 'strategic_farming'
+                : 'strategic_attack';
         }
 
         return 'macro_normal';
@@ -1162,19 +1228,47 @@ class AIController {
         const category = this._classifyCommandCategory(commandType);
         const now = Date.now();
 
-        if (category === 'movement' && villageId && sourceLayer !== 'reactive' && this._hasPendingDodgeForVillage(villageId)) {
+        if (category === 'movement' && villageId && sourceLayer !== 'reactive' && this._isOffensiveMovementCommand(commandType, payload)) {
             const village = this._lastKnownGameState?.villages?.find(candidate => candidate.id === villageId) || null;
-            this.log('warn', village, 'Arbitraje Central', 'Comando bloqueado: aldea con dodge pendiente.', {
-                villageId,
-                commandType,
-                layerPriority,
-                sourceLayer,
-            }, 'military');
-            return {
-                success: false,
-                reason: 'AI_ARBITRATION_DODGE_LOCK',
-                details: { villageId, commandType, layerPriority, sourceLayer },
-            };
+            const combatState = this.getVillageCombatState(villageId);
+            const hasPendingDodge = this._hasPendingDodgeForVillage(villageId);
+            const movementLock = this.getMovementLockForVillage(villageId);
+            const hasHighThreat = combatState?.threatLevel === 'high' || combatState?.threatLevel === 'critical';
+            const hasReservedTroops = this._hasReservedTroops(combatState);
+            const offenseSuppressed = Boolean(combatState?.offenseSuppressed);
+
+            if (hasPendingDodge || movementLock || hasHighThreat || hasReservedTroops || offenseSuppressed) {
+                this.log('warn', village, 'Arbitraje Central', 'Comando ofensivo bloqueado por contrato de combate reactivo.', {
+                    villageId,
+                    commandType,
+                    missionType: payload?.missionType || null,
+                    layerPriority,
+                    sourceLayer,
+                    hasPendingDodge,
+                    movementLockReason: movementLock?.reason || null,
+                    threatLevel: combatState?.threatLevel || 'none',
+                    preferredResponse: combatState?.preferredResponse || 'hold',
+                    offenseSuppressed,
+                    reservedTroopsCount: countTroopsInMap(combatState?.reservedTroops || {}),
+                }, 'military');
+                return {
+                    success: false,
+                    reason: 'AI_ARBITRATION_OFFENSE_SUPPRESSED_BY_REACTIVE',
+                    details: {
+                        villageId,
+                        commandType,
+                        missionType: payload?.missionType || null,
+                        layerPriority,
+                        sourceLayer,
+                        hasPendingDodge,
+                        movementLockReason: movementLock?.reason || null,
+                        threatLevel: combatState?.threatLevel || 'none',
+                        preferredResponse: combatState?.preferredResponse || 'hold',
+                        offenseSuppressed,
+                        reservedTroopsCount: countTroopsInMap(combatState?.reservedTroops || {}),
+                    },
+                };
+            }
         }
 
         if (!this._isConstructionCommandAllowedUnderEmergency(commandType, payload, layerPriority, villageId)) {
@@ -1261,7 +1355,7 @@ class AIController {
     }
 
     _processCounterWindows(gameState) {
-        const sender = this._getCommandSender({ sourceLayer: 'reactive', layerPriority: 'reactive_high' });
+        const sender = this._getCommandSender({ sourceLayer: 'reactive', layerPriority: 'reactive_counterattack' });
         const myVillages = gameState.villages.filter(village => village.ownerId === this._ownerId);
 
         for (const village of myVillages) {
@@ -1624,6 +1718,7 @@ class AIController {
                 archetype: this._archetype,
                 personality: this._personality,
                 gameConfig: this._gameConfig,
+                villageCombatStateByVillageId: this._buildVillageCombatContractSnapshot(myVillages.map(village => village.id)),
                 strategicAI: this._strategicAI,
                 executeCommands: this._executeCommands.bind(this),
                 log: this.log.bind(this),
@@ -1648,7 +1743,7 @@ class AIController {
         executeCommands({
             commands,
             gameState,
-            sendCommand: this._getCommandSender({ sourceLayer: 'military', layerPriority: 'reactive_low' }),
+            sendCommand: this._getCommandSender({ sourceLayer: 'military' }),
             log: this.log.bind(this),
         });
     }

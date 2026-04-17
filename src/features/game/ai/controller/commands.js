@@ -1,3 +1,23 @@
+function getTargetTile(gameState, targetCoords) {
+    if (!targetCoords) return null;
+    const key = `${targetCoords.x}|${targetCoords.y}`;
+    return gameState.spatialIndex.get(key)
+        || gameState.mapData.find(tile => tile.x === targetCoords.x && tile.y === targetCoords.y)
+        || null;
+}
+
+function resolveMilitaryIntent(command, gameState, missionType) {
+    if (command?.comando !== 'ATTACK') return 'strategic_attack';
+    if (missionType !== 'raid') return 'strategic_attack';
+
+    const targetTile = getTargetTile(gameState, command?.parametros?.targetCoords);
+    if (targetTile?.type === 'oasis') {
+        return 'farming';
+    }
+
+    return 'strategic_attack';
+}
+
 export function executeCommands({ commands, gameState, sendCommand, log }) {
     for (const command of commands) {
         const { comando, villageId, parametros } = command;
@@ -25,12 +45,16 @@ export function executeCommands({ commands, gameState, sendCommand, log }) {
                 else if (comando === 'REINFORCE') missionType = 'reinforcement';
                 else missionType = parametros.mision;
 
+                const militaryIntent = resolveMilitaryIntent(command, gameState, missionType);
+
                 const result = sendCommand('send_movement', {
                     originVillageId: villageId,
                     targetCoords: parametros.targetCoords,
                     troops: parametros.tropas,
                     missionType,
                     catapultTargets: parametros.catapultTargets || [],
+                }, {
+                    militaryIntent,
                 });
 
                 if (result.success) {

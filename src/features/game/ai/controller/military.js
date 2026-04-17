@@ -32,6 +32,7 @@ export function runMilitaryDecision({
     archetype,
     personality,
     gameConfig,
+    villageCombatStateByVillageId = {},
     strategicAI,
     executeCommands,
     log,
@@ -88,6 +89,7 @@ export function runMilitaryDecision({
         {
             baitingPlayers: Array.from(baitingPlayers),
             reputationData,
+            combatContractByVillage: villageCombatStateByVillageId,
         },
     );
 

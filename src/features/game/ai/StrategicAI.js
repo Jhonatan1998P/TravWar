@@ -26,6 +26,7 @@ export default class StrategicAI {
 
         const baitingPlayers = intelligenceContext.baitingPlayers || [];
         const reputationData = intelligenceContext.reputationData || {};
+        const combatContractByVillage = intelligenceContext.combatContractByVillage || {};
 
         if (baitingPlayers.length > 0) {
             reasoningLog.push(`[INTEL] Jugadores sospechosos de emboscada: ${baitingPlayers.join(', ')}. Evitando ataques directos.`);
@@ -60,6 +61,8 @@ export default class StrategicAI {
             this._filterNonCombatTroops(totalCombatTroops, race);
 
             const siegeTroopsAtHome = this._extractSiegeTroops(troopsAtHome, race);
+            const combatContract = this._resolveVillageCombatContract(village.id, combatContractByVillage);
+            const offenseGate = this._resolveVillageOffenseGate(combatContract);
 
             const powerAtHome = CombatFormulas.calculateAttackPoints(combatTroopsAtHome, race, village.smithy.upgrades).total;
             const totalPower = CombatFormulas.calculateAttackPoints(totalCombatTroops, race, village.smithy.upgrades).total;
@@ -78,6 +81,9 @@ export default class StrategicAI {
                     totalPower,
                     isArmyBusy,
                     needs: this._analyzeVillageNeeds(village),
+                    combatContract,
+                    offenseBlocked: offenseGate.blocked,
+                    offenseBlockedReasons: offenseGate.reasons,
                 });
             }
         });
@@ -89,11 +95,40 @@ export default class StrategicAI {
             };
         }
 
+        const offensiveReadyForces = availableForces.filter(force => !force.offenseBlocked);
+        const blockedForces = availableForces.filter(force => force.offenseBlocked);
+        if (blockedForces.length > 0) {
+            blockedForces.forEach(force => {
+                reasoningLog.push(
+                    `[GATE-REACTIVE] ${force.village.name} (${force.village.id}) bloqueada para ofensiva: ${force.offenseBlockedReasons.join(', ')}.`
+                );
+            });
+        }
+
+        if (offensiveReadyForces.length === 0) {
+            reasoningLog.push('[GATE-REACTIVE] Sin aldeas ofensivas disponibles. Se cancela ciclo ofensivo por riesgo defensivo.');
+            return {
+                razonamiento: reasoningLog.join('\n'),
+                comandos: [],
+                telemetry: {
+                    militaryGate: {
+                        hasMaxPriorityGoal: false,
+                        isMusteringForWar: false,
+                        farmEvaluationExecuted: false,
+                        farmBlockedByMaxPriorityGoal: false,
+                        offensiveSuppressedByReactive: true,
+                        blockedVillagesCount: blockedForces.length,
+                        offensiveReadyVillages: 0,
+                    },
+                },
+            };
+        }
+
         const nemesisId = this._manageNemesis(gameState, ownerId, aiState, reasoningLog);
 
         const targets = this._scanAndClassifyTargets(
             gameState,
-            availableForces,
+            offensiveReadyForces,
             ownerId,
             nemesisId,
             reasoningLog,
@@ -114,7 +149,7 @@ export default class StrategicAI {
                 if (!hasActiveAttack) {
                     if (nemesisTarget.spyStatus === 'stale' || nemesisTarget.spyStatus === 'failed') {
                         const spyCmd = this._dispatchSpies(
-                            availableForces,
+                            offensiveReadyForces,
                             nemesisTarget,
                             scoutsPerMission,
                             reasoningLog,
@@ -126,7 +161,7 @@ export default class StrategicAI {
                     } else if (nemesisTarget.intel) {
                         const estimatedDefense = this._calculateEstimatedDefense(nemesisTarget);
                         const requiredPower = estimatedDefense * 1.2;
-                        const bestForce = this._getBestForce(availableForces);
+                        const bestForce = this._getBestForce(offensiveReadyForces);
 
                         if (bestForce) {
                             if (bestForce.totalPower > requiredPower) {
@@ -153,7 +188,7 @@ export default class StrategicAI {
             }
         }
 
-        const spyResults = this._performGeneralIntelligence(availableForces, targets.unknown, nemesisId);
+        const spyResults = this._performGeneralIntelligence(offensiveReadyForces, targets.unknown, nemesisId);
         commands.push(...spyResults.commands);
         if (spyResults.logs.length > 0) reasoningLog.push(...spyResults.logs);
 
@@ -172,7 +207,7 @@ export default class StrategicAI {
                 reasoningLog.push('[FARMEO ROI] farm bloqueado por prioridad máxima.');
             } else {
                 const farmingResults = this._performOptimizedFarming(
-                    availableForces,
+                    offensiveReadyForces,
                     safeKnownTargets,
                     nemesisId,
                     race,
@@ -198,6 +233,9 @@ export default class StrategicAI {
                     isMusteringForWar,
                     farmEvaluationExecuted: !hasMaxPriorityGoal && !isMusteringForWar,
                     farmBlockedByMaxPriorityGoal: hasMaxPriorityGoal && !isMusteringForWar,
+                    offensiveSuppressedByReactive: blockedForces.length > 0,
+                    blockedVillagesCount: blockedForces.length,
+                    offensiveReadyVillages: offensiveReadyForces.length,
                 },
             },
         };
@@ -399,6 +437,50 @@ export default class StrategicAI {
 
     _extractSiegeTroops(troops, race) {
         return extractSiegeTroops(troops, race);
+    }
+
+    _resolveVillageCombatContract(villageId, combatContractByVillage = {}) {
+        const state = combatContractByVillage[villageId] || {};
+        return {
+            threatLevel: state.threatLevel || 'none',
+            threatType: state.threatType || 'mixed',
+            intelFresh: Boolean(state.intelFresh),
+            lastIntelAt: Number.isFinite(Number(state.lastIntelAt)) ? Number(state.lastIntelAt) : null,
+            preferredResponse: state.preferredResponse || 'hold',
+            offenseSuppressed: Boolean(state.offenseSuppressed),
+            reservedTroops: { ...(state.reservedTroops || {}) },
+            counterWindowOpen: Boolean(state.counterWindowOpen),
+            attackerVillageId: state.attackerVillageId || null,
+        };
+    }
+
+    _countTroops(troops = {}) {
+        return Object.values(troops).reduce((sum, count) => sum + Math.max(0, Number(count) || 0), 0);
+    }
+
+    _resolveVillageOffenseGate(combatContract) {
+        const reasons = [];
+        const threatLevel = combatContract?.threatLevel || 'none';
+        const preferredResponse = combatContract?.preferredResponse || 'hold';
+        const reservedTroopsCount = this._countTroops(combatContract?.reservedTroops || {});
+
+        if (threatLevel === 'high' || threatLevel === 'critical') {
+            reasons.push(`threat=${threatLevel}`);
+        }
+        if (combatContract?.offenseSuppressed) {
+            reasons.push('offenseSuppressed=true');
+        }
+        if (reservedTroopsCount > 0) {
+            reasons.push(`reservedTroops=${reservedTroopsCount}`);
+        }
+        if (preferredResponse === 'partial_dodge' || preferredResponse === 'full_dodge' || preferredResponse === 'hold_with_reinforcements' || preferredResponse === 'reinforce') {
+            reasons.push(`preferredResponse=${preferredResponse}`);
+        }
+
+        return {
+            blocked: reasons.length > 0,
+            reasons,
+        };
     }
 
     _simulateCombat(attackTroops, defenseTroops, defRace, attRace, wallLevel, type) {
