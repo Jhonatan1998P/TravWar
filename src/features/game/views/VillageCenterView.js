@@ -13,6 +13,7 @@ import { gameData } from '../core/GameData.js';
 import { formatNumber } from '@shared/lib/formatters.js';
 import uiRenderScheduler from '../ui/UIRenderScheduler.js';
 import { perfCollector } from '@shared/lib/perf.js';
+import { selectVillageVisualSignature } from '../ui/renderSelectors.js';
 
 class VillageCenterView {
     #populationDisplay;
@@ -72,10 +73,28 @@ class VillageCenterView {
         document.removeEventListener('notify:recruitment_finished', this._handleRecruitmentFinished);
         document.removeEventListener('notify:research_finished', this._handleResearchFinished);
         document.removeEventListener('notify:smithy_finished', this._handleSmithyFinished);
+
+        this.#activityModalUI?.destroy?.();
+        this.#constructionQueueUI?.destroy?.();
+        this.#recruitmentQueueUI?.destroy?.();
+        this.#researchQueueUI?.destroy?.();
+        this.#smithyQueueUI?.destroy?.();
+        this.#troopsUI?.destroy?.();
+        this.#movementsUI?.destroy?.();
+
+        this.#activityModalUI = null;
+        this.#constructionQueueUI = null;
+        this.#recruitmentQueueUI = null;
+        this.#researchQueueUI = null;
+        this.#smithyQueueUI = null;
+        this.#troopsUI = null;
+        this.#movementsUI = null;
     }
 
     initializeEventListeners() {
-        uiRenderScheduler.register('village-center-view', this._handleGameStateUpdate);
+        uiRenderScheduler.register('village-center-view', this._handleGameStateUpdate, [selectVillageVisualSignature], {
+            suspendWhenPanelVisible: true,
+        });
         document.addEventListener('notify:construction_finished', this._handleConstructionFinished);
         document.addEventListener('notify:recruitment_finished', this._handleRecruitmentFinished);
         document.addEventListener('notify:research_finished', this._handleResearchFinished);

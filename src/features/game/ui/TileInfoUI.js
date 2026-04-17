@@ -6,6 +6,7 @@ import tradePanelUI from './TradePanelUI.js';
 import toastUI from './ToastUI.js';
 import { unitSpriteManager } from './UnitSpriteManager.js';
 import uiRenderScheduler from './UIRenderScheduler.js';
+import { selectTileInfoPanelSignature } from './renderSelectors.js';
 
 const ICON_PATHS = {
     wood: '/icons/wood.png',
@@ -30,6 +31,10 @@ class TileInfoUI {
     #mainContainer;
     #currentTile = null;
     #gameState = null;
+    #schedulerKey = 'tile-info-ui';
+    #boundCloseClick;
+    #boundFooterClick;
+    #boundGameStateUpdate;
 
     constructor() {
         this.#mainContainer = document.getElementById('village-container');
@@ -40,11 +45,36 @@ class TileInfoUI {
     }
 
     _init() {
-        this._createPanelHTML();
+        if (!document.getElementById('tile-info-panel')) {
+            this._createPanelHTML();
+        }
+
         this.#panelElement = document.getElementById('tile-info-panel');
-        uiRenderScheduler.register('tile-info-ui', this._handleGameStateUpdate.bind(this));
-        this.#panelElement.querySelector('[data-action="close"]').addEventListener('click', () => this.hide());
-        this.#panelElement.querySelector('#panel-footer').addEventListener('click', e => this._handleFooterClick(e));
+        if (!this.#panelElement) {
+            return;
+        }
+
+        this.#boundGameStateUpdate = this._handleGameStateUpdate.bind(this);
+        this.#boundCloseClick = this.hide.bind(this);
+        this.#boundFooterClick = this._handleFooterClick.bind(this);
+
+        uiRenderScheduler.register(this.#schedulerKey, this.#boundGameStateUpdate, [selectTileInfoPanelSignature]);
+        this.#panelElement.querySelector('[data-action="close"]').addEventListener('click', this.#boundCloseClick);
+        this.#panelElement.querySelector('#panel-footer').addEventListener('click', this.#boundFooterClick);
+    }
+
+    destroy() {
+        uiRenderScheduler.unregister(this.#schedulerKey);
+
+        if (this.#panelElement) {
+            this.#panelElement.querySelector('[data-action="close"]')?.removeEventListener('click', this.#boundCloseClick);
+            this.#panelElement.querySelector('#panel-footer')?.removeEventListener('click', this.#boundFooterClick);
+            this.#panelElement.remove();
+        }
+
+        this.#panelElement = null;
+        this.#currentTile = null;
+        this.#gameState = null;
     }
 
     _createPanelHTML() {

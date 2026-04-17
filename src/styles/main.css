@@ -64,7 +64,7 @@
 
   .building-slot {
     @apply absolute top-1/2 left-1/2 flex flex-col items-center;
-    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), filter 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    transition: filter 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
     will-change: transform;
     user-select: none;
     -webkit-user-select: none;
@@ -73,8 +73,11 @@
 
   @media (hover: hover) {
     .building-slot:hover {
-      transform: scale(1.12) !important;
       z-index: 20;
+    }
+
+    .building-slot:hover .building-circle {
+      transform: scale(1.12);
     }
   }
 

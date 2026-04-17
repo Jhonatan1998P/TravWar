@@ -24,6 +24,13 @@ const ASSET_PATHS = {
     compass: '/icons/compass.png'
 };
 
+const SHARED_MAP_RUNTIME = {
+    assets: null,
+    assetsPromise: null,
+    chunkCache: new Map(),
+    showWastelandIcons: true,
+};
+
 class MapView {
     #appRoot;
     #viewport;
@@ -67,6 +74,9 @@ class MapView {
         this._handleCenterMapClick = this._handleCenterMapClick.bind(this);
         this._handleToggleWastelandIconChange = this._handleToggleWastelandIconChange.bind(this);
         this._handleResize = this._handleResize.bind(this);
+
+        this.#chunkCache = SHARED_MAP_RUNTIME.chunkCache;
+        this.#showWastelandIcons = SHARED_MAP_RUNTIME.showWastelandIcons;
     }
 
     get html() {
@@ -139,7 +149,11 @@ class MapView {
         if (this.#resizeObserver) {
             this.#resizeObserver.disconnect();
         }
-        this.#chunkCache.clear();
+
+        this.#tileInfoUI?.destroy?.();
+        this.#tileInfoUI = null;
+
+        SHARED_MAP_RUNTIME.showWastelandIcons = this.#showWastelandIcons;
         this.#dirtyChunkKeys.clear();
         this.#isViewportReady = false;
         this.#assetsLoaded = false;
@@ -153,44 +167,65 @@ class MapView {
     }
 
     async _loadAssets() {
-        const promises = Object.entries(ASSET_PATHS).map(([key, src]) => {
-            return new Promise((resolve, reject) => {
-                const img = new Image();
-                img.onload = () => {
-                    this.#assets[key] = img;
-                    resolve();
-                };
-                img.onerror = () => reject(`No se pudo cargar la imagen: ${src}`);
-                img.src = src;
-            });
-        });
-
-        await Promise.all(promises);
-
-        const villageImg = this.#assets.village;
-        if (villageImg) {
-            const playerVillageCanvas = document.createElement('canvas');
-            playerVillageCanvas.width = villageImg.width;
-            playerVillageCanvas.height = villageImg.height;
-            const pctx = playerVillageCanvas.getContext('2d');
-            pctx.drawImage(villageImg, 0, 0);
-            pctx.globalCompositeOperation = 'source-atop';
-            pctx.fillStyle = 'rgba(56, 178, 172, 0.3)';
-            pctx.fillRect(0, 0, villageImg.width, villageImg.height);
-            this.#assets.playerVillage = playerVillageCanvas;
-
-            const enemyVillageCanvas = document.createElement('canvas');
-            enemyVillageCanvas.width = villageImg.width;
-            enemyVillageCanvas.height = villageImg.height;
-            const ectx = enemyVillageCanvas.getContext('2d');
-            ectx.drawImage(villageImg, 0, 0);
-            ectx.globalCompositeOperation = 'source-atop';
-            ectx.fillStyle = 'rgba(229, 62, 62, 0.3)';
-            ectx.fillRect(0, 0, villageImg.width, villageImg.height);
-            this.#assets.enemyVillage = enemyVillageCanvas;
+        if (SHARED_MAP_RUNTIME.assets) {
+            this.#assets = SHARED_MAP_RUNTIME.assets;
+            this.#assetsLoaded = true;
+            return;
         }
 
-        this.#assetsLoaded = true;
+        if (!SHARED_MAP_RUNTIME.assetsPromise) {
+            SHARED_MAP_RUNTIME.assetsPromise = (async () => {
+                const loadedAssets = {};
+                const promises = Object.entries(ASSET_PATHS).map(([key, src]) => {
+                    return new Promise((resolve, reject) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            loadedAssets[key] = img;
+                            resolve();
+                        };
+                        img.onerror = () => reject(`No se pudo cargar la imagen: ${src}`);
+                        img.src = src;
+                    });
+                });
+
+                await Promise.all(promises);
+
+                const villageImg = loadedAssets.village;
+                if (villageImg) {
+                    const playerVillageCanvas = document.createElement('canvas');
+                    playerVillageCanvas.width = villageImg.width;
+                    playerVillageCanvas.height = villageImg.height;
+                    const pctx = playerVillageCanvas.getContext('2d');
+                    pctx.drawImage(villageImg, 0, 0);
+                    pctx.globalCompositeOperation = 'source-atop';
+                    pctx.fillStyle = 'rgba(56, 178, 172, 0.3)';
+                    pctx.fillRect(0, 0, villageImg.width, villageImg.height);
+                    loadedAssets.playerVillage = playerVillageCanvas;
+
+                    const enemyVillageCanvas = document.createElement('canvas');
+                    enemyVillageCanvas.width = villageImg.width;
+                    enemyVillageCanvas.height = villageImg.height;
+                    const ectx = enemyVillageCanvas.getContext('2d');
+                    ectx.drawImage(villageImg, 0, 0);
+                    ectx.globalCompositeOperation = 'source-atop';
+                    ectx.fillStyle = 'rgba(229, 62, 62, 0.3)';
+                    ectx.fillRect(0, 0, villageImg.width, villageImg.height);
+                    loadedAssets.enemyVillage = enemyVillageCanvas;
+                }
+
+                return loadedAssets;
+            })();
+        }
+
+        try {
+            const sharedAssets = await SHARED_MAP_RUNTIME.assetsPromise;
+            SHARED_MAP_RUNTIME.assets = sharedAssets;
+            this.#assets = sharedAssets;
+            this.#assetsLoaded = true;
+        } catch (error) {
+            SHARED_MAP_RUNTIME.assetsPromise = null;
+            throw error;
+        }
     }
 
     _initializeDOMElements() {
@@ -202,6 +237,10 @@ class MapView {
         this.#toggleWastelandIconBtn = document.getElementById('toggle-wasteland-icon');
         this.#terrainCtx = this.#terrainCanvas.getContext('2d');
         this.#detailsCtx = this.#detailsCanvas.getContext('2d');
+
+        if (this.#toggleWastelandIconBtn) {
+            this.#toggleWastelandIconBtn.checked = this.#showWastelandIcons;
+        }
     }
     
     _setupSingleCanvas(canvas, ctx) {
@@ -243,7 +282,9 @@ class MapView {
     }
 
     _initializeEventListeners() {
-        uiRenderScheduler.register('map-view', this._handleGameStateUpdate, [selectMapViewSignature]);
+        uiRenderScheduler.register('map-view', this._handleGameStateUpdate, [selectMapViewSignature], {
+            suspendWhenPanelVisible: true,
+        });
         this.#viewport.addEventListener('mousedown', this._onPanStart);
         this.#viewport.addEventListener('mousemove', this._onPanMove);
         this.#viewport.addEventListener('mouseup', this._onPanEnd);
@@ -267,6 +308,7 @@ class MapView {
 
     _handleToggleWastelandIconChange(e) {
         this.#showWastelandIcons = e.target.checked;
+        SHARED_MAP_RUNTIME.showWastelandIcons = this.#showWastelandIcons;
         this.#chunkCache.clear();
         this._applyTransform();
     }

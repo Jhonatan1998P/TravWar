@@ -13,6 +13,7 @@ import { gameData } from '../core/GameData.js';
 import { formatNumber } from '@shared/lib/formatters.js';
 import uiRenderScheduler from '../ui/UIRenderScheduler.js';
 import { perfCollector } from '@shared/lib/perf.js';
+import { selectVillageVisualSignature } from '../ui/renderSelectors.js';
 
 class VillageView {
     #populationDisplay;
@@ -24,6 +25,7 @@ class VillageView {
     #smithyQueueUI;
     #troopsUI;
     #movementsUI;
+    #lastVillageRenderSignature = '';
     #didReportFirstMeaningfulPaint = false;
 
     constructor() {
@@ -71,10 +73,28 @@ class VillageView {
         document.removeEventListener('notify:recruitment_finished', this._handleRecruitmentFinished);
         document.removeEventListener('notify:research_finished', this._handleResearchFinished);
         document.removeEventListener('notify:smithy_finished', this._handleSmithyFinished);
+
+        this.#activityModalUI?.destroy?.();
+        this.#constructionQueueUI?.destroy?.();
+        this.#recruitmentQueueUI?.destroy?.();
+        this.#researchQueueUI?.destroy?.();
+        this.#smithyQueueUI?.destroy?.();
+        this.#troopsUI?.destroy?.();
+        this.#movementsUI?.destroy?.();
+
+        this.#activityModalUI = null;
+        this.#constructionQueueUI = null;
+        this.#recruitmentQueueUI = null;
+        this.#researchQueueUI = null;
+        this.#smithyQueueUI = null;
+        this.#troopsUI = null;
+        this.#movementsUI = null;
     }
 
     initializeEventListeners() {
-        uiRenderScheduler.register('village-view', this._handleGameStateUpdate);
+        uiRenderScheduler.register('village-view', this._handleGameStateUpdate, [selectVillageVisualSignature], {
+            suspendWhenPanelVisible: true,
+        });
         document.addEventListener('notify:construction_finished', this._handleConstructionFinished);
         document.addEventListener('notify:recruitment_finished', this._handleRecruitmentFinished);
         document.addEventListener('notify:research_finished', this._handleResearchFinished);
@@ -90,7 +110,12 @@ class VillageView {
         if (!activeVillage) return;
 
         renderResourceBar(document.getElementById('resource-bar'), activeVillage.resources);
-        renderBuildingSlots(document.getElementById('mainView'), state);
+
+        const villageRenderSignature = this.#getVillageRenderSignature(activeVillage, state.activeVillageId);
+        if (villageRenderSignature !== this.#lastVillageRenderSignature) {
+            renderBuildingSlots(document.getElementById('mainView'), state);
+            this.#lastVillageRenderSignature = villageRenderSignature;
+        }
 
         if (this.#populationDisplay && activeVillage.population) {
             this.#populationDisplay.textContent = formatNumber(activeVillage.population.current);
@@ -100,6 +125,20 @@ class VillageView {
             this.#didReportFirstMeaningfulPaint = true;
             perfCollector.markEnd('view.village.firstMeaningfulPaint');
         }
+    }
+
+    #getVillageRenderSignature(activeVillage, activeVillageId) {
+        const buildingsSignature = [...(activeVillage.buildings || [])]
+            .sort((left, right) => String(left.id).localeCompare(String(right.id)))
+            .map(building => `${building.id}:${building.type}:${building.level}`)
+            .join(';');
+
+        const constructionQueueSignature = [...(activeVillage.constructionQueue || [])]
+            .sort((left, right) => String(left.jobId).localeCompare(String(right.jobId)))
+            .map(job => `${job.jobId}:${job.buildingId}:${job.buildingType}:${job.targetLevel}`)
+            .join(';');
+
+        return `${activeVillageId}:${activeVillage.villageType}:${buildingsSignature}|${constructionQueueSignature}`;
     }
 
     _handleConstructionFinished(event) {

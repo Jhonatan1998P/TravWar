@@ -7,6 +7,13 @@ class UIRenderScheduler {
     #latestGameState = null;
     #isRenderScheduled = false;
 
+    #isAnyPanelVisible() {
+        if (typeof document === 'undefined') {
+            return false;
+        }
+        return Boolean(document.querySelector('.panel-visible'));
+    }
+
     constructor() {
         if (UIRenderScheduler.instance) {
             return UIRenderScheduler.instance;
@@ -19,7 +26,7 @@ class UIRenderScheduler {
         document.addEventListener('gamestate:refreshed', this.#handleGameStateUpdate.bind(this));
     }
 
-    register(key, renderCallback, selectors = []) {
+    register(key, renderCallback, selectors = [], options = {}) {
         if (typeof renderCallback !== 'function') {
             console.error(`[UIRenderScheduler] El callback para la clave "${key}" no es una función.`);
             return;
@@ -32,7 +39,8 @@ class UIRenderScheduler {
         this.#components.set(key, {
             renderCallback,
             selectors: normalizedSelectors,
-            lastSelectorValues: null
+            lastSelectorValues: null,
+            suspendWhenPanelVisible: Boolean(options?.suspendWhenPanelVisible)
         });
     }
 
@@ -43,13 +51,21 @@ class UIRenderScheduler {
 
     #handleGameStateUpdate(event) {
         this.#latestGameState = event.detail;
+        const panelVisible = this.#isAnyPanelVisible();
 
         perfCollector.incrementCounter('scheduler.gamestateEvents');
 
         let skippedComponents = 0;
         let dirtyComponents = 0;
+        let pausedComponents = 0;
         
         for (const [key, component] of this.#components.entries()) {
+            if (panelVisible && component.suspendWhenPanelVisible) {
+                this.#dirtyComponents.delete(key);
+                pausedComponents += 1;
+                continue;
+            }
+
             if (this.#isComponentDirty(component, this.#latestGameState, key)) {
                 this.#dirtyComponents.add(key);
                 dirtyComponents += 1;
@@ -61,6 +77,7 @@ class UIRenderScheduler {
         perfCollector.observeGauge('scheduler.dirtyComponentsPerUpdate', this.#dirtyComponents.size);
         perfCollector.observeGauge('scheduler.skippedComponentsPerUpdate', skippedComponents);
         perfCollector.observeGauge('scheduler.dirtyComponentsEvaluatedPerUpdate', dirtyComponents);
+        perfCollector.observeGauge('scheduler.pausedComponentsPerUpdate', pausedComponents);
         
         this.#scheduleRender();
     }

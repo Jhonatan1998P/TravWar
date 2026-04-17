@@ -9,6 +9,68 @@ function getActiveVillage(state) {
     return state.villages.find(village => village.id === state.activeVillageId) || null;
 }
 
+function numberFloor(value) {
+    return Math.floor(Number(value) || 0);
+}
+
+function panelVisible(panelId) {
+    if (typeof document === 'undefined') {
+        return false;
+    }
+
+    const panel = document.getElementById(panelId);
+    return Boolean(panel && panel.classList.contains('panel-visible'));
+}
+
+function resourceSignature(resources) {
+    const resourceKeys = ['wood', 'stone', 'iron', 'food'];
+    return resourceKeys
+        .map(resourceKey => {
+            const resource = resources?.[resourceKey] || {};
+            return `${resourceKey}:${numberFloor(resource.current)}:${numberFloor(resource.production)}:${numberFloor(resource.capacity)}`;
+        })
+        .join('|');
+}
+
+function populationSignature(population) {
+    return `${numberFloor(population?.current)}:${numberFloor(population?.foodConsumption)}`;
+}
+
+function sortedByIdSignature(entries = [], key = 'id', mapper = () => '') {
+    return [...entries]
+        .sort((left, right) => String(left?.[key] || '').localeCompare(String(right?.[key] || '')))
+        .map(mapper)
+        .join(';');
+}
+
+function buildingsSignature(buildings = []) {
+    return sortedByIdSignature(buildings, 'id', building => `${building.id}:${building.type}:${building.level}`);
+}
+
+function constructionQueueSignature(queue = []) {
+    return sortedByIdSignature(queue, 'jobId', job => `${job.jobId}:${job.buildingId}:${job.buildingType}:${job.targetLevel}:${job.endTime}`);
+}
+
+function recruitmentQueueSignature(queue = []) {
+    return sortedByIdSignature(queue, 'jobId', job => {
+        const remaining = Number.isFinite(Number(job.remainingCount)) ? Number(job.remainingCount) : '';
+        const total = Number.isFinite(Number(job.totalCount)) ? Number(job.totalCount) : '';
+        return `${job.jobId}:${job.buildingId}:${job.unitId}:${job.count}:${remaining}:${total}:${job.endTime}`;
+    });
+}
+
+function researchQueueSignature(queue = []) {
+    return sortedByIdSignature(queue, 'jobId', job => `${job.jobId}:${job.unitId}:${job.endTime}`);
+}
+
+function smithyQueueSignature(queue = []) {
+    return sortedByIdSignature(queue, 'jobId', job => `${job.jobId}:${job.unitId}:${job.endTime}`);
+}
+
+function completedResearchSignature(completed = []) {
+    return [...completed].sort((left, right) => String(left).localeCompare(String(right))).join(';');
+}
+
 function objectSignature(value) {
     if (!value || typeof value !== 'object') {
         return '';
@@ -48,6 +110,23 @@ export function selectVillageListSignature(payload) {
     return state.villages
         .map(village => `${village.id}:${village.ownerId}:${village.name}:${coordsSignature(village.coords)}`)
         .join(';');
+}
+
+export function selectVillageVisualSignature(payload) {
+    const state = getState(payload);
+    const activeVillage = getActiveVillage(state);
+    if (!activeVillage) {
+        return '';
+    }
+
+    return [
+        activeVillage.id,
+        activeVillage.villageType || '',
+        resourceSignature(activeVillage.resources),
+        populationSignature(activeVillage.population),
+        buildingsSignature(activeVillage.buildings || []),
+        constructionQueueSignature(activeVillage.constructionQueue || []),
+    ].join(':');
 }
 
 export function selectUnreadPlayerReports(payload) {
@@ -162,6 +241,89 @@ export function selectMapViewSignature(payload) {
         .join(';');
 
     return `${state.activeVillageId || ''}:${villagesSignature}:${(state.mapData || []).length}`;
+}
+
+export function selectBuildingInfoPanelSignature(payload) {
+    const state = getState(payload);
+    const visible = panelVisible('building-info-panel');
+
+    if (!state) {
+        return visible ? 'visible:no-state' : 'hidden:no-state';
+    }
+
+    const activeVillage = getActiveVillage(state);
+    if (!activeVillage) {
+        return visible ? 'visible:no-village' : `hidden:${state.activeVillageId || ''}`;
+    }
+
+    if (!visible) {
+        return `hidden:${activeVillage.id}`;
+    }
+
+    return [
+        'visible',
+        activeVillage.id,
+        resourceSignature(activeVillage.resources),
+        populationSignature(activeVillage.population),
+        buildingsSignature(activeVillage.buildings || []),
+        constructionQueueSignature(activeVillage.constructionQueue || []),
+        recruitmentQueueSignature(activeVillage.recruitmentQueue || []),
+        researchQueueSignature(activeVillage.research?.queue || []),
+        completedResearchSignature(activeVillage.research?.completed || []),
+        smithyQueueSignature(activeVillage.smithy?.queue || []),
+        objectSignature(activeVillage.smithy?.upgrades || {}),
+    ].join(':');
+}
+
+export function selectTileInfoPanelSignature(payload) {
+    const state = getState(payload);
+    const visible = panelVisible('tile-info-panel');
+
+    if (!state) {
+        return visible ? 'visible:no-state' : 'hidden:no-state';
+    }
+
+    const activeVillage = getActiveVillage(state);
+    const perspectiveOwnerId = activeVillage?.ownerId || 'player';
+
+    if (!visible) {
+        return `hidden:${perspectiveOwnerId}:${state.activeVillageId || ''}`;
+    }
+
+    const tickSignature = Number(payload?.lastTick) || 0;
+    return [
+        'visible',
+        perspectiveOwnerId,
+        state.activeVillageId || '',
+        selectVillageListSignature(payload),
+        (state.mapData || []).length,
+        (state.movements || []).length,
+        (state.reports || []).length,
+        tickSignature,
+    ].join(':');
+}
+
+export function selectBattleReportPanelSignature(payload) {
+    const state = getState(payload);
+    const visible = panelVisible('battle-report-panel');
+
+    if (!state) {
+        return visible ? 'visible:no-state' : 'hidden:no-state';
+    }
+
+    const activeVillage = getActiveVillage(state);
+    const perspectiveOwnerId = activeVillage?.ownerId || 'player';
+
+    if (!visible) {
+        return `hidden:${perspectiveOwnerId}:${state.activeVillageId || ''}`;
+    }
+
+    return [
+        'visible',
+        perspectiveOwnerId,
+        state.activeVillageId || '',
+        selectReportsSignature(payload),
+    ].join(':');
 }
 
 export function selectTroopsSignature(payload) {

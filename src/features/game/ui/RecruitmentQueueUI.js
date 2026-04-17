@@ -26,6 +26,8 @@ class RecruitmentQueueUI {
     #groupsContainer;
     #emptyState;
     #countdownScope;
+    #schedulerKey;
+    #handleContainerClick;
 
     constructor(containerId) {
         this.#container = document.getElementById(containerId);
@@ -35,21 +37,43 @@ class RecruitmentQueueUI {
         }
 
         this.#countdownScope = `recruitment:${containerId}`;
+        this.#schedulerKey = `recruitment-queue-${containerId}`;
 
         this.#setupStaticMarkup();
 
-        this.#container.addEventListener('click', (event) => {
+        this.#handleContainerClick = (event) => {
             const toggleButton = event.target.closest('[data-toggle-queue]');
             if (!toggleButton) return;
 
             event.stopPropagation();
             const queueId = toggleButton.dataset.toggleQueue;
             this.#toggleQueue(queueId);
-        });
+        };
 
-        uiRenderScheduler.register(`recruitment-queue-${containerId}`, this.render.bind(this), [
+        this.#container.addEventListener('click', this.#handleContainerClick);
+
+        uiRenderScheduler.register(this.#schedulerKey, this.render.bind(this), [
             selectRecruitmentQueueSignature
         ]);
+    }
+
+    destroy() {
+        if (!this.#container) {
+            return;
+        }
+
+        if (this.#handleContainerClick) {
+            this.#container.removeEventListener('click', this.#handleContainerClick);
+        }
+
+        if (this.#schedulerKey) {
+            uiRenderScheduler.unregister(this.#schedulerKey);
+        }
+
+        countdownService.unsubscribeByPrefix(`${this.#countdownScope}:`);
+        this.#activeCountdownKeys.clear();
+        this.#groupNodes.clear();
+        this.#expandedQueues.clear();
     }
 
     #setupStaticMarkup() {

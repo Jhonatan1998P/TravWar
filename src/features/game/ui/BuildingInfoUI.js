@@ -6,6 +6,7 @@ import { formatNumber, formatTime } from '@shared/lib/formatters.js';
 import toastUI from './ToastUI.js';
 import { unitSpriteManager } from './UnitSpriteManager.js';
 import uiRenderScheduler from './UIRenderScheduler.js';
+import { selectBuildingInfoPanelSignature } from './renderSelectors.js';
 
 const ICONS = {
     time: `<img src="/icons/timer.png" alt="Tiempo" class="h-5 w-5">`,
@@ -47,7 +48,7 @@ class BuildingInfoUI {
     }
 
     _init() {
-        uiRenderScheduler.register('building-info-ui', this._handleGameStateUpdate.bind(this));
+        uiRenderScheduler.register('building-info-ui', this._handleGameStateUpdate.bind(this), [selectBuildingInfoPanelSignature]);
         this._createPanelHTML();
         this.#panelElement = document.getElementById('building-info-panel');
         this.#panelElement.querySelector('[data-action="close"]').addEventListener('click', () => this.hide());

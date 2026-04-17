@@ -11,6 +11,7 @@ const ICONS = {
 
 class TroopsUI {
     #container;
+    #schedulerKey;
 
     constructor(containerId) {
         this.#container = document.getElementById(containerId);
@@ -18,9 +19,16 @@ class TroopsUI {
             console.error(`[TroopsUI] No se encontró el contenedor con el ID: ${containerId}`);
             return;
         }
-        uiRenderScheduler.register(`troops-ui-${containerId}`, (gameState) => this.render(gameState.state), [
+        this.#schedulerKey = `troops-ui-${containerId}`;
+        uiRenderScheduler.register(this.#schedulerKey, (gameState) => this.render(gameState.state), [
             selectTroopsSignature
         ]);
+    }
+
+    destroy() {
+        if (this.#schedulerKey) {
+            uiRenderScheduler.unregister(this.#schedulerKey);
+        }
     }
 
     render(state) {

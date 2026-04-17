@@ -41,6 +41,8 @@ class ReportsView {
     unmount() {
         uiRenderScheduler.unregister('reports-view');
         document.removeEventListener('notify:battle_report', this._handleNewReport);
+        this.#reportListUI?.destroy?.();
+        this.#reportListUI = null;
     }
 
     initializeEventListeners() {

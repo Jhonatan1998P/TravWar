@@ -57,6 +57,10 @@ const typeToClassMap = {
     'bakery': 'bg-yellow-600',
 };
 
+const layoutCacheByVillageType = new Map();
+const villageCenterLayout = generateVillageCenterLayout();
+const renderStateByContainer = new WeakMap();
+
 function getBuildingState(buildings, constructionQueue, id) {
     const queuedJob = constructionQueue.find(j => j.buildingId === id);
     if (queuedJob) {
@@ -70,6 +74,136 @@ function getBuildingState(buildings, constructionQueue, id) {
     return existingBuilding 
         ? { ...existingBuilding, isUnderConstruction: false }
         : { level: 0, type: 'empty', isUnderConstruction: false };
+}
+
+function getLayoutForVillageType(villageType) {
+    const normalizedVillageType = villageType || '4-4-4-6';
+    if (!layoutCacheByVillageType.has(normalizedVillageType)) {
+        layoutCacheByVillageType.set(normalizedVillageType, generateLayout(normalizedVillageType));
+    }
+    return layoutCacheByVillageType.get(normalizedVillageType);
+}
+
+function getContainerRenderState(container, mode) {
+    const previousState = renderStateByContainer.get(container);
+    if (!previousState || previousState.mode !== mode) {
+        const nextState = {
+            mode,
+            slots: new Map(),
+        };
+        renderStateByContainer.set(container, nextState);
+        container.replaceChildren();
+        return nextState;
+    }
+
+    return previousState;
+}
+
+function createSlotElement(slotId, options = {}) {
+    const {
+        circleSizeClass = '',
+        labelClass = '',
+        isWallSlot = false,
+    } = options;
+
+    const slotElement = document.createElement('div');
+    slotElement.className = `building-slot${isWallSlot ? ' wall-slot' : ''}`;
+    slotElement.dataset.slotId = slotId;
+
+    const circleElement = document.createElement('div');
+    circleElement.className = [
+        'building-circle',
+        'border-royal-blue-border',
+        'pointer-events-none',
+        circleSizeClass,
+    ].filter(Boolean).join(' ');
+
+    const levelElement = document.createElement('div');
+    levelElement.className = 'building-level';
+    circleElement.appendChild(levelElement);
+    slotElement.appendChild(circleElement);
+
+    let labelElement = null;
+    if (labelClass) {
+        labelElement = document.createElement('span');
+        labelElement.className = labelClass;
+        slotElement.appendChild(labelElement);
+    }
+
+    slotElement.__refs = {
+        circleElement,
+        levelElement,
+        labelElement,
+    };
+
+    return slotElement;
+}
+
+function ensureSlotElement(containerState, slotId, options = {}) {
+    let slotElement = containerState.slots.get(slotId);
+    if (!slotElement) {
+        slotElement = createSlotElement(slotId, options);
+        containerState.slots.set(slotId, slotElement);
+    }
+    return slotElement;
+}
+
+function setSlotColorClass(slotElement, nextColorClass) {
+    const refs = slotElement.__refs;
+    if (!refs?.circleElement) return;
+
+    const previousColorClass = slotElement.dataset.colorClass;
+    if (previousColorClass && previousColorClass !== nextColorClass) {
+        refs.circleElement.classList.remove(previousColorClass);
+    }
+
+    if (!refs.circleElement.classList.contains(nextColorClass)) {
+        refs.circleElement.classList.add(nextColorClass);
+    }
+
+    slotElement.dataset.colorClass = nextColorClass;
+}
+
+function updateSlotElement(slotElement, nextState) {
+    const refs = slotElement.__refs;
+    if (!refs) return;
+
+    const {
+        tooltipText,
+        transform,
+        isUnderConstruction,
+        colorClass,
+        level,
+        label,
+    } = nextState;
+
+    if (slotElement.dataset.tooltipText !== tooltipText) {
+        slotElement.dataset.tooltipText = tooltipText;
+    }
+
+    if (slotElement.style.transform !== transform) {
+        slotElement.style.transform = transform;
+    }
+
+    slotElement.classList.toggle('under-construction', Boolean(isUnderConstruction));
+    setSlotColorClass(slotElement, colorClass);
+
+    const levelText = String(level);
+    if (refs.levelElement.textContent !== levelText) {
+        refs.levelElement.textContent = levelText;
+    }
+
+    if (refs.labelElement && refs.labelElement.textContent !== String(label || '')) {
+        refs.labelElement.textContent = String(label || '');
+    }
+}
+
+function pruneUnusedSlotElements(containerState, seenSlotIds) {
+    for (const [slotId, slotElement] of containerState.slots.entries()) {
+        if (seenSlotIds.has(slotId)) continue;
+        slotElement.remove();
+        containerState.slots.delete(slotId);
+    }
 }
 
 export function initializeBuildingSlotClicks(container) {
@@ -172,9 +306,10 @@ export function renderBuildingSlots(container, gameState) {
 
     const buildingsState = activeVillage.buildings;
     const constructionQueue = activeVillage.constructionQueue;
-    const layout = generateLayout(activeVillage.villageType);
-    let slotsHTML = '';
+    const layout = getLayoutForVillageType(activeVillage.villageType);
     const containerSize = container.offsetWidth;
+    const renderState = getContainerRenderState(container, 'resource');
+    const seenSlotIds = new Set();
 
     layout.forEach(slotLayout => {
         const state = getBuildingState(buildingsState, constructionQueue, slotLayout.id);
@@ -187,17 +322,25 @@ export function renderBuildingSlots(container, gameState) {
         const tooltipText = `${buildingName} (Nivel ${state.level})`;
         const constructionClass = state.isUnderConstruction ? 'under-construction' : '';
 
-        slotsHTML += `
-            <div class="building-slot ${constructionClass}" data-slot-id="${slotLayout.id}" data-tooltip-text="${tooltipText}" style="transform: translate(-50%, -50%) translate(${x}px, ${y}px);">
-                <div class="building-circle w-[52px] h-[52px] ${colorClass} border-royal-blue-border pointer-events-none">
-                    <div class="building-level text-xs w-6 h-6">${state.level}</div>
-                </div>
-                <span class="text-[10px] font-semibold text-gray-300 mt-1.5">${buildingName}</span>
-            </div>
-        `;
+        const slotElement = ensureSlotElement(renderState, slotLayout.id, {
+            circleSizeClass: 'w-[52px] h-[52px]',
+            labelClass: 'text-[10px] font-semibold text-gray-300 mt-1.5',
+        });
+
+        updateSlotElement(slotElement, {
+            tooltipText,
+            transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
+            isUnderConstruction: Boolean(constructionClass),
+            colorClass,
+            level: state.level,
+            label: buildingName,
+        });
+
+        container.appendChild(slotElement);
+        seenSlotIds.add(slotLayout.id);
     });
-    
-    container.innerHTML = slotsHTML;
+
+    pruneUnusedSlotElements(renderState, seenSlotIds);
 }
 
 export function renderVillageCenterSlots(container, gameState) {
@@ -208,10 +351,11 @@ export function renderVillageCenterSlots(container, gameState) {
 
     const buildingsState = activeVillage.buildings;
     const constructionQueue = activeVillage.constructionQueue;
-    const layout = generateVillageCenterLayout();
-    let slotsHTML = '';
+    const layout = villageCenterLayout;
     const containerSize = container.offsetWidth;
     const nonWallSlotYOffsetPx = -15;
+    const renderState = getContainerRenderState(container, 'village-center');
+    const seenSlotIds = new Set();
 
     layout.forEach(slotLayout => {
         const state = getBuildingState(buildingsState, constructionQueue, slotLayout.id);
@@ -226,13 +370,19 @@ export function renderVillageCenterSlots(container, gameState) {
         const tooltipText = `${buildingName} (Nivel ${state.level})`;
         const constructionClass = state.isUnderConstruction ? 'under-construction' : '';
         
-        slotsHTML += `
-            <div class="building-slot ${constructionClass}" data-slot-id="${slotLayout.id}" data-tooltip-text="${tooltipText}" style="transform: translate(-50%, -50%) translate(${x}px, ${y}px);">
-                <div class="building-circle ${colorClass} border-royal-blue-border pointer-events-none">
-                    <div class="building-level">${state.level}</div>
-                </div>
-            </div>
-        `;
+        const slotElement = ensureSlotElement(renderState, slotLayout.id);
+
+        updateSlotElement(slotElement, {
+            tooltipText,
+            transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
+            isUnderConstruction: Boolean(constructionClass),
+            colorClass,
+            level: state.level,
+            label: '',
+        });
+
+        container.appendChild(slotElement);
+        seenSlotIds.add(slotLayout.id);
     });
 
     const wallState = getBuildingState(buildingsState, constructionQueue, 'v_wall');
@@ -243,14 +393,23 @@ export function renderVillageCenterSlots(container, gameState) {
     const wallBottomOffset = Math.floor(Math.max(18, containerSize * 0.06) * 1.5);
     const wallYOffset = Math.floor((containerSize / 2) + wallBottomOffset);
 
-    slotsHTML += `
-        <div class="building-slot wall-slot ${wallConstructionClass}" data-slot-id="v_wall" data-tooltip-text="${wallTooltipText}" style="transform: translate(-50%, -50%) translate(0px, ${wallYOffset}px);">
-            <div class="building-circle w-[54px] h-[54px] ${wallColorClass} border-royal-blue-border pointer-events-none">
-                <div class="building-level">${wallState.level}</div>
-            </div>
-            <span class="text-[10px] font-semibold text-gray-300 mt-1">${wallName}</span>
-        </div>
-    `;
-    
-    container.innerHTML = slotsHTML;
+    const wallSlotElement = ensureSlotElement(renderState, 'v_wall', {
+        isWallSlot: true,
+        circleSizeClass: 'w-[54px] h-[54px]',
+        labelClass: 'text-[10px] font-semibold text-gray-300 mt-1',
+    });
+
+    updateSlotElement(wallSlotElement, {
+        tooltipText: wallTooltipText,
+        transform: `translate(-50%, -50%) translate(0px, ${wallYOffset}px)`,
+        isUnderConstruction: Boolean(wallConstructionClass),
+        colorClass: wallColorClass,
+        level: wallState.level,
+        label: wallName,
+    });
+
+    container.appendChild(wallSlotElement);
+    seenSlotIds.add('v_wall');
+
+    pruneUnusedSlotElements(renderState, seenSlotIds);
 }

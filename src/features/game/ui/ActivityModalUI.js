@@ -6,6 +6,10 @@ class ActivityModalUI {
     #closeButton;
     #tabButtons;
     #tabPanels;
+    #handleOpenClick;
+    #handleCloseClick;
+    #handleTabClick;
+    #isInitialized = false;
 
     constructor() {
         this.#modalElement = document.getElementById('activity-modal');
@@ -20,16 +24,41 @@ class ActivityModalUI {
         this.#tabButtons = this.#modalElement.querySelectorAll('.tab-button');
         this.#tabPanels = this.#modalElement.querySelectorAll('.tab-panel');
 
+        this.#handleOpenClick = this.show.bind(this);
+        this.#handleCloseClick = this.hide.bind(this);
+        this.#handleTabClick = this._switchTab.bind(this);
+
         this._initializeEventListeners();
     }
 
     _initializeEventListeners() {
-        this.#openButton.addEventListener('click', () => this.show());
-        this.#closeButton.addEventListener('click', () => this.hide());
+        if (this.#isInitialized) {
+            return;
+        }
+
+        this.#openButton.addEventListener('click', this.#handleOpenClick);
+        this.#closeButton.addEventListener('click', this.#handleCloseClick);
         
         this.#tabButtons.forEach(button => {
-            button.addEventListener('click', (event) => this._switchTab(event));
+            button.addEventListener('click', this.#handleTabClick);
         });
+
+        this.#isInitialized = true;
+    }
+
+    destroy() {
+        if (!this.#isInitialized) {
+            return;
+        }
+
+        this.#openButton?.removeEventListener('click', this.#handleOpenClick);
+        this.#closeButton?.removeEventListener('click', this.#handleCloseClick);
+
+        this.#tabButtons?.forEach(button => {
+            button.removeEventListener('click', this.#handleTabClick);
+        });
+
+        this.#isInitialized = false;
     }
 
     _switchTab(event) {

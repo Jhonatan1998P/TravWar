@@ -31,6 +31,9 @@ class ReportListUI {
     #reportNodes = new Map();
     #list;
     #emptyState;
+    #mainElement;
+    #handleMainClick;
+    #schedulerKey = 'report-list-ui';
 
     constructor(containerId) {
         this.#container = document.getElementById(containerId);
@@ -41,11 +44,23 @@ class ReportListUI {
 
         this.#setupStaticMarkup();
 
-        document.querySelector('main').addEventListener('click', event => this.#handleContainerClick(event));
-        uiRenderScheduler.register('report-list-ui', (gameState) => this.render(gameState.state), [
+        this.#mainElement = document.querySelector('main');
+        this.#handleMainClick = event => this.#handleContainerClick(event);
+        this.#mainElement?.addEventListener('click', this.#handleMainClick);
+
+        uiRenderScheduler.register(this.#schedulerKey, (gameState) => this.render(gameState.state), [
             selectReportsSignature,
             selectUnreadPlayerReports
         ]);
+    }
+
+    destroy() {
+        if (this.#mainElement && this.#handleMainClick) {
+            this.#mainElement.removeEventListener('click', this.#handleMainClick);
+        }
+
+        uiRenderScheduler.unregister(this.#schedulerKey);
+        this.#reportNodes.clear();
     }
 
     #setupStaticMarkup() {

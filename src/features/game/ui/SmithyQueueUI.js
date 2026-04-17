@@ -12,6 +12,7 @@ class SmithyQueueUI {
     #jobNodes = new Map();
     #list;
     #countdownScope;
+    #schedulerKey;
 
     constructor(containerId, wrapperId) {
         this.#container = document.getElementById(containerId);
@@ -22,14 +23,25 @@ class SmithyQueueUI {
         }
 
         this.#countdownScope = `smithy:${containerId}`;
+        this.#schedulerKey = `smithy-queue-${containerId}`;
 
         this.#list = document.createElement('ul');
         this.#list.className = 'space-y-2';
         this.#container.replaceChildren(this.#list);
 
-        uiRenderScheduler.register(`smithy-queue-${containerId}`, this.render.bind(this), [
+        uiRenderScheduler.register(this.#schedulerKey, this.render.bind(this), [
             selectSmithyQueueSignature
         ]);
+    }
+
+    destroy() {
+        if (this.#schedulerKey) {
+            uiRenderScheduler.unregister(this.#schedulerKey);
+        }
+
+        countdownService.unsubscribeByPrefix(`${this.#countdownScope}:`);
+        this.#activeCountdownKeys.clear();
+        this.#jobNodes.clear();
     }
 
     #createJobNode() {

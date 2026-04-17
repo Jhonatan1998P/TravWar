@@ -15,6 +15,7 @@ class MovementsUI {
     #list;
     #emptyState;
     #countdownScope;
+    #schedulerKey;
 
     constructor(containerId) {
         this.#container = document.getElementById(containerId);
@@ -24,12 +25,24 @@ class MovementsUI {
         }
 
         this.#countdownScope = `movements:${containerId}`;
+        this.#schedulerKey = `movements-ui-${containerId}`;
 
         this.#setupStaticMarkup();
 
-        uiRenderScheduler.register(`movements-ui-${containerId}`, (gameState) => this.render(gameState.state), [
+        uiRenderScheduler.register(this.#schedulerKey, (gameState) => this.render(gameState.state), [
             selectMovementsSignature
         ]);
+    }
+
+    destroy() {
+        if (this.#schedulerKey) {
+            uiRenderScheduler.unregister(this.#schedulerKey);
+        }
+
+        countdownService.unsubscribeByPrefix(`${this.#countdownScope}:`);
+        this.#activeCountdownKeys.clear();
+        this.#movementNodes.clear();
+        this.#notifiedAttackIds.clear();
     }
 
     #setupStaticMarkup() {

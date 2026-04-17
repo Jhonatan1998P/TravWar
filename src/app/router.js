@@ -128,12 +128,21 @@ class Router {
         }
 
         this.#currentView = null;
-        this.#appRoot.innerHTML = '<div class="h-full flex items-center justify-center text-sm text-gray-400">Cargando vista...</div>';
+        let loadingPlaceholderShown = false;
+        const loadingPlaceholderTimeoutId = setTimeout(() => {
+            if (navigationRequestId !== this.#navigationRequestId) {
+                return;
+            }
+
+            this.#appRoot.innerHTML = '<div class="h-full flex items-center justify-center text-sm text-gray-400">Cargando vista...</div>';
+            loadingPlaceholderShown = true;
+        }, 140);
 
         let ViewClass;
         try {
             ViewClass = await loadViewClass();
         } catch (error) {
+            clearTimeout(loadingPlaceholderTimeoutId);
             console.error(`Error loading route ${path}:`, error);
             appStore.getState().setLastError('route_load_error');
             perfCollector.incrementCounter('router.routeLoadErrors');
@@ -145,6 +154,8 @@ class Router {
             return;
         }
 
+        clearTimeout(loadingPlaceholderTimeoutId);
+
         if (navigationRequestId !== this.#navigationRequestId) {
             perfCollector.markEnd(routeMetricKey);
             return;
@@ -155,6 +166,11 @@ class Router {
         }
 
         this.#currentView = new ViewClass();
+
+        if (!loadingPlaceholderShown) {
+            perfCollector.incrementCounter('router.viewLoadedWithoutPlaceholder');
+        }
+
         this.#appRoot.innerHTML = this.#currentView.html;
         
         if (typeof this.#currentView.mount === 'function') {

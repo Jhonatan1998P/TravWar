@@ -18,6 +18,8 @@ class ConstructionQueueUI {
     #list;
     #emptyState;
     #countdownScope;
+    #schedulerKey;
+    #handleContainerClick;
 
     constructor(containerId) {
         this.#container = document.getElementById(containerId);
@@ -27,10 +29,11 @@ class ConstructionQueueUI {
         }
 
         this.#countdownScope = `construction:${containerId}`;
+        this.#schedulerKey = `construction-queue-${containerId}`;
 
         this.#setupStaticMarkup();
 
-        this.#container.addEventListener('click', (event) => {
+        this.#handleContainerClick = (event) => {
             const button = event.target.closest('.cancel-btn');
             if (!button) return;
 
@@ -38,11 +41,31 @@ class ConstructionQueueUI {
             if (jobId) {
                 gameManager.sendCommand('cancel_construction', { jobId });
             }
-        });
+        };
 
-        uiRenderScheduler.register(`construction-queue-${containerId}`, this.render.bind(this), [
+        this.#container.addEventListener('click', this.#handleContainerClick);
+
+        uiRenderScheduler.register(this.#schedulerKey, this.render.bind(this), [
             selectConstructionQueueSignature
         ]);
+    }
+
+    destroy() {
+        if (!this.#container) {
+            return;
+        }
+
+        if (this.#handleContainerClick) {
+            this.#container.removeEventListener('click', this.#handleContainerClick);
+        }
+
+        if (this.#schedulerKey) {
+            uiRenderScheduler.unregister(this.#schedulerKey);
+        }
+
+        countdownService.unsubscribeByPrefix(`${this.#countdownScope}:`);
+        this.#activeCountdownKeys.clear();
+        this.#jobNodes.clear();
     }
 
     #setupStaticMarkup() {
