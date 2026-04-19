@@ -35,6 +35,17 @@ function applyVillageUpdates(gameState, villageUpdates) {
     });
 }
 
+function getHumanOwnerId(gameState) {
+    const players = Array.isArray(gameState?.players) ? gameState.players : [];
+    const explicitPlayer = players.find(player => player.id === 'player');
+    if (explicitPlayer) return explicitPlayer.id;
+
+    const firstHuman = players.find(player => !String(player.id || '').startsWith('ai_'));
+    if (firstHuman) return firstHuman.id;
+
+    return 'player';
+}
+
 function applyTileUpdates(gameState, tileUpdates) {
     tileUpdates.forEach(update => {
         const tile = gameState.mapData.find(candidate => candidate.x === update.coords.x && candidate.y === update.coords.y);
@@ -81,8 +92,10 @@ function processCombatMovement({
     results.reportsToCreate.forEach(report => {
         gameState.reports.unshift(report);
         if (gameState.reports.filter(candidate => candidate.ownerId === report.ownerId).length > maxReports) {
-            const reportIds = gameState.reports.map(candidate => candidate.id);
-            const lastReportIndex = reportIds.lastIndexOf(candidate => candidate.ownerId === report.ownerId);
+            const lastReportIndex = gameState.reports
+                .map((candidate, index) => ({ candidate, index }))
+                .reverse()
+                .find(item => item.candidate.ownerId === report.ownerId)?.index ?? -1;
             if (lastReportIndex !== -1) gameState.reports.splice(lastReportIndex, 1);
         }
 
@@ -90,7 +103,7 @@ function processCombatMovement({
             gameState.unreadCounts[report.ownerId] += 1;
         }
 
-        const perspectiveOwnerId = gameState.villages.find(v => v.id === gameState.activeVillageId)?.ownerId || 'player';
+        const perspectiveOwnerId = getHumanOwnerId(gameState);
         if (report.ownerId === perspectiveOwnerId) {
             postMessage({ type: 'notify:battle_report', payload: { report, state: gameState } });
         }

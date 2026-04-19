@@ -330,6 +330,75 @@ function getResourcePoolSnapshotForStep(village, step) {
     };
 }
 
+function getBudgetCapacityByResource(village, step) {
+    const ratio = village?.budgetRatio || { econ: 0.5, mil: 0.5 };
+    const isMilitaryBudgetStep = step?.type === 'units' || step?.type === 'proportional_units';
+    const budgetShare = isMilitaryBudgetStep
+        ? Math.max(0, Number(ratio.mil) || 0)
+        : Math.max(0, Number(ratio.econ) || 0);
+
+    const capacities = {
+        wood: Math.max(0, Number(village?.resources?.wood?.capacity) || 0),
+        stone: Math.max(0, Number(village?.resources?.stone?.capacity) || 0),
+        iron: Math.max(0, Number(village?.resources?.iron?.capacity) || 0),
+        food: Math.max(0, Number(village?.resources?.food?.capacity) || 0),
+    };
+
+    return {
+        wood: capacities.wood * budgetShare,
+        stone: capacities.stone * budgetShare,
+        iron: capacities.iron * budgetShare,
+        food: capacities.food * budgetShare,
+    };
+}
+
+function maybeShiftBudgetForBlockedEconomicStep(village, step, neededResources, availableResources) {
+    if (!village?.budget?.econ || !village?.budget?.mil) return { shifted: false };
+    if (!step) return { shifted: false };
+
+    const queueType = getPhaseStepQueueType(step);
+    const isEconomicQueue = queueType === 'construction' || queueType === 'research' || queueType === 'smithy';
+    if (!isEconomicQueue) return { shifted: false };
+
+    const needed = neededResources && typeof neededResources === 'object' ? neededResources : null;
+    if (!needed) return { shifted: false };
+
+    const resources = ['wood', 'stone', 'iron', 'food'];
+    const transfers = {};
+    let shiftedAny = false;
+
+    resources.forEach(resource => {
+        const need = Math.max(0, Number(needed[resource]) || 0);
+        const have = Math.max(0, Number(availableResources?.[resource]) || 0);
+        if (need <= have) return;
+
+        const deficit = need - have;
+        const fromMil = Math.max(0, Number(village.budget.mil?.[resource]) || 0);
+        const transfer = Math.min(deficit, fromMil);
+        if (transfer <= 0) return;
+
+        village.budget.mil[resource] = fromMil - transfer;
+        village.budget.econ[resource] = Math.max(0, Number(village.budget.econ?.[resource]) || 0) + transfer;
+        transfers[resource] = transfer;
+        shiftedAny = true;
+    });
+
+    if (shiftedAny && village?.resources) {
+        resources.forEach(resource => {
+            const econValue = Math.max(0, Number(village.budget.econ?.[resource]) || 0);
+            const milValue = Math.max(0, Number(village.budget.mil?.[resource]) || 0);
+            if (village.resources[resource]) {
+                village.resources[resource].current = econValue + milValue;
+            }
+        });
+    }
+
+    return {
+        shifted: shiftedAny,
+        transfers,
+    };
+}
+
 function getMissingResourceMap(needed, available) {
     if (!needed || typeof needed !== 'object') return null;
     const resources = ['wood', 'stone', 'iron', 'food'];
@@ -610,6 +679,49 @@ export function processPhaseActiveSubGoal({
         const neededText = formatResourceMap(neededResources);
         const availableText = formatResourceMap(availableResources);
         const missingText = formatResourceMap(missingResources);
+
+        const budgetShift = maybeShiftBudgetForBlockedEconomicStep(
+            village,
+            subGoal.blockedStep,
+            neededResources,
+            availableResources,
+        );
+        if (budgetShift.shifted) {
+            const refreshedAvailable = getResourcePoolSnapshotForStep(village, subGoal.blockedStep);
+            const refreshedMissing = getMissingResourceMap(neededResources, refreshedAvailable);
+            const refreshedMissingText = formatResourceMap(refreshedMissing);
+            const transferText = formatResourceMap(budgetShift.transfers);
+
+            if (now - (subGoal.lastLogAt || 0) >= config.logThrottleMs) {
+                subGoal.lastLogAt = now;
+                log(
+                    'info',
+                    village,
+                    'Macro SubGoal',
+                    `Rebalanceo temporal MIL->ECO aplicado para desbloquear ${getStepSignature(subGoal.blockedStep)}. Transferido{${transferText || '0'}}. Faltante tras rebalanceo{${refreshedMissingText || '0'}}.`,
+                    {
+                        transferred: budgetShift.transfers,
+                        needed: neededResources,
+                        availableBefore: availableResources,
+                        availableAfter: refreshedAvailable,
+                        missingAfter: refreshedMissing,
+                    },
+                    'economic',
+                );
+            }
+
+            if (!refreshedMissing || Object.keys(refreshedMissing).length === 0) {
+                clearPhaseActiveSubGoal({
+                    phaseState,
+                    now,
+                    village,
+                    log,
+                    message: `Subgoal de ahorro resuelto tras rebalanceo temporal de presupuesto para ${getStepSignature(subGoal.blockedStep)}.`,
+                    config,
+                });
+                return { handled: false };
+            }
+        }
 
         if (waitResourcesMode === 'retry_after_interval') {
             if (now < subGoal.nextAttemptAt) {
@@ -1267,15 +1379,25 @@ export function buildPrerequisiteResolverStepFromBlock({
     if (blockedResult?.reason === 'INSUFFICIENT_RESOURCES') {
         const needed = blockedResult?.details?.needed;
         if (needed && typeof needed === 'object') {
+            const blockedStep = blockedResult?.step || null;
             const capacityByResource = {
-                wood: village?.resources?.wood?.capacity || 0,
-                stone: village?.resources?.stone?.capacity || 0,
-                iron: village?.resources?.iron?.capacity || 0,
-                food: village?.resources?.food?.capacity || 0,
+                wood: Number(village?.resources?.wood?.capacity || 0),
+                stone: Number(village?.resources?.stone?.capacity || 0),
+                iron: Number(village?.resources?.iron?.capacity || 0),
+                food: Number(village?.resources?.food?.capacity || 0),
             };
+            const budgetCapacityByResource = getBudgetCapacityByResource(village, blockedStep);
 
-            const requiresGranary = Number(needed.food || 0) > Number(capacityByResource.food || 0);
-            const requiresWarehouse = ['wood', 'stone', 'iron'].some(resourceType => Number(needed[resourceType] || 0) > Number(capacityByResource[resourceType] || 0));
+            const exceedsRawFoodCapacity = Number(needed.food || 0) > Number(capacityByResource.food || 0);
+            const exceedsRawWarehouseCapacity = ['wood', 'stone', 'iron']
+                .some(resourceType => Number(needed[resourceType] || 0) > Number(capacityByResource[resourceType] || 0));
+
+            const exceedsBudgetFoodCapacity = Number(needed.food || 0) > Number(budgetCapacityByResource.food || 0);
+            const exceedsBudgetWarehouseCapacity = ['wood', 'stone', 'iron']
+                .some(resourceType => Number(needed[resourceType] || 0) > Number(budgetCapacityByResource[resourceType] || 0));
+
+            const requiresGranary = exceedsRawFoodCapacity || exceedsBudgetFoodCapacity;
+            const requiresWarehouse = exceedsRawWarehouseCapacity || exceedsBudgetWarehouseCapacity;
 
             if (requiresGranary || requiresWarehouse) {
                 const storageType = requiresGranary ? 'granary' : 'warehouse';
@@ -1287,7 +1409,7 @@ export function buildPrerequisiteResolverStepFromBlock({
                     buildingType: storageType,
                     level: Math.max(1, currentLevel + 1),
                 };
-            }
+            };
         }
     }
 

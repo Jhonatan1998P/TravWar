@@ -101,8 +101,13 @@ class ReportListUI {
     }
 
     #getPerspectiveOwnerId(state = this.#gameState) {
-        const activeVillage = state?.villages?.find(village => village.id === state?.activeVillageId);
-        return activeVillage?.ownerId || 'player';
+        if (!state?.players) return 'player';
+
+        const explicitPlayer = state.players.find(player => player.id === 'player');
+        if (explicitPlayer) return explicitPlayer.id;
+
+        const firstHuman = state.players.find(player => !String(player.id || '').startsWith('ai_'));
+        return firstHuman?.id || 'player';
     }
 
     #analyzeReportForPlayer(report, perspectiveOwnerId) {

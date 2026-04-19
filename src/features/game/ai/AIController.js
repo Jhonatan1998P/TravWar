@@ -41,7 +41,7 @@ const PHASE_LABELS_BY_RACE = Object.freeze({
         [EGYPTIAN_PHASE_IDS.phase3]: 'Fase 3 - Escalado Defensivo',
         [EGYPTIAN_PHASE_IDS.phase4]: 'Fase 4 - Preparacion Expansion Segura',
         [EGYPTIAN_PHASE_IDS.phase5]: 'Fase 5 - Expansion Custodiada',
-        [EGYPTIAN_PHASE_IDS.phase6]: 'Fase 6 - Control Resiliente Tardio',
+        [EGYPTIAN_PHASE_IDS.phase6]: 'Fase 5 - Expansion Custodiada (legacy)',
         [EGYPTIAN_PHASE_IDS.phaseDone]: 'Plantilla completada',
     },
 });
@@ -266,7 +266,8 @@ function getStageFromPhaseId(phaseId) {
     if (phaseId === GERMAN_PHASE_IDS.phase5 || phaseId === GERMAN_PHASE_IDS.phaseDone) return 'late';
     if (phaseId === EGYPTIAN_PHASE_IDS.phase1 || phaseId === EGYPTIAN_PHASE_IDS.phase2) return 'early';
     if (phaseId === EGYPTIAN_PHASE_IDS.phase3 || phaseId === EGYPTIAN_PHASE_IDS.phase4) return 'mid';
-    if (phaseId === EGYPTIAN_PHASE_IDS.phase5 || phaseId === EGYPTIAN_PHASE_IDS.phase6 || phaseId === EGYPTIAN_PHASE_IDS.phaseDone) return 'late';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase5 || phaseId === EGYPTIAN_PHASE_IDS.phaseDone) return 'late';
+    if (phaseId === EGYPTIAN_PHASE_IDS.phase6) return 'late';
     return 'unknown';
 }
 
@@ -289,7 +290,7 @@ const PHASE_KEY_BY_RACE = Object.freeze({
         [EGYPTIAN_PHASE_IDS.phase3]: 'phase3',
         [EGYPTIAN_PHASE_IDS.phase4]: 'phase4',
         [EGYPTIAN_PHASE_IDS.phase5]: 'phase5',
-        [EGYPTIAN_PHASE_IDS.phase6]: 'phase6',
+        [EGYPTIAN_PHASE_IDS.phase6]: 'phase5',
     }),
 });
 
@@ -711,6 +712,22 @@ class AIController {
         if (race === 'germans') return this._germanPhaseStates;
         if (race === 'egyptians') return this._egyptianPhaseStates;
         return null;
+    }
+
+    _shouldDeferMilitaryByGermanPhase(gameState) {
+        if (this._race !== 'germans' || !this._isPhaseEngineEnabledForRace('germans')) {
+            return false;
+        }
+
+        const myVillages = (gameState?.villages || []).filter(village => village.ownerId === this._ownerId);
+        if (myVillages.length === 0) {
+            return false;
+        }
+
+        return myVillages.some(village => {
+            const phaseId = this._germanPhaseStates.get(village.id)?.activePhaseId;
+            return phaseId !== GERMAN_PHASE_IDS.phaseDone;
+        });
     }
 
     handleGameNotification(notification, gameState) {
@@ -1973,6 +1990,11 @@ class AIController {
         }
 
         if (!this._isThinkingMilitary && (now - this._lastMilitaryDecisionTime >= this._militaryDecisionInterval)) {
+            if (this._shouldDeferMilitaryByGermanPhase(gameState)) {
+                this._lastMilitaryDecisionTime = now;
+                return;
+            }
+
             this._processMilitaryDecision(gameState);
         }
     }

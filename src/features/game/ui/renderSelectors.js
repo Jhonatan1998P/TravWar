@@ -9,6 +9,18 @@ function getActiveVillage(state) {
     return state.villages.find(village => village.id === state.activeVillageId) || null;
 }
 
+function getPerspectiveOwnerId(state) {
+    if (!state || !Array.isArray(state.players)) {
+        return 'player';
+    }
+
+    const explicitPlayer = state.players.find(player => player.id === 'player');
+    if (explicitPlayer) return explicitPlayer.id;
+
+    const firstHuman = state.players.find(player => !String(player.id || '').startsWith('ai_'));
+    return firstHuman?.id || 'player';
+}
+
 function numberFloor(value) {
     return Math.floor(Number(value) || 0);
 }
@@ -131,8 +143,7 @@ export function selectVillageVisualSignature(payload) {
 
 export function selectUnreadPlayerReports(payload) {
     const state = getState(payload);
-    const activeVillage = getActiveVillage(state);
-    const ownerId = activeVillage?.ownerId || 'player';
+    const ownerId = getPerspectiveOwnerId(state);
     return state?.unreadCounts?.[ownerId] || 0;
 }
 

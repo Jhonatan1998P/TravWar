@@ -198,6 +198,16 @@ function getActiveVillage() {
     return gameState.villages.find(v => v.id === gameState.activeVillageId);
 }
 
+function getHumanOwnerId() {
+    if (!gameState?.players) return 'player';
+
+    const explicitPlayer = gameState.players.find(player => player.id === 'player');
+    if (explicitPlayer) return explicitPlayer.id;
+
+    const firstHuman = gameState.players.find(player => !String(player.id || '').startsWith('ai_'));
+    return firstHuman?.id || 'player';
+}
+
 function mainLoop() {
     if (!gameState) return;
     const currentTime = Date.now();
@@ -401,6 +411,21 @@ function handleSettleArrival(movement) {
 function handleReturnArrival(movement) {
     const village = gameState.villages.find(v => v.id === movement.originVillageId);
     if (!village) return;
+
+    if (movement.ownerId && village.ownerId !== movement.ownerId) {
+        _log(
+            'warn',
+            'Retorno',
+            `Retorno descartado por inconsistencia de propietario (mov:${movement.id || 'N/A'}).`,
+            {
+                originVillageId: movement.originVillageId,
+                movementOwnerId: movement.ownerId,
+                villageOwnerId: village.ownerId,
+            },
+            { villageId: movement.originVillageId, ownerId: movement.ownerId },
+        );
+        return;
+    }
 
     for (const unitId in movement.payload.troops) {
         village.unitsInVillage[unitId] = (village.unitsInVillage[unitId] || 0) + movement.payload.troops[unitId];
@@ -699,8 +724,7 @@ self.onmessage = function(event) {
         case 'mark_reports_as_read':
             if (gameState.unreadCounts) {
                 const targetOwnerId = payload?.ownerId
-                    || gameState.villages.find(v => v.id === gameState.activeVillageId)?.ownerId
-                    || 'player';
+                    || getHumanOwnerId();
                 if (gameState.unreadCounts[targetOwnerId] !== undefined) {
                     gameState.unreadCounts[targetOwnerId] = 0;
                 }

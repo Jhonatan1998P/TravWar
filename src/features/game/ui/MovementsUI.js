@@ -6,6 +6,24 @@ import { selectMovementsSignature } from './renderSelectors.js';
 import { reconcileList } from './reconcileList.js';
 import countdownService from './CountdownService.js';
 
+function getPerspectiveOwnerId(state) {
+    if (!state?.players) return 'player';
+
+    const explicitPlayer = state.players.find(player => player.id === 'player');
+    if (explicitPlayer) return explicitPlayer.id;
+
+    const firstHuman = state.players.find(player => !String(player.id || '').startsWith('ai_'));
+    return firstHuman?.id || 'player';
+}
+
+function mergeLoot(plunder = {}, bounty = {}) {
+    const resources = ['wood', 'stone', 'iron', 'food'];
+    return resources.reduce((accumulator, resource) => {
+        accumulator[resource] = (plunder?.[resource] || 0) + (bounty?.[resource] || 0);
+        return accumulator;
+    }, {});
+}
+
 class MovementsUI {
     #container;
     #activeCountdownKeys = new Set();
@@ -135,7 +153,7 @@ class MovementsUI {
         const resourcesToRender = movement.type === 'trade'
             ? movement.payload.resources
             : (movement.type === 'return' && (movement.payload.plunder || movement.payload.bounty))
-                ? { ...movement.payload.plunder, ...movement.payload.bounty }
+                ? mergeLoot(movement.payload.plunder, movement.payload.bounty)
                 : null;
 
         if (resourcesToRender) {
@@ -226,8 +244,7 @@ class MovementsUI {
         if (!this.#container || !state) return;
         this.#gameState = state;
 
-        const activeVillage = state.villages.find(v => v.id === state.activeVillageId);
-        const currentOwnerId = activeVillage ? activeVillage.ownerId : 'player';
+        const currentOwnerId = getPerspectiveOwnerId(state);
 
         const currentOwnerVillageCoords = new Set(
             state.villages

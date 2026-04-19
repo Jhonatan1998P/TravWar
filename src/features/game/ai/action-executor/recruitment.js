@@ -189,7 +189,9 @@ function maybeBorrowEconomicBudgetForRecruitment({ village, step, log }) {
         return { applied: false, reason: 'NO_AI_BUDGET' };
     }
 
-    if (Math.random() > RECRUITMENT_BUDGET_BORROW_PROBABILITY) {
+    const isCycleBatchStep = step?.countMode === 'cycle_batch';
+
+    if (!isCycleBatchStep && Math.random() > RECRUITMENT_BUDGET_BORROW_PROBABILITY) {
         return {
             applied: false,
             reason: 'PROBABILITY_GATE',
@@ -635,7 +637,8 @@ export function manageRecruitmentForGoal({
         if (!Number.isFinite(singleUnitTimeMs) || singleUnitTimeMs <= 0) {
             return { success: false, reason: 'INVALID_UNIT_DATA' };
         }
-        unitsNeeded = Math.max(1, Math.ceil((cycleBatchCount * RECRUITMENT_CYCLE_MS) / singleUnitTimeMs));
+        const cycleDurationRealMs = cycleBatchCount * RECRUITMENT_CYCLE_MS;
+        unitsNeeded = Math.max(1, Math.ceil(cycleDurationRealMs / singleUnitTimeMs));
     }
 
     if (unitsNeeded <= 0) return { success: true };
@@ -672,10 +675,7 @@ export function manageRecruitmentForGoal({
 
     let batchSize = batchPlan.batchSize;
 
-    if (cycleBatchCount > 0) {
-        if (effectiveAffordableTotal < unitsNeeded) {
-            return { success: false, reason: 'INSUFFICIENT_RESOURCES' };
-        }
+    if (cycleBatchCount > 0 && effectiveAffordableTotal >= unitsNeeded) {
         batchSize = unitsNeeded;
     }
 
@@ -697,6 +697,8 @@ export function manageRecruitmentForGoal({
         const ratioPct = Math.round((batchPlan.ratio || 0) * 100);
         const queueInfo = Number.isFinite(batchPlan.queueUnits) ? `, Queue:${batchPlan.queueUnits}` : '';
         const queueTargetInfo = queueTargetMinutes > 0 ? `, QueueTarget:${queueTargetMinutes}m` : '';
+        const committedRealMs = Math.max(0, countToTrain * (singleUnitTimeMs || 0));
+        const committedRealSec = committedRealMs / 1000;
         const queueCoverageBeforeCycles = queueCoverageMs > 0
             ? (queueCoverageMs / RECRUITMENT_CYCLE_MS)
             : 0;
@@ -712,12 +714,22 @@ export function manageRecruitmentForGoal({
             ? `, CiclosCola:${queueCoverageBeforeCycles.toFixed(2)}->${queueCoverageAfterCycles.toFixed(2)}/${queueCoverageTargetCycles.toFixed(2)}`
             : '';
 
-        log('success', village, 'Reclutamiento', `Orden para ${countToTrain}x ${unitId} enviada (Max:${effectiveAffordableTotal}, Mode:${batchPlan.phase}, Batch:${ratioPct}%${queueInfo}${queueTargetInfo}${queueCycleInfo}).`);
+        const cycleBatchInfo = cycleBatchCount > 0
+            ? (() => {
+                const targetCycleMs = cycleBatchCount * RECRUITMENT_CYCLE_MS;
+                const cyclePct = targetCycleMs > 0 ? (committedRealMs / targetCycleMs) * 100 : 0;
+                return `, CicloReal:${committedRealSec.toFixed(2)}s/${(targetCycleMs / 1000).toFixed(2)}s (${cyclePct.toFixed(1)}%), UnidadesObjetivo:${unitsNeeded}`;
+            })()
+            : '';
+
+        log('success', village, 'Reclutamiento', `Orden para ${countToTrain}x ${unitId} enviada (Max:${effectiveAffordableTotal}, Mode:${batchPlan.phase}, Batch:${ratioPct}%${queueInfo}${queueTargetInfo}${queueCycleInfo}${cycleBatchInfo}).`);
         return {
             success: true,
             count: countToTrain,
             unitId,
             timePerUnit: singleUnitTimeMs,
+            committedRealMs,
+            cycleBatchCount,
             batchMeta: batchPlan,
         };
     }

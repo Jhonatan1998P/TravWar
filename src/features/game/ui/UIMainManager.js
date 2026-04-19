@@ -9,6 +9,16 @@ import {
 
 const DEV_MODE_AI_VIEW = true;
 
+function getPerspectiveOwnerId(state) {
+    if (!state?.players) return 'player';
+
+    const explicitPlayer = state.players.find(player => player.id === 'player');
+    if (explicitPlayer) return explicitPlayer.id;
+
+    const firstHuman = state.players.find(player => !String(player.id || '').startsWith('ai_'));
+    return firstHuman?.id || 'player';
+}
+
 class UIMainManager {
     static instance;
 
@@ -199,8 +209,7 @@ class UIMainManager {
 
     #updateUnreadBadge(state) {
         if (!this.#unreadBadge) return;
-        const activeVillage = state.villages?.find(v => v.id === state.activeVillageId);
-        const perspectiveOwnerId = activeVillage?.ownerId || 'player';
+        const perspectiveOwnerId = getPerspectiveOwnerId(state);
         const count = state.unreadCounts?.[perspectiveOwnerId] || 0;
         if (count > 0) {
             this.#unreadBadge.textContent = count > 9 ? '9+' : count;

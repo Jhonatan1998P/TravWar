@@ -42,6 +42,16 @@ function normalizeKey(key) {
     return String(key || '').replace(/[^a-z0-9]/gi, '').toLowerCase();
 }
 
+function getPerspectiveOwnerId(state) {
+    if (!state?.players) return 'player';
+
+    const explicitPlayer = state.players.find(player => player.id === 'player');
+    if (explicitPlayer) return explicitPlayer.id;
+
+    const firstHuman = state.players.find(player => !String(player.id || '').startsWith('ai_'));
+    return firstHuman?.id || 'player';
+}
+
 class BattleReportUI {
     #panelElement;
     #mainContainer;
@@ -125,8 +135,7 @@ class BattleReportUI {
         const date = new Date(report.time).toLocaleString();
         let title = 'Informe del Sistema';
         let titleColorClass = 'text-yellow-300';
-        const activeVillage = this.#gameState?.villages?.find(village => village.id === this.#gameState?.activeVillageId);
-        const perspectiveOwnerId = activeVillage?.ownerId || 'player';
+        const perspectiveOwnerId = getPerspectiveOwnerId(this.#gameState);
     
         if (report.type === 'settlement_success') {
             title = 'Fundación de Aldea Exitosa';

@@ -28,155 +28,27 @@ import {
     pickPhaseLaneResult,
     runPhaseLaneMatrix,
     runPriorityStepList,
-    TRAINING_CYCLE_MS,
 } from './phase-engine-common.js';
+import { GERMAN_PHASE_PROFILE } from './tribe-phase-profiles/germans.profile.js';
+import { getCommittedRecruitmentMsFromResult } from './phase-engine-core.js';
 
-export const GERMAN_PHASE_IDS = Object.freeze({
-    phase1: 'german_phase_1_economic_bootstrap',
-    phase2: 'german_phase_2_basic_military_unlock',
-    phase3: 'german_phase_3_sustained_mixed_production',
-    phase4: 'german_phase_4_military_pressure_tech',
-    phase5: 'german_phase_5_siege_expansion',
-    phaseDone: 'german_phase_template_complete',
-});
+export const GERMAN_PHASE_IDS = GERMAN_PHASE_PROFILE.PHASE_IDS;
 
 const HOSTILE_MOVEMENT_TYPES = new Set(['attack', 'raid']);
-const PHASE_TEMPLATE_BY_DIFFICULTY = Object.freeze({
-    Pesadilla: {
-        phase1: { ratio: { econ: 0.65, mil: 0.35 } },
-        phase2: { ratio: { econ: 0.65, mil: 0.35 } },
-        phase3: { ratio: { econ: 0.65, mil: 0.35 } },
-        phase4: { ratio: { econ: 0.65, mil: 0.35 } },
-        phase5: { ratio: { econ: 0.65, mil: 0.35 } },
-    },
-});
-
-const PHASE_ONE_EXIT_CONDITIONS = Object.freeze({
-    resourceFieldsLevel: 2,
-    buildingLevels: Object.freeze({
-        mainBuilding: 3,
-        barracks: 3,
-        academy: 3,
-        smithy: 1,
-        warehouse: 3,
-        granary: 3,
-        marketplace: 1,
-    }),
-});
-
-const PHASE_ONE_PRIORITY = Object.freeze({
-    mainBuildingTargetLevel: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.mainBuilding,
-    emergencyDefenseTargetTroops: 40,
-    defenseLookaheadMs: 180_000,
-    minIdleLogIntervalMs: 20_000,
-});
-
-const PHASE_TWO_EXIT_CONDITIONS = Object.freeze({
-    resourceFieldsLevel: 4,
-    buildingLevels: Object.freeze({
-        mainBuilding: 5,
-        barracks: 5,
-        academy: 5,
-        smithy: 3,
-        stable: 3,
-        warehouse: 7,
-        granary: 7,
-        marketplace: 3,
-    }),
-});
-
-const PHASE_TWO_PRIORITY = Object.freeze({
-    barracksTargetLevel: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.barracks,
-    resourceFieldsTargetLevel: PHASE_TWO_EXIT_CONDITIONS.resourceFieldsLevel,
-    minIdleLogIntervalMs: 20_000,
-});
-
-const PHASE_THREE_INFRASTRUCTURE_TARGETS = Object.freeze({
-    resourceFieldsLevel: 5,
-    buildingLevels: Object.freeze({
-        mainBuilding: 7,
-        barracks: 8,
-        academy: 8,
-        smithy: 5,
-        stable: 8,
-        warehouse: 12,
-        granary: 12,
-        marketplace: 7,
-        embassy: 3,
-        heroMansion: 3,
-        grainMill: 1,
-    }),
-});
-
-const PHASE_THREE_PRIORITY = Object.freeze({
-    smithyTargetLevel: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.smithy,
-    barracksTargetLevel: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.barracks,
-    academyTargetLevel: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.academy,
-    resourceFieldsTargetLevel: PHASE_THREE_INFRASTRUCTURE_TARGETS.resourceFieldsLevel,
-    minIdleLogIntervalMs: 20_000,
-});
-
-const PHASE_FOUR_INFRASTRUCTURE_TARGETS = Object.freeze({
-    resourceFieldsLevel: 6,
-    buildingLevels: Object.freeze({
-        mainBuilding: 10,
-        barracks: 10,
-        academy: 15,
-        smithy: 5,
-        stable: 10,
-        warehouse: 15,
-        granary: 15,
-        marketplace: 10,
-    }),
-});
-
-const PHASE_FOUR_PRIORITY = Object.freeze({
-    rallyPointTargetLevel: 1,
-    stableTargetLevel: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.stable,
-    workshopTargetLevel: 1,
-    smithyTargetLevel: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.smithy,
-    barracksTargetLevel: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.barracks,
-    academyTargetLevel: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.academy,
-    marketplaceTargetLevel: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.marketplace,
-    mainBuildingTargetLevel: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.mainBuilding,
-    warehouseTargetLevel: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.warehouse,
-    granaryTargetLevel: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.granary,
-    resourceFieldsTargetLevel: PHASE_FOUR_INFRASTRUCTURE_TARGETS.resourceFieldsLevel,
-    storagePressureThreshold: 0.92,
-    minIdleLogIntervalMs: 20_000,
-});
-
-const PHASE_FIVE_INFRASTRUCTURE_TARGETS = Object.freeze({
-    resourceFieldsLevel: 7,
-    buildingLevels: Object.freeze({
-        barracks: 12,
-        academy: 15,
-        smithy: 10,
-        stable: 12,
-        warehouse: 20,
-        granary: 20,
-        heroMansion: 10,
-        workshop: 5,
-        palace: 10,
-    }),
-});
-
-const PHASE_FIVE_PRIORITY = Object.freeze({
-    academyTargetLevel: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.academy,
-    workshopTargetLevel: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.workshop,
-    smithyTargetLevel: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.smithy,
-    barracksTargetLevel: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.barracks,
-    stableTargetLevel: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.stable,
-    marketplaceTargetLevel: 0,
-    embassyTargetLevel: 0,
-    palaceTargetLevel: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.palace,
-    heroMansionTargetLevel: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.heroMansion,
-    warehouseTargetLevel: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.warehouse,
-    granaryTargetLevel: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.granary,
-    resourceFieldsTargetLevel: PHASE_FIVE_INFRASTRUCTURE_TARGETS.resourceFieldsLevel,
-    storagePressureThreshold: 0.9,
-    minIdleLogIntervalMs: 20_000,
-});
+const {
+    PHASE_TEMPLATE_BY_DIFFICULTY,
+    PHASE_ONE_EXIT_CONDITIONS,
+    PHASE_ONE_PRIORITY,
+    PHASE_TWO_EXIT_CONDITIONS,
+    PHASE_TWO_PRIORITY,
+    PHASE_THREE_INFRASTRUCTURE_TARGETS,
+    PHASE_THREE_PRIORITY,
+    PHASE_FOUR_INFRASTRUCTURE_TARGETS,
+    PHASE_FOUR_PRIORITY,
+    PHASE_FIVE_INFRASTRUCTURE_TARGETS,
+    PHASE_FIVE_PRIORITY,
+    PHASE_CYCLE_TARGETS_BY_DIFFICULTY,
+} = GERMAN_PHASE_PROFILE;
 
 const PHASE_SUBGOAL = Object.freeze({
     ...PHASE_SUBGOAL_CONFIG,
@@ -184,17 +56,6 @@ const PHASE_SUBGOAL = Object.freeze({
     maxHistory: 24,
     logThrottleMs: 15_000,
     maxAttemptsBeforeReset: 16,
-});
-
-const PHASE_CYCLE_TARGETS_BY_DIFFICULTY = Object.freeze({
-    Pesadilla: {
-        phase1: { total: 0 },
-        phase1Emergency: { defensiveInfantry: 5, total: 5 },
-        phase2: { total: 4, offensiveInfantry: 3, scout: 1 },
-        phase3: { total: 9, offensiveInfantry: 6, scout: 3 },
-        phase4: { total: 13, offensiveInfantry: 10, scout: 1, offensiveCavalry: 2 },
-        phase5: { total: 29, offensiveInfantry: 20, scout: 3, offensiveCavalry: 6 },
-    },
 });
 
 const SUBGOAL_KIND = PHASE_SUBGOAL_KIND;
@@ -318,15 +179,7 @@ export function recordGermanPhaseRecruitmentProgress({ phaseState, phaseKey, vil
 }
 
 function getCommittedRecruitmentMs(result) {
-    const cycleCount = result?.step?.countMode === 'cycle_batch'
-        ? Math.max(1, Math.floor(result?.step?.cycleCount || 1))
-        : 0;
-
-    if (cycleCount > 0) {
-        return cycleCount * TRAINING_CYCLE_MS;
-    }
-
-    return getQueuedTrainingMs(result?.count, result?.timePerUnit);
+    return getCommittedRecruitmentMsFromResult(result);
 }
 
 const CYCLE_BUCKET_BY_PROGRESS_KEY = Object.freeze({
@@ -338,6 +191,27 @@ const CYCLE_BUCKET_BY_PROGRESS_KEY = Object.freeze({
     catapultMs: 'catapult',
     expansionMs: 'expansion',
 });
+
+const CYCLE_BUCKET_LABEL_BY_PROGRESS_KEY = Object.freeze({
+    defensiveInfantryMs: 'infDef',
+    offensiveInfantryMs: 'infOf',
+    scoutMs: 'scout',
+    offensiveCavalryMs: 'cabOf',
+    ramMs: 'ariete',
+    catapultMs: 'catapulta',
+    expansionMs: 'expansion',
+});
+
+function getCycleBreakdownFromMs(valueMs) {
+    const normalized = Math.max(0, Math.floor(Number(valueMs) || 0));
+    const cycles = msToCycles(normalized);
+    const remainderMs = normalized % RECRUITMENT_CYCLE_REAL_MS;
+    return {
+        ms: normalized,
+        cycles,
+        remainderMs,
+    };
+}
 
 function resolveRecruitmentCycleBucketForStep({ village, phaseKey, step, actionExecutor }) {
     if (!step || step.type !== 'units') return null;
@@ -374,8 +248,10 @@ function filterRecruitmentStepsByCycleTargets({
     });
 }
 
+const RECRUITMENT_CYCLE_REAL_MS = 3 * 60 * 1000;
+
 function msToCycles(ms) {
-    return getCompletedTrainingCycles(ms, TRAINING_CYCLE_MS);
+    return getCompletedTrainingCycles(ms, RECRUITMENT_CYCLE_REAL_MS);
 }
 
 function getCycleProgressByPhase(phaseState, phaseKey) {
@@ -484,7 +360,7 @@ function estimateUnitsForCycles({ village, actionExecutor, unitType, cycles, gam
     const singleUnitTimeMs = ((unitData.trainTime / timeFactor) / normalizedSpeed) * 1000;
 
     if (!Number.isFinite(singleUnitTimeMs) || singleUnitTimeMs <= 0) return 0;
-    const cycleTimeMs = resolvedCycles * TRAINING_CYCLE_MS;
+    const cycleTimeMs = resolvedCycles * RECRUITMENT_CYCLE_REAL_MS;
     return Math.max(1, Math.ceil(cycleTimeMs / singleUnitTimeMs));
 }
 
@@ -524,6 +400,19 @@ function getResourceFieldStats(village) {
         average: total / levels.length,
         min: Math.min(...levels),
     };
+}
+
+function gateResourceFieldStepsByAverage(village, targetLevel, steps) {
+    const normalizedSteps = Array.isArray(steps) ? steps.filter(Boolean) : [];
+    const requiredLevel = Math.max(0, Number(targetLevel) || 0);
+    if (requiredLevel <= 0) return normalizedSteps;
+
+    const averageLevel = getResourceFieldStats(village).average;
+    if (averageLevel >= requiredLevel) {
+        return normalizedSteps.filter(step => step.type !== 'resource_fields_level');
+    }
+
+    return normalizedSteps;
 }
 
 function evaluatePhaseOneExit(village, phaseState, difficulty) {
@@ -1425,7 +1314,7 @@ function attemptRecruitmentStep({ village, gameState, step, actionExecutor }) {
 }
 
 function tryPhaseOnePriorityConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
-    const prioritySteps = [
+    const prioritySteps = gateResourceFieldStepsByAverage(village, PHASE_ONE_EXIT_CONDITIONS.resourceFieldsLevel, [
         { type: 'resource_fields_level', level: PHASE_ONE_EXIT_CONDITIONS.resourceFieldsLevel },
         { type: 'building', buildingType: 'mainBuilding', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.mainBuilding },
         { type: 'building', buildingType: 'barracks', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.barracks },
@@ -1434,7 +1323,8 @@ function tryPhaseOnePriorityConstruction({ village, gameState, actionExecutor, p
         { type: 'building', buildingType: 'warehouse', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.warehouse },
         { type: 'building', buildingType: 'granary', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.granary },
         { type: 'building', buildingType: 'marketplace', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.marketplace },
-    ];
+        { type: 'building', buildingType: 'cityWall', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.cityWall },
+    ]);
 
     return runConstructionStepList({
         village,
@@ -1445,7 +1335,7 @@ function tryPhaseOnePriorityConstruction({ village, gameState, actionExecutor, p
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_PRIORITY_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
-        stopOnRecoverableBlock: true,
+        stopOnRecoverableBlock: false,
     });
 }
 
@@ -1458,17 +1348,18 @@ function tryPhaseOneFallbackConstruction({ village, gameState, actionExecutor, p
 }
 
 function tryPhaseTwoPriorityConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
-    const prioritySteps = [
+    const prioritySteps = gateResourceFieldStepsByAverage(village, PHASE_TWO_EXIT_CONDITIONS.resourceFieldsLevel, [
         { type: 'resource_fields_level', level: PHASE_TWO_EXIT_CONDITIONS.resourceFieldsLevel },
         { type: 'building', buildingType: 'mainBuilding', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.mainBuilding },
+        { type: 'building', buildingType: 'rallyPoint', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.rallyPoint },
         { type: 'building', buildingType: 'barracks', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.barracks },
         { type: 'building', buildingType: 'academy', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.academy },
         { type: 'building', buildingType: 'smithy', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.smithy },
         { type: 'building', buildingType: 'stable', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.stable },
         { type: 'building', buildingType: 'warehouse', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.warehouse },
         { type: 'building', buildingType: 'granary', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.granary },
-        { type: 'building', buildingType: 'marketplace', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.marketplace },
-    ];
+        { type: 'building', buildingType: 'cityWall', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.cityWall },
+    ]);
 
     return runConstructionStepList({
         village,
@@ -1479,7 +1370,7 @@ function tryPhaseTwoPriorityConstruction({ village, gameState, actionExecutor, p
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_PRIORITY_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
-        stopOnRecoverableBlock: true,
+        stopOnRecoverableBlock: false,
     });
 }
 
@@ -1488,7 +1379,7 @@ function tryPhaseTwoFallbackConstruction({ village, gameState, actionExecutor, p
 }
 
 function tryPhaseThreePriorityConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
-    const prioritySteps = [
+    const prioritySteps = gateResourceFieldStepsByAverage(village, PHASE_THREE_INFRASTRUCTURE_TARGETS.resourceFieldsLevel, [
         { type: 'resource_fields_level', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.resourceFieldsLevel },
         { type: 'building', buildingType: 'mainBuilding', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.mainBuilding },
         { type: 'building', buildingType: 'barracks', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.barracks },
@@ -1497,11 +1388,8 @@ function tryPhaseThreePriorityConstruction({ village, gameState, actionExecutor,
         { type: 'building', buildingType: 'stable', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.stable },
         { type: 'building', buildingType: 'warehouse', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.warehouse },
         { type: 'building', buildingType: 'granary', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.granary },
-        { type: 'building', buildingType: 'marketplace', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.marketplace },
-        { type: 'building', buildingType: 'embassy', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.embassy },
-        { type: 'building', buildingType: 'heroMansion', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.heroMansion },
         { type: 'building', buildingType: 'grainMill', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.grainMill },
-    ];
+    ]);
 
     return runConstructionStepList({
         village,
@@ -1512,7 +1400,7 @@ function tryPhaseThreePriorityConstruction({ village, gameState, actionExecutor,
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_PRIORITY_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
-        stopOnRecoverableBlock: true,
+        stopOnRecoverableBlock: false,
     });
 }
 
@@ -1521,7 +1409,7 @@ function tryPhaseThreeFallbackConstruction({ village, gameState, actionExecutor,
 }
 
 function tryPhaseFourPriorityConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
-    const prioritySteps = [
+    const prioritySteps = gateResourceFieldStepsByAverage(village, PHASE_FOUR_INFRASTRUCTURE_TARGETS.resourceFieldsLevel, [
         { type: 'resource_fields_level', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.resourceFieldsLevel },
         { type: 'building', buildingType: 'mainBuilding', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.mainBuilding },
         { type: 'building', buildingType: 'barracks', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.barracks },
@@ -1531,7 +1419,9 @@ function tryPhaseFourPriorityConstruction({ village, gameState, actionExecutor, 
         { type: 'building', buildingType: 'warehouse', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.warehouse },
         { type: 'building', buildingType: 'granary', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.granary },
         { type: 'building', buildingType: 'marketplace', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.marketplace },
-    ];
+        { type: 'building', buildingType: 'embassy', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.embassy },
+        { type: 'building', buildingType: 'palace', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.palace },
+    ]);
 
     return runConstructionStepList({
         village,
@@ -1542,7 +1432,7 @@ function tryPhaseFourPriorityConstruction({ village, gameState, actionExecutor, 
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_PRIORITY_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
-        stopOnRecoverableBlock: true,
+        stopOnRecoverableBlock: false,
     });
 }
 
@@ -1551,7 +1441,7 @@ function tryPhaseFourFallbackConstruction({ village, gameState, actionExecutor, 
 }
 
 function tryPhaseFivePriorityConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
-    const prioritySteps = [
+    const prioritySteps = gateResourceFieldStepsByAverage(village, PHASE_FIVE_INFRASTRUCTURE_TARGETS.resourceFieldsLevel, [
         { type: 'resource_fields_level', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.resourceFieldsLevel },
         { type: 'building', buildingType: 'barracks', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.barracks },
         { type: 'building', buildingType: 'academy', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.academy },
@@ -1561,8 +1451,8 @@ function tryPhaseFivePriorityConstruction({ village, gameState, actionExecutor, 
         { type: 'building', buildingType: 'granary', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.granary },
         { type: 'building', buildingType: 'heroMansion', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.heroMansion },
         { type: 'building', buildingType: 'workshop', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.workshop },
-        { type: 'building', buildingType: 'palace', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.palace },
-    ];
+        { type: 'building', buildingType: 'embassy', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.embassy },
+    ]);
 
     return runConstructionStepList({
         village,
@@ -1573,7 +1463,7 @@ function tryPhaseFivePriorityConstruction({ village, gameState, actionExecutor, 
         executeStep: step => attemptConstructionStep({ village, gameState, step, actionExecutor }),
         noActionReason: 'NO_PRIORITY_ACTION',
         shouldAttemptStep: shouldAttemptConstructionStep,
-        stopOnRecoverableBlock: true,
+        stopOnRecoverableBlock: false,
     });
 }
 
@@ -1720,9 +1610,10 @@ function tryPhaseFivePriorityResearch({ village, gameState, actionExecutor, phas
 }
 
 function tryPhaseFourPriorityUpgrade({ village, gameState, actionExecutor, phaseState }) {
-    const steps = [
-        { type: 'upgrade', unitType: 'offensive_infantry', level: 5 },
-    ];
+    const steps = [];
+    if (!isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 5)) {
+        steps.push({ type: 'upgrade', unitType: 'offensive_infantry', level: 5 });
+    }
 
     return runStepList({
         steps,
@@ -1736,10 +1627,13 @@ function tryPhaseFourPriorityUpgrade({ village, gameState, actionExecutor, phase
 }
 
 function tryPhaseFivePriorityUpgrade({ village, gameState, actionExecutor, phaseState }) {
-    const steps = [
-        { type: 'upgrade', unitType: 'offensive_infantry', level: 10 },
-        { type: 'upgrade', unitType: 'offensive_cavalry', level: 5 },
-    ];
+    const steps = [];
+    if (!isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 10)) {
+        steps.push({ type: 'upgrade', unitType: 'offensive_infantry', level: 10 });
+    }
+    if (!isPhaseUpgradeRequirementMet(village, 'offensive_cavalry', 5)) {
+        steps.push({ type: 'upgrade', unitType: 'offensive_cavalry', level: 5 });
+    }
 
     return runStepList({
         steps,
@@ -1945,6 +1839,16 @@ function handlePhaseActionResult({
     });
 }
 
+function allowSecondaryLanesAfterConstruction(result) {
+    if (!result || result.success) return result;
+
+    if (result.reason === 'QUEUE_FULL' || isRecoverablePhaseBlockReason(result.reason)) {
+        return { success: false, reason: 'NO_ACTION' };
+    }
+
+    return result;
+}
+
 function runAndHandlePhaseLaneMatrix({
     phaseState,
     phaseId,
@@ -1995,6 +1899,13 @@ function registerRecruitmentCommitFromAction({ result, phaseState, phaseId, vill
                         ? 'phase5'
                         : phaseId;
 
+    const progressBefore = getCycleProgressByPhase(phaseState, phaseKey);
+    const bucketProgressKey = getPhaseBucketForUnitId(village, phaseKey, result.unitId);
+    const beforeTotal = getCycleBreakdownFromMs(progressBefore.totalMs);
+    const beforeBucket = bucketProgressKey
+        ? getCycleBreakdownFromMs(progressBefore[bucketProgressKey])
+        : null;
+
     recordGermanPhaseRecruitmentProgress({
         phaseState,
         phaseKey,
@@ -2006,14 +1917,45 @@ function registerRecruitmentCommitFromAction({ result, phaseState, phaseId, vill
     });
 
     if (typeof log === 'function') {
+        const progressAfter = getCycleProgressByPhase(phaseState, phaseKey);
+        const afterTotal = getCycleBreakdownFromMs(progressAfter.totalMs);
+        const afterBucket = bucketProgressKey
+            ? getCycleBreakdownFromMs(progressAfter[bucketProgressKey])
+            : null;
+        const bucketLabel = bucketProgressKey ? (CYCLE_BUCKET_LABEL_BY_PROGRESS_KEY[bucketProgressKey] || bucketProgressKey) : 'sin_bucket';
         const status = getGermanPhaseCycleStatus(phaseState, difficulty, phaseKey);
         const percent = status.max > 0 ? ((status.completed / status.max) * 100) : 0;
+        const totalCycleDelta = afterTotal.cycles - beforeTotal.cycles;
+        const bucketCycleDelta = afterBucket && beforeBucket ? (afterBucket.cycles - beforeBucket.cycles) : 0;
+        const timePerUnit = Math.max(0, Number(result.timePerUnit) || 0);
+        const committedSec = trainedMs / 1000;
+
         log(
             'info',
             village,
             'Macro Reclutamiento',
-            `Progreso ciclos fase: ${status.completed}/${status.max} (${percent.toFixed(1)}%).`,
-            null,
+            `Ciclo real +${committedSec.toFixed(2)}s (${result.count}x ${result.unitId}, ${timePerUnit.toFixed(2)}ms/u). Fase ${status.completed}/${status.max} (${percent.toFixed(1)}%), deltaCiclos total:${totalCycleDelta >= 0 ? '+' : ''}${totalCycleDelta}, ${bucketLabel}:${bucketCycleDelta >= 0 ? '+' : ''}${bucketCycleDelta}. Residuo total ${beforeTotal.remainderMs}ms->${afterTotal.remainderMs}ms${afterBucket && beforeBucket ? `, ${bucketLabel} ${beforeBucket.remainderMs}ms->${afterBucket.remainderMs}ms` : ''}.`,
+            {
+                fase: phaseKey,
+                unitId: result.unitId,
+                count: result.count,
+                timePerUnitMs: timePerUnit,
+                committedMs: trainedMs,
+                total: {
+                    before: beforeTotal,
+                    after: afterTotal,
+                    deltaCycles: totalCycleDelta,
+                },
+                bucket: bucketProgressKey
+                    ? {
+                        key: bucketProgressKey,
+                        label: bucketLabel,
+                        before: beforeBucket,
+                        after: afterBucket,
+                        deltaCycles: bucketCycleDelta,
+                    }
+                    : null,
+            },
             'economic',
         );
     }
@@ -2227,13 +2169,13 @@ function normalizeGermanCycleProgressEntry(rawEntry) {
 
     const legacyTotalCycles = Number(rawEntry.total);
     if (Number.isFinite(legacyTotalCycles) && legacyTotalCycles > 0 && normalized.totalMs <= 0) {
-        normalized.totalMs = Math.floor(legacyTotalCycles * TRAINING_CYCLE_MS);
+        normalized.totalMs = Math.floor(legacyTotalCycles * RECRUITMENT_CYCLE_REAL_MS);
     }
 
     for (const [legacyKey, bucketKey] of Object.entries(GERMAN_CYCLE_BUCKET_ALIAS)) {
         const value = Number(rawEntry[legacyKey]);
         if (Number.isFinite(value) && value > 0 && normalized[bucketKey] <= 0) {
-            normalized[bucketKey] = Math.floor(value * TRAINING_CYCLE_MS);
+            normalized[bucketKey] = Math.floor(value * RECRUITMENT_CYCLE_REAL_MS);
         }
     }
 
@@ -2505,7 +2447,7 @@ export function runGermanEconomicPhaseCycle({
                 {
                     id: 'construction',
                     source: 'phase1_lane_construction',
-                    execute: () => pickPhaseLaneResult([
+                    execute: () => allowSecondaryLanesAfterConstruction(pickPhaseLaneResult([
                         tryPhaseOnePriorityConstruction({
                             village,
                             gameState,
@@ -2520,7 +2462,7 @@ export function runGermanEconomicPhaseCycle({
                             phaseState,
                             shouldAttemptConstructionStep: phaseOneThreatFilter,
                         }),
-                    ], 'NO_ACTION'),
+                    ], 'NO_ACTION')),
                 },
                 {
                     id: 'research',
@@ -2666,7 +2608,7 @@ export function runGermanEconomicPhaseCycle({
                     {
                         id: 'construction',
                         source: 'phase2_lane_construction',
-                        execute: () => pickPhaseLaneResult([
+                        execute: () => allowSecondaryLanesAfterConstruction(pickPhaseLaneResult([
                             tryPhaseTwoPriorityConstruction({
                                 village,
                                 gameState,
@@ -2681,7 +2623,7 @@ export function runGermanEconomicPhaseCycle({
                                 phaseState,
                                 shouldAttemptConstructionStep: phaseTwoConstructionFilter,
                             }),
-                        ], 'NO_ACTION'),
+                        ], 'NO_ACTION')),
                     },
                     {
                         id: 'research',
@@ -2816,7 +2758,7 @@ export function runGermanEconomicPhaseCycle({
                     {
                         id: 'construction',
                         source: 'phase3_lane_construction',
-                        execute: () => pickPhaseLaneResult([
+                        execute: () => allowSecondaryLanesAfterConstruction(pickPhaseLaneResult([
                             tryPhaseThreePriorityConstruction({
                                 village,
                                 gameState,
@@ -2831,7 +2773,7 @@ export function runGermanEconomicPhaseCycle({
                                 phaseState,
                                 shouldAttemptConstructionStep: phaseThreeConstructionFilter,
                             }),
-                        ], 'NO_ACTION'),
+                        ], 'NO_ACTION')),
                     },
                     {
                         id: 'research',
@@ -2966,7 +2908,7 @@ export function runGermanEconomicPhaseCycle({
                     {
                         id: 'construction',
                         source: 'phase4_lane_construction',
-                        execute: () => pickPhaseLaneResult([
+                        execute: () => allowSecondaryLanesAfterConstruction(pickPhaseLaneResult([
                             tryPhaseFourPriorityConstruction({
                                 village,
                                 gameState,
@@ -2981,7 +2923,7 @@ export function runGermanEconomicPhaseCycle({
                                 phaseState,
                                 shouldAttemptConstructionStep: phaseFourConstructionFilter,
                             }),
-                        ], 'NO_ACTION'),
+                        ], 'NO_ACTION')),
                     },
                     {
                         id: 'research',
@@ -3119,7 +3061,7 @@ export function runGermanEconomicPhaseCycle({
             {
                 id: 'construction',
                 source: 'phase5_lane_construction',
-                execute: () => pickPhaseLaneResult([
+                execute: () => allowSecondaryLanesAfterConstruction(pickPhaseLaneResult([
                     tryPhaseFivePriorityConstruction({
                         village,
                         gameState,
@@ -3134,7 +3076,7 @@ export function runGermanEconomicPhaseCycle({
                         phaseState,
                         shouldAttemptConstructionStep: phaseFiveConstructionFilter,
                     }),
-                ], 'NO_ACTION'),
+                ], 'NO_ACTION')),
             },
             {
                 id: 'research',

@@ -5,6 +5,16 @@ import uiRenderScheduler from '../ui/UIRenderScheduler.js';
 import { perfCollector } from '@shared/lib/perf.js';
 import { selectReportsSignature, selectUnreadPlayerReports } from '../ui/renderSelectors.js';
 
+function getPerspectiveOwnerId(state) {
+    if (!state?.players) return 'player';
+
+    const explicitPlayer = state.players.find(player => player.id === 'player');
+    if (explicitPlayer) return explicitPlayer.id;
+
+    const firstHuman = state.players.find(player => !String(player.id || '').startsWith('ai_'));
+    return firstHuman?.id || 'player';
+}
+
 class ReportsView {
     #reportListUI;
     #gameState;
@@ -68,8 +78,7 @@ class ReportsView {
     
     _handleNewReport(event) {
         const { report } = event.detail;
-        const activeVillage = this.#gameState?.villages?.find(v => v.id === this.#gameState?.activeVillageId);
-        const perspectiveOwnerId = activeVillage?.ownerId || 'player';
+        const perspectiveOwnerId = getPerspectiveOwnerId(this.#gameState);
         if (this.#gameState && report?.ownerId === perspectiveOwnerId) {
             toastUI.show('¡Nuevo informe de batalla recibido!', 'info');
         }
