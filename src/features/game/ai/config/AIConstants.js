@@ -17,3 +17,8 @@ export const AI_SETTLEMENT_CONSTANTS = Object.freeze({
     maxSearchRadius: 25,
     minDistanceFromExistingVillage: 4,
 });
+
+export const AI_RECRUITMENT_CONSTANTS = Object.freeze({
+    laneRecruitmentBatchMode: 'dynamic_cycle',
+    dynamicCycleFraction: 0.2,
+});

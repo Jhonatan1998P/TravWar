@@ -724,10 +724,7 @@ class AIController {
             return false;
         }
 
-        return myVillages.some(village => {
-            const phaseId = this._germanPhaseStates.get(village.id)?.activePhaseId;
-            return phaseId !== GERMAN_PHASE_IDS.phaseDone;
-        });
+        return myVillages.some(village => !this._germanPhaseStates.has(village.id));
     }
 
     handleGameNotification(notification, gameState) {

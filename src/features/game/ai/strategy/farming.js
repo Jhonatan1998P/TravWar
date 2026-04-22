@@ -5,11 +5,32 @@ import { calculateBeastBountyValue } from '../../core/OasisEconomy.js';
 
 const DEFAULT_TRAVEL_COST_PER_DISTANCE = 8;
 const DEFAULT_TRAVEL_COST_PER_MINUTE = 15;
-const OASIS_RAID_BATCH_MAX_TARGETS = 5;
+const OASIS_RAID_BATCH_MAX_TARGETS = 15;
 const OASIS_RAID_MISSION_TYPES = new Set(['attack', 'raid']);
 const OASIS_RETURN_SOURCE_TILE_TYPE = 'oasis';
 const OASIS_RAID_MIN_ATTACK_RATIO = 1.02;
 const OASIS_RAID_COUNT_STEPS = [1, 1.08, 1.15, 1.25, 1.4, 1.6];
+const OASIS_RAID_MIN_GROSS_RETURN_RATIO = 1.25;
+
+function getOasisRequiredGrossReward(lossValue) {
+    const invested = Math.max(0, Number(lossValue) || 0);
+    return invested * OASIS_RAID_MIN_GROSS_RETURN_RATIO;
+}
+
+function getOasisGrossReturnRatio(rewardGross, lossValue) {
+    const invested = Math.max(0, Number(lossValue) || 0);
+    const gross = Math.max(0, Number(rewardGross) || 0);
+
+    if (invested <= 0) {
+        return gross > 0 ? Number.POSITIVE_INFINITY : 0;
+    }
+
+    return gross / invested;
+}
+
+function meetsOasisGrossReturnThreshold(rewardGross, lossValue) {
+    return getOasisGrossReturnRatio(rewardGross, lossValue) >= OASIS_RAID_MIN_GROSS_RETURN_RATIO;
+}
 
 function getMovementTroopCount(movement) {
     if (!movement?.payload?.troops || typeof movement.payload.troops !== 'object') return 0;
@@ -333,6 +354,8 @@ function calculateBestOasisRaidConfig({
                 travelCost,
                 travelMinutes,
                 rewardNet,
+                grossReturnRatio: getOasisGrossReturnRatio(rewardGross, lossValue),
+                minRequiredGrossReward: getOasisRequiredGrossReward(lossValue),
                 killedEstimated,
                 selectedUnitId: unit.id,
             };
@@ -523,7 +546,7 @@ export function performOptimizedFarming({
                     slotTelemetry.rejectedNoSquad += 1;
                     return;
                 }
-                if (oasisConfig.rewardNet <= 0) {
+                if (!meetsOasisGrossReturnThreshold(oasisConfig.rewardGross, oasisConfig.lossValue)) {
                     slotTelemetry.rejectedNonPositive += 1;
                     return;
                 }
@@ -670,7 +693,7 @@ export function performOptimizedFarming({
     if (oasisOpportunities.length === 0) {
         telemetry.noProfitableCycle = !oasisBatchState.hasActiveBatch;
         if (!oasisBatchState.hasActiveBatch) {
-            logs.push('[FARMEO ROI] No hay oasis con RewardNet > 0 en este ciclo.');
+            logs.push('[FARMEO ROI] No hay oasis con retorno bruto >= 25% sobre inversion en tropas (RewardGross/LossValue >= 1.25).');
         }
     } else {
         const ranking = oasisOpportunities
@@ -692,9 +715,11 @@ export function performOptimizedFarming({
             if (oasisRaidsIssuedThisCycle >= OASIS_RAID_BATCH_MAX_TARGETS) return;
         }
 
-        if (opportunity.target.type === 'oasis' && opportunity.profit <= 0) {
+        if (opportunity.target.type === 'oasis' && !meetsOasisGrossReturnThreshold(opportunity.details?.rewardGross || 0, opportunity.details?.lossValue || 0)) {
             telemetry.rejectedNonPositive += 1;
-            logs.push(`[FARMEO ROI] Oasis ${opportunity.target.coords.x}|${opportunity.target.coords.y} bloqueado en emisión: RewardNet ${opportunity.profit.toFixed(0)} <= 0.`);
+            const minRequiredGross = getOasisRequiredGrossReward(opportunity.details?.lossValue || 0);
+            const grossReturnRatio = getOasisGrossReturnRatio(opportunity.details?.rewardGross || 0, opportunity.details?.lossValue || 0);
+            logs.push(`[FARMEO ROI] Oasis ${opportunity.target.coords.x}|${opportunity.target.coords.y} bloqueado en emision: Gross ${Number(opportunity.details?.rewardGross || 0).toFixed(0)} / Loss ${Number(opportunity.details?.lossValue || 0).toFixed(0)} = ${grossReturnRatio.toFixed(2)} < 1.25 (gross minimo ${minRequiredGross.toFixed(0)}).`);
             return;
         }
 

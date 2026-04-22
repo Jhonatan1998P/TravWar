@@ -140,6 +140,7 @@ function getPhaseBucketForUnitId(village, phaseKey, unitId) {
 
     if (phaseKey === 'phase3') {
         if (unit.type === 'infantry' && unit.role === 'offensive') return 'offensiveInfantryMs';
+        if (unit.type === 'cavalry' && unit.role === 'offensive') return 'offensiveCavalryMs';
         if (unit.role === 'scout') return 'scoutMs';
         return null;
     }
@@ -442,15 +443,14 @@ function evaluatePhaseTwoExit(village, phaseState, difficulty) {
         targets: PHASE_TWO_EXIT_CONDITIONS,
     });
     const cycleGate = evaluateCycleTargets(phaseState, difficulty, 'phase2');
-    const researchReady = isPhaseResearchRequirementMet(village, 'scout');
-    const ready = infraGate.ready && cycleGate.ready && researchReady;
+    const ready = infraGate.ready && cycleGate.ready;
 
     return {
         ready,
         details: infraGate.details,
         cycles: cycleGate.cycles,
         cycleTargets: cycleGate.targets,
-        researchReady,
+        researchReady: true,
     };
 }
 
@@ -472,8 +472,10 @@ function evaluatePhaseFourExit(village, phaseState, difficulty) {
         targets: PHASE_FOUR_INFRASTRUCTURE_TARGETS,
     });
     const cycleGate = evaluateCycleTargets(phaseState, difficulty, 'phase4');
-    const researchReady = isPhaseResearchRequirementMet(village, 'offensive_cavalry');
-    const upgradesReady = isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 5);
+    const researchReady = isPhaseResearchRequirementMet(village, 'ram');
+    const infantryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 12);
+    const cavalryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_cavalry', 10);
+    const upgradesReady = infantryUpgradeReady && cavalryUpgradeReady;
 
     const ready = infraGate.ready && cycleGate.ready && researchReady && upgradesReady;
 
@@ -484,6 +486,8 @@ function evaluatePhaseFourExit(village, phaseState, difficulty) {
         cycleTargets: cycleGate.targets,
         researchReady,
         upgradesReady,
+        infantryUpgradeReady,
+        cavalryUpgradeReady,
     };
 }
 
@@ -535,8 +539,11 @@ function evaluatePhaseThreeExit(village, phaseState, difficulty) {
         targets: PHASE_THREE_INFRASTRUCTURE_TARGETS,
     });
     const cycleGate = evaluateCycleTargets(phaseState, difficulty, 'phase3');
-    const researchReady = isPhaseResearchRequirementMet(village, 'scout');
-    const ready = infraGate.ready && cycleGate.ready && researchReady;
+    const researchReady = isPhaseResearchRequirementMet(village, 'offensive_cavalry');
+    const infantryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 10);
+    const cavalryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_cavalry', 6);
+    const upgradesReady = infantryUpgradeReady && cavalryUpgradeReady;
+    const ready = infraGate.ready && cycleGate.ready && researchReady && upgradesReady;
 
     return {
         ready,
@@ -545,6 +552,9 @@ function evaluatePhaseThreeExit(village, phaseState, difficulty) {
         cycles: cycleGate.cycles,
         cycleTargets: cycleGate.targets,
         researchReady,
+        upgradesReady,
+        infantryUpgradeReady,
+        cavalryUpgradeReady,
     };
 }
 
@@ -638,9 +648,9 @@ function evaluatePhaseFiveExit(village, phaseState, difficulty) {
         targets: PHASE_FIVE_INFRASTRUCTURE_TARGETS,
     });
     const cycleGate = evaluateCycleTargets(phaseState, difficulty, 'phase5');
-    const researchReady = isPhaseResearchRequirementMet(village, 'ram');
-    const infantryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 10);
-    const cavalryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_cavalry', 5);
+    const researchReady = isPhaseResearchRequirementMet(village, 'catapult');
+    const infantryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 15);
+    const cavalryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_cavalry', 12);
     const upgradesReady = infantryUpgradeReady && cavalryUpgradeReady;
     const dominanceReady = infraGate.ready && cycleGate.ready && researchReady && upgradesReady;
 
@@ -762,6 +772,41 @@ function isRecoverableBlockReason(reason) {
     return isRecoverablePhaseBlockReason(reason);
 }
 
+function getRecruitmentCycleStepProgressMap(phaseState) {
+    if (!phaseState || typeof phaseState !== 'object') return {};
+    if (!phaseState.recruitmentCycleStepProgress || typeof phaseState.recruitmentCycleStepProgress !== 'object') {
+        phaseState.recruitmentCycleStepProgress = {};
+    }
+    return phaseState.recruitmentCycleStepProgress;
+}
+
+function shouldAdvanceRecruitmentPointerOnResult({ phaseState, phaseId, laneId, result }) {
+    if (!result?.success) return false;
+    if (result.step?.countMode !== 'cycle_batch') return true;
+
+    const targetCycleMs = Number(result.cycleBatchTargetMs);
+    if (!Number.isFinite(targetCycleMs) || targetCycleMs <= 0) return true;
+
+    const committedMs = getCommittedRecruitmentMs(result);
+    if (!Number.isFinite(committedMs) || committedMs <= 0) return false;
+
+    const stepSignature = getStepSignature(result.step);
+    if (!stepSignature) return true;
+
+    const progressByStep = getRecruitmentCycleStepProgressMap(phaseState);
+    const progressKey = `${phaseId}:${laneId}:${stepSignature}`;
+    const previousMs = Math.max(0, Number(progressByStep[progressKey]) || 0);
+    const totalMs = previousMs + committedMs;
+
+    if (totalMs + 1e-6 < targetCycleMs) {
+        progressByStep[progressKey] = totalMs;
+        return false;
+    }
+
+    progressByStep[progressKey] = Math.max(0, totalMs - targetCycleMs);
+    return true;
+}
+
 function runStepList({
     steps,
     executeStep,
@@ -787,7 +832,12 @@ function runStepList({
         stopOnRecoverableBlock: shouldUseRecruitmentPriority ? true : stopOnRecoverableBlock,
     });
 
-    if (shouldUseRecruitmentPriority && result?.success) {
+    if (shouldUseRecruitmentPriority && result?.success && shouldAdvanceRecruitmentPointerOnResult({
+        phaseState,
+        phaseId,
+        laneId,
+        result,
+    })) {
         advanceRoundRobinPhasePointer({
             phaseState,
             phaseId,
@@ -865,6 +915,8 @@ function getMilitaryConstructionTargetsForPhase(phaseId) {
             { buildingType: 'barracks', level: PHASE_FOUR_PRIORITY.barracksTargetLevel },
             { buildingType: 'smithy', level: PHASE_FOUR_PRIORITY.smithyTargetLevel },
             { buildingType: 'stable', level: PHASE_FOUR_PRIORITY.stableTargetLevel },
+            { buildingType: 'rallyPoint', level: PHASE_FOUR_PRIORITY.rallyPointTargetLevel },
+            { buildingType: 'workshop', level: PHASE_FOUR_PRIORITY.workshopTargetLevel },
         ];
     }
 
@@ -1274,22 +1326,12 @@ function tryThreatEmergencyRecruitment({ village, gameState, actionExecutor, dif
     else if (threatLevel === 'medium') cycles = 2;
     else cycles = 1;
 
-    const emergencyCount = estimateUnitsForCycles({
-        village,
-        actionExecutor,
-        unitType: 'defensive_infantry',
-        cycles,
-        gameSpeed: 1,
-    });
-
-    if (emergencyCount <= 0) {
-        return { success: false, reason: 'PREREQUISITES_NOT_MET', details: { unitType: 'defensive_infantry' } };
-    }
-
     const emergencyStep = {
         type: 'units',
         unitType: 'defensive_infantry',
-        count: emergencyCount,
+        countMode: 'cycle_batch',
+        cycleCount: cycles,
+        allowBudgetBorrow: true,
     };
 
     const result = actionExecutor.executePlanStep(
@@ -1322,6 +1364,7 @@ function tryPhaseOnePriorityConstruction({ village, gameState, actionExecutor, p
         { type: 'building', buildingType: 'smithy', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.smithy },
         { type: 'building', buildingType: 'warehouse', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.warehouse },
         { type: 'building', buildingType: 'granary', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.granary },
+        { type: 'building', buildingType: 'grainMill', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.grainMill },
         { type: 'building', buildingType: 'marketplace', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.marketplace },
         { type: 'building', buildingType: 'cityWall', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.cityWall },
     ]);
@@ -1339,8 +1382,28 @@ function tryPhaseOnePriorityConstruction({ village, gameState, actionExecutor, p
     });
 }
 
-function tryPhaseOnePriorityRecruitment({ village, gameState, actionExecutor, phaseState }) {
-    return { success: false, reason: 'NO_PRIORITY_RECRUITMENT' };
+function tryPhaseOnePriorityRecruitment({ village, gameState, actionExecutor, phaseState, difficulty }) {
+    const baseSteps = [
+        createCycleMicroRecruitmentStep('offensive_infantry'),
+        createCycleMicroRecruitmentStep('scout'),
+    ];
+    const steps = filterRecruitmentStepsByCycleTargets({
+        phaseState,
+        difficulty,
+        phaseKey: 'phase1',
+        village,
+        actionExecutor,
+        steps: baseSteps,
+    });
+
+    return runStepList({
+        steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase1,
+        laneId: 'phase1_priority_recruitment',
+        executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
+        noActionReason: 'NO_PRIORITY_RECRUITMENT',
+    });
 }
 
 function tryPhaseOneFallbackConstruction({ village, gameState, actionExecutor, phaseState, shouldAttemptConstructionStep = null }) {
@@ -1413,9 +1476,11 @@ function tryPhaseFourPriorityConstruction({ village, gameState, actionExecutor, 
         { type: 'resource_fields_level', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.resourceFieldsLevel },
         { type: 'building', buildingType: 'mainBuilding', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.mainBuilding },
         { type: 'building', buildingType: 'barracks', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.barracks },
+        { type: 'building', buildingType: 'rallyPoint', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.rallyPoint },
         { type: 'building', buildingType: 'academy', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.academy },
         { type: 'building', buildingType: 'smithy', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.smithy },
         { type: 'building', buildingType: 'stable', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.stable },
+        { type: 'building', buildingType: 'workshop', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.workshop },
         { type: 'building', buildingType: 'warehouse', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.warehouse },
         { type: 'building', buildingType: 'granary', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.granary },
         { type: 'building', buildingType: 'marketplace', level: PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.marketplace },
@@ -1451,7 +1516,9 @@ function tryPhaseFivePriorityConstruction({ village, gameState, actionExecutor, 
         { type: 'building', buildingType: 'granary', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.granary },
         { type: 'building', buildingType: 'heroMansion', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.heroMansion },
         { type: 'building', buildingType: 'workshop', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.workshop },
+        { type: 'building', buildingType: 'marketplace', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.marketplace },
         { type: 'building', buildingType: 'embassy', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.embassy },
+        { type: 'building', buildingType: 'palace', level: PHASE_FIVE_INFRASTRUCTURE_TARGETS.buildingLevels.palace },
     ]);
 
     return runConstructionStepList({
@@ -1499,21 +1566,12 @@ function tryPhaseOneEmergencyRecruitment({ village, gameState, actionExecutor, g
     }
 
     const emergencyCycles = getCycleTargetForPhase(difficulty, 'phase1Emergency').defensiveInfantry || 3;
-    const emergencyCount = estimateUnitsForCycles({
-        village,
-        actionExecutor,
-        unitType: 'defensive_infantry',
-        cycles: emergencyCycles,
-        gameSpeed,
-    });
-    if (emergencyCount <= 0) {
-        return { success: false, reason: 'PREREQUISITES_NOT_MET', details: { unitType: 'defensive_infantry' } };
-    }
-
     const emergencyStep = {
         type: 'units',
         unitType: 'defensive_infantry',
-        count: emergencyCount,
+        countMode: 'cycle_batch',
+        cycleCount: emergencyCycles,
+        allowBudgetBorrow: true,
     };
 
     const result = actionExecutor.executePlanStep(
@@ -1535,6 +1593,9 @@ function tryPhaseOnePriorityResearch({ village, gameState, actionExecutor, phase
     const offensiveInfantryResearch = buildResearchStepIfNeeded(village, actionExecutor, 'offensive_infantry');
     if (offensiveInfantryResearch) steps.push(offensiveInfantryResearch);
 
+    const scoutResearch = buildResearchStepIfNeeded(village, actionExecutor, 'scout');
+    if (scoutResearch) steps.push(scoutResearch);
+
     return runStepList({
         steps,
         phaseState,
@@ -1546,26 +1607,14 @@ function tryPhaseOnePriorityResearch({ village, gameState, actionExecutor, phase
 }
 
 function tryPhaseTwoPriorityResearch({ village, gameState, actionExecutor, phaseState }) {
-    const steps = [];
-
-    const scoutResearch = buildResearchStepIfNeeded(village, actionExecutor, 'scout');
-    if (scoutResearch) steps.push(scoutResearch);
-
-    return runStepList({
-        steps,
-        phaseState,
-        phaseId: GERMAN_PHASE_IDS.phase2,
-        laneId: 'phase2_priority_research',
-        executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
-        noActionReason: 'NO_PRIORITY_RESEARCH',
-    });
+    return { success: false, reason: 'NO_PRIORITY_RESEARCH' };
 }
 
 function tryPhaseThreePriorityResearch({ village, gameState, actionExecutor, phaseState }) {
     const steps = [];
 
-    const scoutResearch = buildResearchStepIfNeeded(village, actionExecutor, 'scout');
-    if (scoutResearch) steps.push(scoutResearch);
+    const offensiveCavalryResearch = buildResearchStepIfNeeded(village, actionExecutor, 'offensive_cavalry');
+    if (offensiveCavalryResearch) steps.push(offensiveCavalryResearch);
 
     return runStepList({
         steps,
@@ -1577,11 +1626,31 @@ function tryPhaseThreePriorityResearch({ village, gameState, actionExecutor, pha
     });
 }
 
+function tryPhaseThreePriorityUpgrade({ village, gameState, actionExecutor, phaseState }) {
+    const steps = [];
+    if (!isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 10)) {
+        steps.push({ type: 'upgrade', unitType: 'offensive_infantry', level: 10 });
+    }
+    if (!isPhaseUpgradeRequirementMet(village, 'offensive_cavalry', 6)) {
+        steps.push({ type: 'upgrade', unitType: 'offensive_cavalry', level: 6 });
+    }
+
+    return runStepList({
+        steps,
+        phaseState,
+        phaseId: GERMAN_PHASE_IDS.phase3,
+        laneId: 'phase3_priority_upgrade',
+        executeStep: step => attemptRecruitmentStep({ village, gameState, step, actionExecutor }),
+        noActionReason: 'NO_PRIORITY_UPGRADE',
+        stopOnRecoverableBlock: true,
+    });
+}
+
 function tryPhaseFourPriorityResearch({ village, gameState, actionExecutor, phaseState }) {
     const steps = [];
 
-    const offensiveCavalryResearch = buildResearchStepIfNeeded(village, actionExecutor, 'offensive_cavalry');
-    if (offensiveCavalryResearch) steps.push(offensiveCavalryResearch);
+    const ramResearch = buildResearchStepIfNeeded(village, actionExecutor, 'ram');
+    if (ramResearch) steps.push(ramResearch);
 
     return runStepList({
         steps,
@@ -1596,8 +1665,8 @@ function tryPhaseFourPriorityResearch({ village, gameState, actionExecutor, phas
 function tryPhaseFivePriorityResearch({ village, gameState, actionExecutor, phaseState }) {
     const steps = [];
 
-    const ramResearch = buildResearchStepIfNeeded(village, actionExecutor, 'ram');
-    if (ramResearch) steps.push(ramResearch);
+    const catapultResearch = buildResearchStepIfNeeded(village, actionExecutor, 'catapult');
+    if (catapultResearch) steps.push(catapultResearch);
 
     return runStepList({
         steps,
@@ -1611,8 +1680,11 @@ function tryPhaseFivePriorityResearch({ village, gameState, actionExecutor, phas
 
 function tryPhaseFourPriorityUpgrade({ village, gameState, actionExecutor, phaseState }) {
     const steps = [];
-    if (!isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 5)) {
-        steps.push({ type: 'upgrade', unitType: 'offensive_infantry', level: 5 });
+    if (!isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 12)) {
+        steps.push({ type: 'upgrade', unitType: 'offensive_infantry', level: 12 });
+    }
+    if (!isPhaseUpgradeRequirementMet(village, 'offensive_cavalry', 10)) {
+        steps.push({ type: 'upgrade', unitType: 'offensive_cavalry', level: 10 });
     }
 
     return runStepList({
@@ -1628,11 +1700,11 @@ function tryPhaseFourPriorityUpgrade({ village, gameState, actionExecutor, phase
 
 function tryPhaseFivePriorityUpgrade({ village, gameState, actionExecutor, phaseState }) {
     const steps = [];
-    if (!isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 10)) {
-        steps.push({ type: 'upgrade', unitType: 'offensive_infantry', level: 10 });
+    if (!isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 15)) {
+        steps.push({ type: 'upgrade', unitType: 'offensive_infantry', level: 15 });
     }
-    if (!isPhaseUpgradeRequirementMet(village, 'offensive_cavalry', 5)) {
-        steps.push({ type: 'upgrade', unitType: 'offensive_cavalry', level: 5 });
+    if (!isPhaseUpgradeRequirementMet(village, 'offensive_cavalry', 12)) {
+        steps.push({ type: 'upgrade', unitType: 'offensive_cavalry', level: 12 });
     }
 
     return runStepList({
@@ -1678,6 +1750,7 @@ function tryPhaseThreePriorityRecruitment({ village, gameState, actionExecutor, 
     const baseSteps = [
         createCycleMicroRecruitmentStep('offensive_infantry'),
         createCycleMicroRecruitmentStep('scout'),
+        createCycleMicroRecruitmentStep('offensive_cavalry'),
     ];
     const steps = filterRecruitmentStepsByCycleTargets({
         phaseState,
@@ -1849,6 +1922,11 @@ function allowSecondaryLanesAfterConstruction(result) {
     return result;
 }
 
+function shouldPassThroughSupportLaneResult(result) {
+    if (!result || result.success) return false;
+    return result.reason === 'QUEUE_FULL' || result.reason === 'INSUFFICIENT_RESOURCES';
+}
+
 function runAndHandlePhaseLaneMatrix({
     phaseState,
     phaseId,
@@ -1857,11 +1935,24 @@ function runAndHandlePhaseLaneMatrix({
     gameSpeed,
     log,
 }) {
+    const normalizedLanes = (Array.isArray(lanes) ? lanes : [])
+        .filter(lane => lane && typeof lane.execute === 'function')
+        .map(lane => ({
+            ...lane,
+            execute: () => {
+                const result = lane.execute() || { success: false, reason: 'NO_ACTION' };
+                if (lane.id !== 'recruitment' && shouldPassThroughSupportLaneResult(result)) {
+                    return { success: false, reason: 'NO_ACTION' };
+                }
+                return result;
+            },
+        }));
+
     const laneRun = runPhaseLaneMatrix({
         phaseState,
         phaseId,
         laneMatrixId: `${phaseId}_lane_matrix`,
-        lanes,
+        lanes: normalizedLanes,
     });
 
     if (!laneRun.handled) {
@@ -2192,6 +2283,7 @@ function normalizeGermanCycleProgressEntry(rawEntry) {
 function normalizeGermanPhaseCycleProgress(rawProgress) {
     const source = rawProgress && typeof rawProgress === 'object' ? rawProgress : {};
     const aliases = {
+        phase1: ['phase1', 'phase_1'],
         phase2: ['phase2', 'phase_2'],
         phase3: ['phase3', 'phase_3'],
         phase4: ['phase4', 'phase_4'],
@@ -2199,6 +2291,7 @@ function normalizeGermanPhaseCycleProgress(rawProgress) {
     };
 
     return {
+        phase1: normalizeGermanCycleProgressEntry(source[aliases.phase1.find(key => key in source)]),
         phase2: normalizeGermanCycleProgressEntry(source[aliases.phase2.find(key => key in source)]),
         phase3: normalizeGermanCycleProgressEntry(source[aliases.phase3.find(key => key in source)]),
         phase4: normalizeGermanCycleProgressEntry(source[aliases.phase4.find(key => key in source)]),
@@ -2261,12 +2354,14 @@ export function createDefaultGermanPhaseState(now = Date.now()) {
         phase5ConsecutiveActiveSamples: 0,
         lastAppliedBudgetPhaseId: null,
         phaseCycleProgress: {
+            phase1: createEmptyCycleProgress(),
             phase2: createEmptyCycleProgress(),
             phase3: createEmptyCycleProgress(),
             phase4: createEmptyCycleProgress(),
             phase5: createEmptyCycleProgress(),
         },
         roundRobinPointers: {},
+        recruitmentCycleStepProgress: {},
         activeSubGoal: null,
         subGoalHistory: [],
     };
@@ -2339,6 +2434,10 @@ export function hydrateGermanPhaseState(rawState = null, now = Date.now()) {
             rawState.roundRobinPointers && typeof rawState.roundRobinPointers === 'object'
                 ? { ...rawState.roundRobinPointers }
                 : {},
+        recruitmentCycleStepProgress:
+            rawState.recruitmentCycleStepProgress && typeof rawState.recruitmentCycleStepProgress === 'object'
+                ? { ...rawState.recruitmentCycleStepProgress }
+                : {},
         activeSubGoal: normalizedActiveSubGoal,
         subGoalHistory: normalizedSubGoalHistory,
     };
@@ -2372,6 +2471,7 @@ export function serializeGermanPhaseStates(stateByVillageMap) {
             lastAppliedBudgetPhaseId: state.lastAppliedBudgetPhaseId,
             phaseCycleProgress: state.phaseCycleProgress,
             roundRobinPointers: state.roundRobinPointers,
+            recruitmentCycleStepProgress: state.recruitmentCycleStepProgress,
             activeSubGoal: state.activeSubGoal,
             subGoalHistory: state.subGoalHistory,
         };
@@ -2490,6 +2590,7 @@ export function runGermanEconomicPhaseCycle({
                         gameState,
                         actionExecutor,
                         phaseState,
+                        difficulty,
                     }),
                 },
             ],
@@ -2783,7 +2884,7 @@ export function runGermanEconomicPhaseCycle({
                     {
                         id: 'upgrade',
                         source: 'phase3_lane_upgrade',
-                        execute: () => ({ success: false, reason: 'NO_ACTION' }),
+                        execute: () => tryPhaseThreePriorityUpgrade({ village, gameState, actionExecutor, phaseState }),
                     },
                     {
                         id: 'recruitment',

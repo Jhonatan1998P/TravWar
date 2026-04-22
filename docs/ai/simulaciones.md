@@ -12,42 +12,42 @@ Los tiempos de fase son acumulados en tiempo real desde el inicio.
 
 ### x100
 - Estado: **No completa** (queda en `Fase 5 - Asedio y expansion`)
-- Entrada a fases: F1 `00:00:00`, F2 `00:30:00`, F3 `01:22:00`, F4 `04:51:00`, F5 `09:59:30`
+- Entrada a fases: F1 `00:00:00`, F2 `03:03:00`, F3 `07:27:15`, F4 `15:19:00`, F5 `25:31:15`
 - Tropas por fase:
-  - F1: `hacheros 0`, `exploradores 0`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
-  - F2: `hacheros 0`, `exploradores 0`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
-  - F3: `hacheros 450`, `exploradores 125`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
-  - F4: `hacheros 946`, `exploradores 126`, `caballeria_teutona 238`, `arietes 0`, `catapultas 0`
+  - F1: `hacheros 360`, `exploradores 97`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
+  - F2: `hacheros 1081`, `exploradores 100`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
+  - F3: `hacheros 3895`, `exploradores 422`, `caballeria_teutona 635`, `arietes 0`, `catapultas 0`
+  - F4: `hacheros 7067`, `exploradores 520`, `caballeria_teutona 791`, `arietes 0`, `catapultas 0`
 
 ### x500
-- Estado: **Completa** (`tick=79920`, fase final `Plantilla completada`)
-- Entrada a fases: F1 `00:00:00`, F2 `00:03:15`, F3 `00:10:18`, F4 `02:25:51`, F5 `05:53:57`, Done `11:06:00`
+- Estado: **Completa** (`tick=237198`, fase final `Plantilla completada`)
+- Entrada a fases: F1 `00:00:00`, F2 `01:25:36`, F3 `04:41:33`, F4 `11:33:45`, F5 `19:27:06`, Done `32:56:39`
 - Tropas por fase:
-  - F1: `hacheros 0`, `exploradores 0`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
-  - F2: `hacheros 0`, `exploradores 0`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
-  - F3: `hacheros 2250`, `exploradores 603`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
-  - F4: `hacheros 4727`, `exploradores 515`, `caballeria_teutona 1187`, `arietes 0`, `catapultas 0`
-  - F5: `hacheros 15593`, `exploradores 0`, `caballeria_teutona 2375`, `arietes 0`, `catapultas 0`
+  - F1: `hacheros 1801`, `exploradores 483`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
+  - F2: `hacheros 5400`, `exploradores 485`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
+  - F3: `hacheros 17957`, `exploradores 2091`, `caballeria_teutona 3163`, `arietes 0`, `catapultas 0`
+  - F4: `hacheros 32097`, `exploradores 2573`, `caballeria_teutona 3955`, `arietes 0`, `catapultas 0`
+  - F5: `hacheros 74461`, `exploradores 3552`, `caballeria_teutona 9742`, `arietes 0`, `catapultas 0`
 
 ### x1000
-- Estado: **Completa** (`tick=73518`, fase final `Plantilla completada`)
-- Entrada a fases: F1 `00:00:00`, F2 `00:01:37`, F3 `00:03:40`, F4 `01:58:00`, F5 `05:14:06`, Done `10:12:39`
+- Estado: **Completa** (`tick=231045`, fase final `Plantilla completada`)
+- Entrada a fases: F1 `00:00:00`, F2 `01:15:48`, F3 `04:23:31`, F4 `11:02:13`, F5 `18:43:39`, Done `32:05:22`
 - Tropas por fase:
-  - F1: `hacheros 0`, `exploradores 0`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
-  - F2: `hacheros 0`, `exploradores 0`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
-  - F3: `hacheros 4501`, `exploradores 1206`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
-  - F4: `hacheros 9457`, `exploradores 1014`, `caballeria_teutona 2373`, `arietes 0`, `catapultas 0`
-  - F5: `hacheros 29030`, `exploradores 0`, `caballeria_teutona 4746`, `arietes 0`, `catapultas 0`
+  - F1: `hacheros 3470`, `exploradores 965`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
+  - F2: `hacheros 10363`, `exploradores 965`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
+  - F3: `hacheros 35379`, `exploradores 4180`, `caballeria_teutona 6326`, `arietes 0`, `catapultas 0`
+  - F4: `hacheros 64474`, `exploradores 5153`, `caballeria_teutona 7909`, `arietes 0`, `catapultas 0`
+  - F5: `hacheros 150403`, `exploradores 7084`, `caballeria_teutona 19465`, `arietes 0`, `catapultas 0`
 
 ### x5000
-- Estado: **Completa** (`tick=58754`, fase final `Plantilla completada`)
-- Entrada a fases: F1 `00:00:00`, F2 `00:00:57`, F3 `00:01:59`, F4 `01:21:42`, F5 `03:45:25`, Done `08:09:37`
+- Estado: **Completa** (`tick=215946`, fase final `Plantilla completada`)
+- Entrada a fases: F1 `00:00:00`, F2 `01:03:26`, F3 `03:05:07`, F4 `10:18:48`, F5 `17:23:41`, Done `29:59:33`
 - Tropas por fase:
-  - F1: `hacheros 0`, `exploradores 0`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
-  - F2: `hacheros 0`, `exploradores 0`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
-  - F3: `hacheros 31417`, `exploradores 8190`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
-  - F4: `hacheros 40902`, `exploradores 5070`, `caballeria_teutona 11866`, `arietes 0`, `catapultas 0`
-  - F5: `hacheros 131768`, `exploradores 0`, `caballeria_teutona 23724`, `arietes 0`, `catapultas 0`
+  - F1: `hacheros 13869`, `exploradores 4833`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
+  - F2: `hacheros 31997`, `exploradores 4830`, `caballeria_teutona 0`, `arietes 0`, `catapultas 0`
+  - F3: `hacheros 272637`, `exploradores 25720`, `caballeria_teutona 31629`, `arietes 0`, `catapultas 0`
+  - F4: `hacheros 299602`, `exploradores 27915`, `caballeria_teutona 48653`, `arietes 0`, `catapultas 0`
+  - F5: `hacheros 759496`, `exploradores 35387`, `caballeria_teutona 97303`, `arietes 0`, `catapultas 0`
 
 ---
 

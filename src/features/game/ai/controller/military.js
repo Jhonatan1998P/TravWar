@@ -25,6 +25,10 @@ function isOasisRaidCommand(command, gameState) {
     return tile?.type === 'oasis';
 }
 
+function isAllowedUnderBeginnerProtection(command, gameState) {
+    return isOasisRaidCommand(command, gameState);
+}
+
 export function runMilitaryDecision({
     gameState,
     ownerId,
@@ -43,10 +47,7 @@ export function runMilitaryDecision({
     const aiPlayerState = gameState.players.find(player => player.id === ownerId);
     if (!aiPlayerState) return null;
 
-    if (aiPlayerState.isUnderProtection) {
-        log('info', null, 'Ciclo Militar Omitido', 'La IA esta bajo proteccion de principiante.', null, 'military');
-        return null;
-    }
+    const isUnderBeginnerProtection = Boolean(aiPlayerState.isUnderProtection);
 
     const myVillages = gameState.villages.filter(village => village.ownerId === ownerId);
     const totalPopulation = myVillages.reduce((sum, village) => sum + village.population.current, 0);
@@ -121,6 +122,21 @@ export function runMilitaryDecision({
                 'military',
             );
         }
+    }
+
+    if (isUnderBeginnerProtection) {
+        const blockedCommands = commandsToExecute.filter(command => !isAllowedUnderBeginnerProtection(command, gameState));
+        if (blockedCommands.length > 0) {
+            log(
+                'info',
+                null,
+                'Gate Proteccion Principiante',
+                `Proteccion activa: se bloquearon ${blockedCommands.length} comandos militares no-oasis. Solo se permite farm a oasis.`,
+                null,
+                'military',
+            );
+        }
+        commandsToExecute = commandsToExecute.filter(command => isAllowedUnderBeginnerProtection(command, gameState));
     }
 
     const filteredMilitaryCommands = commandsToExecute.filter(command => MILITARY_ALLOWED_COMMANDS.has(command?.comando));

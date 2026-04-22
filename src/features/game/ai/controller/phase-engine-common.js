@@ -1253,7 +1253,9 @@ export function advanceRoundRobinPhasePointer({
     const completedIndex = completedSignature
         ? orderedSteps.findIndex(step => getPhaseStepSignature(step) === completedSignature)
         : -1;
-    const currentIndex = completedIndex >= 0 ? completedIndex : normalizedPointer;
+    const currentIndex = completedIndex >= 0
+        ? (normalizedPointer + completedIndex) % orderedSteps.length
+        : normalizedPointer;
 
     phaseState.roundRobinPointers[pointerKey] = (currentIndex + 1) % orderedSteps.length;
 }

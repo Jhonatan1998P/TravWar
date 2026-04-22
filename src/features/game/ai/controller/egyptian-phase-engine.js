@@ -344,6 +344,41 @@ function getStepSignature(step) {
     return getPhaseStepSignature(step);
 }
 
+function getRecruitmentCycleStepProgressMap(phaseState) {
+    if (!phaseState || typeof phaseState !== 'object') return {};
+    if (!phaseState.recruitmentCycleStepProgress || typeof phaseState.recruitmentCycleStepProgress !== 'object') {
+        phaseState.recruitmentCycleStepProgress = {};
+    }
+    return phaseState.recruitmentCycleStepProgress;
+}
+
+function shouldAdvanceRecruitmentPointerOnResult({ phaseState, phaseId, laneId, result }) {
+    if (!result?.success) return false;
+    if (result.step?.countMode !== 'cycle_batch') return true;
+
+    const targetCycleMs = Number(result.cycleBatchTargetMs);
+    if (!Number.isFinite(targetCycleMs) || targetCycleMs <= 0) return true;
+
+    const committedMs = getCommittedRecruitmentMs(result);
+    if (!Number.isFinite(committedMs) || committedMs <= 0) return false;
+
+    const stepSignature = getStepSignature(result.step);
+    if (!stepSignature) return true;
+
+    const progressByStep = getRecruitmentCycleStepProgressMap(phaseState);
+    const progressKey = `${phaseId}:${laneId}:${stepSignature}`;
+    const previousMs = Math.max(0, Number(progressByStep[progressKey]) || 0);
+    const totalMs = previousMs + committedMs;
+
+    if (totalMs + 1e-6 < targetCycleMs) {
+        progressByStep[progressKey] = totalMs;
+        return false;
+    }
+
+    progressByStep[progressKey] = Math.max(0, totalMs - targetCycleMs);
+    return true;
+}
+
 function isQueueAvailable(village, queueType) {
     return isPhaseQueueAvailable(village, queueType);
 }
@@ -729,7 +764,12 @@ function tryRecruitmentPriority({ actionExecutor, village, gameState, phaseState
         stopOnRecoverableBlock: true,
     });
 
-    if (result?.success) {
+    if (result?.success && shouldAdvanceRecruitmentPointerOnResult({
+        phaseState,
+        phaseId,
+        laneId,
+        result,
+    })) {
         advanceRoundRobinPhasePointer({
             phaseState,
             phaseId,
@@ -765,6 +805,40 @@ function tryUpgradePriority({ actionExecutor, village, gameState, options, shoul
         noActionReason: 'NO_ACTION',
         shouldAttemptStep,
         stopOnRecoverableBlock: true,
+    });
+}
+
+function shouldPassThroughSupportLaneResult(result) {
+    if (!result || result.success) return false;
+    return result.reason === 'QUEUE_FULL' || result.reason === 'INSUFFICIENT_RESOURCES';
+}
+
+function runPhaseLaneMatrixWithSupportPassThrough({
+    phaseState,
+    phaseId,
+    laneMatrixId,
+    lanes,
+    noActionReason = 'NO_ACTION',
+}) {
+    const normalizedLanes = (Array.isArray(lanes) ? lanes : [])
+        .filter(lane => lane && typeof lane.execute === 'function')
+        .map(lane => ({
+            ...lane,
+            execute: () => {
+                const result = lane.execute() || { success: false, reason: noActionReason };
+                if (lane.id !== 'recruitment' && shouldPassThroughSupportLaneResult(result)) {
+                    return { success: false, reason: noActionReason };
+                }
+                return result;
+            },
+        }));
+
+    return runPhaseLaneMatrix({
+        phaseState,
+        phaseId,
+        laneMatrixId,
+        lanes: normalizedLanes,
+        noActionReason,
     });
 }
 
@@ -1029,7 +1103,7 @@ function createThreatRecruitmentFilter(village, threatContext) {
 }
 
 function runPhaseOne({ village, gameState, actionExecutor, phaseState, threatContext, constructionFilter, recruitmentFilter }) {
-    const matrix = runPhaseLaneMatrix({
+    const matrix = runPhaseLaneMatrixWithSupportPassThrough({
         phaseState,
         phaseId: EGYPTIAN_PHASE_IDS.phase1,
         laneMatrixId: 'phase1_lane_matrix',
@@ -1112,7 +1186,7 @@ function runPhaseOne({ village, gameState, actionExecutor, phaseState, threatCon
 }
 
 function runPhaseTwo({ village, gameState, actionExecutor, phaseState, threatContext, constructionFilter, recruitmentFilter }) {
-    const matrix = runPhaseLaneMatrix({
+    const matrix = runPhaseLaneMatrixWithSupportPassThrough({
         phaseState,
         phaseId: EGYPTIAN_PHASE_IDS.phase2,
         laneMatrixId: 'phase2_lane_matrix',
@@ -1187,7 +1261,7 @@ function runPhaseTwo({ village, gameState, actionExecutor, phaseState, threatCon
 }
 
 function runPhaseThree({ village, gameState, actionExecutor, phaseState, constructionFilter, recruitmentFilter }) {
-    const matrix = runPhaseLaneMatrix({
+    const matrix = runPhaseLaneMatrixWithSupportPassThrough({
         phaseState,
         phaseId: EGYPTIAN_PHASE_IDS.phase3,
         laneMatrixId: 'phase3_lane_matrix',
@@ -1249,7 +1323,7 @@ function runPhaseThree({ village, gameState, actionExecutor, phaseState, constru
 }
 
 function runPhaseFour({ village, gameState, actionExecutor, phaseState, constructionFilter, recruitmentFilter }) {
-    const matrix = runPhaseLaneMatrix({
+    const matrix = runPhaseLaneMatrixWithSupportPassThrough({
         phaseState,
         phaseId: EGYPTIAN_PHASE_IDS.phase4,
         laneMatrixId: 'phase4_lane_matrix',
@@ -1318,7 +1392,7 @@ function runPhaseFive({
     constructionFilter,
     recruitmentFilter,
 }) {
-    const matrix = runPhaseLaneMatrix({
+    const matrix = runPhaseLaneMatrixWithSupportPassThrough({
         phaseState,
         phaseId: EGYPTIAN_PHASE_IDS.phase5,
         laneMatrixId: 'phase5_lane_matrix',
@@ -1501,8 +1575,15 @@ export function createDefaultEgyptianPhaseState(now = Date.now()) {
         phase2MilitaryQueueActiveSamples: 0,
         phase3DefensiveQueueSamples: 0,
         phase3DefensiveQueueActiveSamples: 0,
-        phaseCycleProgress: {},
+        phaseCycleProgress: {
+            phase1: createEmptyCycleProgress(),
+            phase2: createEmptyCycleProgress(),
+            phase3: createEmptyCycleProgress(),
+            phase4: createEmptyCycleProgress(),
+            phase5: createEmptyCycleProgress(),
+        },
         roundRobinPointers: {},
+        recruitmentCycleStepProgress: {},
         activeSubGoal: null,
         subGoalHistory: [],
         lastThreatOverrideLogAt: 0,
@@ -1565,6 +1646,10 @@ export function hydrateEgyptianPhaseState(rawState = null, now = Date.now()) {
             rawState.roundRobinPointers && typeof rawState.roundRobinPointers === 'object'
                 ? { ...rawState.roundRobinPointers }
                 : {},
+        recruitmentCycleStepProgress:
+            rawState.recruitmentCycleStepProgress && typeof rawState.recruitmentCycleStepProgress === 'object'
+                ? { ...rawState.recruitmentCycleStepProgress }
+                : {},
         activeSubGoal: normalizedActiveSubGoal,
         subGoalHistory: normalizedSubGoalHistory,
         lastThreatOverrideLogAt: Number.isFinite(rawState.lastThreatOverrideLogAt) ? rawState.lastThreatOverrideLogAt : 0,
@@ -1622,6 +1707,7 @@ export function serializeEgyptianPhaseStates(stateByVillageMap) {
             phase3DefensiveQueueActiveSamples: state.phase3DefensiveQueueActiveSamples,
             phaseCycleProgress: state.phaseCycleProgress,
             roundRobinPointers: state.roundRobinPointers,
+            recruitmentCycleStepProgress: state.recruitmentCycleStepProgress,
             activeSubGoal: state.activeSubGoal,
             subGoalHistory: state.subGoalHistory,
             lastThreatOverrideLogAt: state.lastThreatOverrideLogAt,

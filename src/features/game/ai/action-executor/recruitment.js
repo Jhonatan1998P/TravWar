@@ -1,5 +1,6 @@
 import { gameData } from '../../core/GameData.js';
 import { getMaxAffordableCount, getVillageBudget } from '../utils/AIBudgetUtils.js';
+import { AI_RECRUITMENT_CONSTANTS } from '../config/AIConstants.js';
 
 const PHASE_BATCH_CONFIG = {
     early: { basePct: 0.18, min: 5, max: 24 },
@@ -12,6 +13,24 @@ const EXCHANGE_RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
 const RECRUITMENT_BUDGET_BORROW_PROBABILITY = 0.1;
 const RECRUITMENT_BUDGET_BORROW_ECON_SHARE = 0.25;
 const RECRUITMENT_EXCHANGE_PROBABILITY = 0.25;
+const LANE_RECRUITMENT_BATCH_MODES = Object.freeze({
+    fullCycle: 'full_cycle',
+    dynamicCycle: 'dynamic_cycle',
+});
+
+function resolveLaneRecruitmentBatchMode() {
+    const configuredMode = AI_RECRUITMENT_CONSTANTS?.laneRecruitmentBatchMode;
+    if (configuredMode === LANE_RECRUITMENT_BATCH_MODES.dynamicCycle) {
+        return LANE_RECRUITMENT_BATCH_MODES.dynamicCycle;
+    }
+    return LANE_RECRUITMENT_BATCH_MODES.fullCycle;
+}
+
+function getDynamicCycleFraction() {
+    const raw = Number(AI_RECRUITMENT_CONSTANTS?.dynamicCycleFraction);
+    if (!Number.isFinite(raw)) return 0.2;
+    return clamp(raw, 0.05, 1);
+}
 
 function createEmptyRecruitmentExchangeKpi() {
     return {
@@ -603,9 +622,14 @@ export function manageRecruitmentForGoal({
     const cycleBatchCount = step.countMode === 'cycle_batch'
         ? Math.max(1, Math.floor(step.cycleCount || 1))
         : 0;
+    const laneBatchMode = resolveLaneRecruitmentBatchMode();
     const isOpenEndedTarget = step.countMode === 'queue_cycles'
         || step.count === Infinity
         || !Number.isFinite(step.count);
+    let cycleBatchTargetMs = 0;
+    let cycleBatchTargetUnits = 0;
+    let cycleBatchRequiredUnits = 0;
+    let cycleBatchRequiredFraction = 1;
 
     if (queueTargetMs > 0) {
         queueCoverageMs = getQueueCoverageMs(village, trainingBuilding.id);
@@ -637,8 +661,13 @@ export function manageRecruitmentForGoal({
         if (!Number.isFinite(singleUnitTimeMs) || singleUnitTimeMs <= 0) {
             return { success: false, reason: 'INVALID_UNIT_DATA' };
         }
-        const cycleDurationRealMs = cycleBatchCount * RECRUITMENT_CYCLE_MS;
-        unitsNeeded = Math.max(1, Math.ceil(cycleDurationRealMs / singleUnitTimeMs));
+        cycleBatchTargetMs = cycleBatchCount * RECRUITMENT_CYCLE_MS;
+        cycleBatchTargetUnits = Math.max(1, Math.ceil(cycleBatchTargetMs / singleUnitTimeMs));
+        cycleBatchRequiredFraction = laneBatchMode === LANE_RECRUITMENT_BATCH_MODES.dynamicCycle
+            ? getDynamicCycleFraction()
+            : 1;
+        cycleBatchRequiredUnits = Math.max(1, Math.ceil(cycleBatchTargetUnits * cycleBatchRequiredFraction));
+        unitsNeeded = cycleBatchRequiredUnits;
     }
 
     if (unitsNeeded <= 0) return { success: true };
@@ -659,6 +688,24 @@ export function manageRecruitmentForGoal({
     const militaryBudget = getVillageBudget(village, 'mil');
     const maxAffordableTotal = getMaxAffordableCount(unitData.cost, militaryBudget);
     const effectiveAffordableTotal = Number.isFinite(maxAffordableTotal) ? maxAffordableTotal : unitsNeeded;
+
+    if (cycleBatchCount > 0 && effectiveAffordableTotal > 0 && effectiveAffordableTotal < unitsNeeded) {
+        return {
+            success: false,
+            reason: 'INSUFFICIENT_RESOURCES',
+            details: {
+                mode: 'cycle_batch',
+                cycleBatchCount,
+                laneBatchMode,
+                cycleBatchTargetMs,
+                cycleBatchTargetUnits,
+                cycleBatchRequiredFraction,
+                requiredUnits: unitsNeeded,
+                affordableUnits: effectiveAffordableTotal,
+            },
+        };
+    }
+
     if (effectiveAffordableTotal <= 0) {
         return { success: false, reason: 'INSUFFICIENT_RESOURCES' };
     }
@@ -716,9 +763,11 @@ export function manageRecruitmentForGoal({
 
         const cycleBatchInfo = cycleBatchCount > 0
             ? (() => {
-                const targetCycleMs = cycleBatchCount * RECRUITMENT_CYCLE_MS;
+                const targetCycleMs = cycleBatchTargetMs > 0
+                    ? cycleBatchTargetMs
+                    : cycleBatchCount * RECRUITMENT_CYCLE_MS;
                 const cyclePct = targetCycleMs > 0 ? (committedRealMs / targetCycleMs) * 100 : 0;
-                return `, CicloReal:${committedRealSec.toFixed(2)}s/${(targetCycleMs / 1000).toFixed(2)}s (${cyclePct.toFixed(1)}%), UnidadesObjetivo:${unitsNeeded}`;
+                return `, BatchModo:${laneBatchMode}, CicloReal:${committedRealSec.toFixed(2)}s/${(targetCycleMs / 1000).toFixed(2)}s (${cyclePct.toFixed(1)}%), UnidadesCiclo:${cycleBatchTargetUnits || unitsNeeded}, UnidadesTurno:${unitsNeeded}`;
             })()
             : '';
 
@@ -730,6 +779,12 @@ export function manageRecruitmentForGoal({
             timePerUnit: singleUnitTimeMs,
             committedRealMs,
             cycleBatchCount,
+            cycleBatchMode: laneBatchMode,
+            cycleBatchTargetMs,
+            cycleBatchTargetUnits,
+            cycleBatchRequiredUnits,
+            cycleBatchRequiredFraction,
+            cycleBatchCommittedFraction: cycleBatchTargetMs > 0 ? (committedRealMs / cycleBatchTargetMs) : 0,
             batchMeta: batchPlan,
         };
     }
