@@ -1,3 +1,5 @@
+import { units } from './units.js';
+
 export const RESOURCE_FIELD_BUILDING_TYPES = Object.freeze([
     'woodcutter',
     'clayPit',
@@ -22,6 +24,14 @@ export const STORAGE_BUILDING_BY_RESOURCE = Object.freeze({
 export const BEGINNER_PROTECTION_POPULATION_THRESHOLD = 250;
 
 export const BUDGET_RATIO_REBALANCE_INTERVAL_MS = 600000;
+
+export const FARM_LIST_LIMITS = Object.freeze({
+    maxListsPerOwner: 5,
+    maxEntriesPerList: 100,
+    minDispatchCooldownMs: 30000,
+    defaultUnitCount: 1,
+    defaultMissionType: 'raid',
+});
 
 export const AI_PHASE_ENGINE_ROLLOUT_DEFAULTS = Object.freeze({
     germans: true,
@@ -66,4 +76,17 @@ export function getOasisSpeedMultiplier(gameSpeed) {
 
 export function isUnderBeginnerProtectionByPopulation(totalPopulation) {
     return (Number(totalPopulation) || 0) < BEGINNER_PROTECTION_POPULATION_THRESHOLD;
+}
+
+export function resolveDefaultFarmUnitId(race) {
+    const troopCatalog = units?.[race]?.troops;
+    if (!Array.isArray(troopCatalog)) return null;
+    const firstTrainableUnit = troopCatalog.find(unit => unit?.type !== 'merchant');
+    return firstTrainableUnit?.id || null;
+}
+
+export function resolveDefaultFarmTroops(race) {
+    const unitId = resolveDefaultFarmUnitId(race);
+    if (!unitId) return {};
+    return { [unitId]: FARM_LIST_LIMITS.defaultUnitCount };
 }

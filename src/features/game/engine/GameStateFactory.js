@@ -2,8 +2,10 @@
 import { gameData } from '../core/GameData.js';
 import { generateLayout, generateVillageCenterLayout, TEMPLATES } from '../core/LayoutManager.js';
 import {
+    FARM_LIST_LIMITS,
     getOasisSpeedMultiplier,
     isUnderBeginnerProtectionByPopulation,
+    resolveDefaultFarmTroops,
 } from '../core/data/constants.js';
 import { scaleCapacityByGameSpeed } from '../core/capacityScaling.js';
 
@@ -30,6 +32,164 @@ function createDefaultRecruitmentExchangeKpi() {
         lastActivationAt: null,
         byUnit: {},
     };
+}
+
+function createEmptyFarmListsOwnerState() {
+    return { lists: [] };
+}
+
+function createFarmListsByOwnerId(players) {
+    const farmListsByOwnerId = {};
+    const safePlayers = Array.isArray(players) ? players : [];
+    safePlayers.forEach(player => {
+        if (typeof player?.id === 'string' && player.id.length > 0) {
+            farmListsByOwnerId[player.id] = createEmptyFarmListsOwnerState();
+        }
+    });
+    return farmListsByOwnerId;
+}
+
+function normalizeFarmListTimestamp(value, fallback) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : fallback;
+}
+
+function normalizeFarmListTargetCoords(targetCoords) {
+    const x = Number(targetCoords?.x);
+    const y = Number(targetCoords?.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    return { x: Math.trunc(x), y: Math.trunc(y) };
+}
+
+function normalizeFarmListTroops(troops, race) {
+    const allowedUnitIds = new Set(
+        (gameData.units?.[race]?.troops || [])
+            .filter(unit => unit?.id && unit.type !== 'merchant')
+            .map(unit => unit.id),
+    );
+
+    const normalizedTroops = {};
+    if (troops && typeof troops === 'object' && !Array.isArray(troops)) {
+        Object.entries(troops).forEach(([unitId, amount]) => {
+            const normalizedAmount = Math.floor(Number(amount));
+            if (!unitId || !allowedUnitIds.has(unitId) || !Number.isFinite(normalizedAmount) || normalizedAmount <= 0) return;
+            normalizedTroops[unitId] = normalizedAmount;
+        });
+    }
+
+    if (Object.keys(normalizedTroops).length > 0) {
+        return normalizedTroops;
+    }
+
+    return resolveDefaultFarmTroops(race);
+}
+
+function normalizeFarmListDispatchMap(lastDispatchAtByOrigin) {
+    const normalizedDispatchMap = {};
+    if (!lastDispatchAtByOrigin || typeof lastDispatchAtByOrigin !== 'object' || Array.isArray(lastDispatchAtByOrigin)) {
+        return normalizedDispatchMap;
+    }
+
+    Object.entries(lastDispatchAtByOrigin).forEach(([originVillageId, timestamp]) => {
+        if (!originVillageId) return;
+        const normalizedTimestamp = Number(timestamp);
+        if (!Number.isFinite(normalizedTimestamp) || normalizedTimestamp < 0) return;
+        normalizedDispatchMap[originVillageId] = Math.floor(normalizedTimestamp);
+    });
+
+    return normalizedDispatchMap;
+}
+
+function normalizeFarmListEntry(entry, entryIndex, race) {
+    if (!entry || typeof entry !== 'object') return null;
+    const targetCoords = normalizeFarmListTargetCoords(entry.targetCoords);
+    if (!targetCoords) return null;
+
+    return {
+        id: (typeof entry.id === 'string' && entry.id.length > 0) ? entry.id : `entry_${entryIndex + 1}`,
+        targetType: entry.targetType === 'oasis' ? 'oasis' : 'village',
+        targetCoords,
+        troops: normalizeFarmListTroops(entry.troops, race),
+        lastDispatchAtByOrigin: normalizeFarmListDispatchMap(entry.lastDispatchAtByOrigin),
+    };
+}
+
+function normalizeFarmList(list, listIndex, race) {
+    const safeNow = Date.now();
+    const createdAt = normalizeFarmListTimestamp(list?.createdAt, safeNow);
+    const updatedAt = normalizeFarmListTimestamp(list?.updatedAt, createdAt);
+    const maxEntriesPerList = Math.max(1, Math.floor(Number(FARM_LIST_LIMITS.maxEntriesPerList) || 100));
+    const normalizedEntries = [];
+    const seenTargetCoords = new Set();
+    const seenEntryIds = new Set();
+    const rawEntries = Array.isArray(list?.entries) ? list.entries : [];
+
+    rawEntries.forEach((entry, entryIndex) => {
+        if (normalizedEntries.length >= maxEntriesPerList) return;
+
+        const normalizedEntry = normalizeFarmListEntry(entry, entryIndex, race);
+        if (!normalizedEntry) return;
+
+        const coordKey = `${normalizedEntry.targetCoords.x}|${normalizedEntry.targetCoords.y}`;
+        if (seenTargetCoords.has(coordKey)) return;
+
+        let resolvedEntryId = normalizedEntry.id;
+        let entryDisambiguator = 1;
+        while (seenEntryIds.has(resolvedEntryId)) {
+            resolvedEntryId = `${normalizedEntry.id}_${entryDisambiguator++}`;
+        }
+
+        normalizedEntry.id = resolvedEntryId;
+        seenEntryIds.add(resolvedEntryId);
+        seenTargetCoords.add(coordKey);
+        normalizedEntries.push(normalizedEntry);
+    });
+
+    return {
+        id: (typeof list?.id === 'string' && list.id.length > 0) ? list.id : `farm_list_${listIndex + 1}`,
+        name: (typeof list?.name === 'string' && list.name.trim().length > 0) ? list.name.trim() : `Lista ${listIndex + 1}`,
+        createdAt,
+        updatedAt,
+        entries: normalizedEntries,
+    };
+}
+
+function normalizeFarmListsByOwnerId(source, players) {
+    const normalized = createFarmListsByOwnerId(players);
+    const safeSource = source && typeof source === 'object' ? source : null;
+    const safePlayers = Array.isArray(players) ? players : [];
+    const maxListsPerOwner = Math.max(1, Math.floor(Number(FARM_LIST_LIMITS.maxListsPerOwner) || 5));
+
+    safePlayers.forEach(player => {
+        const ownerId = player?.id;
+        if (!ownerId || !safeSource) return;
+
+        const ownerPayload = safeSource[ownerId];
+        const lists = [];
+        const seenListIds = new Set();
+        const rawLists = Array.isArray(ownerPayload?.lists) ? ownerPayload.lists : [];
+
+        rawLists.forEach((list, listIndex) => {
+            if (lists.length >= maxListsPerOwner) return;
+
+            const normalizedList = normalizeFarmList(list, listIndex, player.race);
+            if (!normalizedList) return;
+
+            let resolvedListId = normalizedList.id;
+            let listDisambiguator = 1;
+            while (seenListIds.has(resolvedListId)) {
+                resolvedListId = `${normalizedList.id}_${listDisambiguator++}`;
+            }
+
+            normalizedList.id = resolvedListId;
+            seenListIds.add(resolvedListId);
+            lists.push(normalizedList);
+        });
+
+        normalized[ownerId] = { lists };
+    });
+
+    return normalized;
 }
 
 export class GameStateFactory {
@@ -106,6 +266,7 @@ export class GameStateFactory {
             sessionId: sessionId, worldSeed: this.#config.worldSeed, villages: allVillages, players, activeVillageId: playerVillageId, mapData,
             movements: [], reports: [], unreadCounts: {}, diplomacy: { relations: {} },
             alliance: { id: null, name: null, bonuses: { productionBonusPercent: 0, constructionTimeBonusPercent: 0 } }, aiState: {},
+            farmListsByOwnerId: createFarmListsByOwnerId(players),
             lastOasisRegenTime: Date.now(),
             memory: { log: [] },
             aiProfiles: new Map(),
@@ -124,6 +285,7 @@ export class GameStateFactory {
             });
         }
         savedState.players.forEach(player => {
+            player.race ??= savedState.villages.find(v => v.ownerId === player.id)?.race ?? 'germans';
             if (player.isUnderProtection === undefined) {
                 const totalPopulation = savedState.villages
                     .filter(v => v.ownerId === player.id)
@@ -165,6 +327,7 @@ export class GameStateFactory {
         savedState.unreadCounts ??= {};
         savedState.diplomacy ??= { relations: {} };
         savedState.aiState ??= {};
+        savedState.farmListsByOwnerId = normalizeFarmListsByOwnerId(savedState.farmListsByOwnerId, savedState.players);
         savedState.startedAt ??= Date.now();
         savedState.lastOasisRegenTime ??= Date.now();
         savedState.memory ??= { log: [] };

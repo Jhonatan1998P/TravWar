@@ -1,7 +1,6 @@
 import gameManager from '@game/state/GameManager.js';
 import { renderVillageCenterSlots, initializeBuildingSlotClicks } from '../ui/BuildingSlotsUI.js';
 import { renderResourceBar } from '../ui/ResourceBarUI.js';
-import ActivityModalUI from '../ui/ActivityModalUI.js';
 import ConstructionQueueUI from '../ui/ConstructionQueueUI.js';
 import RecruitmentQueueUI from '../ui/RecruitmentQueueUI.js';
 import ResearchQueueUI from '../ui/ResearchQueueUI.js';
@@ -19,7 +18,6 @@ class VillageCenterView {
     #populationDisplay;
     #gameState;
     #lastVillageRenderSignature = '';
-    #activityModalUI;
     #constructionQueueUI;
     #recruitmentQueueUI;
     #researchQueueUI;
@@ -51,7 +49,6 @@ class VillageCenterView {
 
         this.#populationDisplay = document.getElementById('population-display');
 
-        this.#activityModalUI = new ActivityModalUI();
         this.#constructionQueueUI = new ConstructionQueueUI('construction-queue-container');
         this.#recruitmentQueueUI = new RecruitmentQueueUI('tab-panel-recruitment');
         this.#researchQueueUI = new ResearchQueueUI('research-queue-container', 'research-queue-wrapper');
@@ -74,7 +71,6 @@ class VillageCenterView {
         document.removeEventListener('notify:research_finished', this._handleResearchFinished);
         document.removeEventListener('notify:smithy_finished', this._handleSmithyFinished);
 
-        this.#activityModalUI?.destroy?.();
         this.#constructionQueueUI?.destroy?.();
         this.#recruitmentQueueUI?.destroy?.();
         this.#researchQueueUI?.destroy?.();
@@ -82,7 +78,6 @@ class VillageCenterView {
         this.#troopsUI?.destroy?.();
         this.#movementsUI?.destroy?.();
 
-        this.#activityModalUI = null;
         this.#constructionQueueUI = null;
         this.#recruitmentQueueUI = null;
         this.#researchQueueUI = null;

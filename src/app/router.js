@@ -34,6 +34,7 @@ class Router {
             '/config': () => import('@game/views/ConfigView.js').then(module => module.default),
             '/village': () => import('@game/views/VillageView.js').then(module => module.default),
             '/village-center': () => import('@game/views/VillageCenterView.js').then(module => module.default),
+            '/farm-lists': () => import('@game/views/FarmListsView.js').then(module => module.default),
             '/reports': () => import('@game/views/ReportsView.js').then(module => module.default),
             '/map': () => import('@game/views/MapView.js').then(module => module.default)
         };
@@ -177,14 +178,20 @@ class Router {
             this.#currentView.mount();
         }
 
+        const widthClasses = ['max-w-md', 'max-w-3xl', 'max-w-6xl'];
+        this.#villageContainer.classList.remove(...widthClasses);
+
         if (path === '/config') {
             this.#appHeader.classList.add('hidden');
             this.#appFooter.classList.add('hidden');
             this.#resourceBar.classList.add('hidden');
-            this.#villageContainer.classList.remove('max-w-md');
             this.#villageContainer.classList.add('max-w-3xl');
+        } else if (path === '/farm-lists') {
+            this.#appHeader.classList.remove('hidden');
+            this.#appFooter.classList.remove('hidden');
+            this.#resourceBar.classList.remove('hidden');
+            this.#villageContainer.classList.add('max-w-6xl');
         } else {
-            this.#villageContainer.classList.remove('max-w-3xl');
             this.#villageContainer.classList.add('max-w-md');
 
             if (path === '/map' ) {

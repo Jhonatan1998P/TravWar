@@ -249,6 +249,14 @@ class GameManager {
             case 'ai_log_content':
                 document.dispatchEvent(new CustomEvent('ai_log_ready_for_download', { detail: payload }));
                 break;
+
+            case 'farm_list:command_result':
+                document.dispatchEvent(new CustomEvent('farm_list:command_result', { detail: payload }));
+                break;
+
+            case 'farm_list:send_result':
+                document.dispatchEvent(new CustomEvent('farm_list:send_result', { detail: payload }));
+                break;
         }
     }
 

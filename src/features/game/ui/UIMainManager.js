@@ -1,6 +1,7 @@
 import gameManager from '@game/state/GameManager.js';
 import { router } from '@app/router.js';
 import uiRenderScheduler from './UIRenderScheduler.js';
+import ActivityModalUI from './ActivityModalUI.js';
 import {
     selectActiveVillageId,
     selectUnreadPlayerReports,
@@ -28,6 +29,7 @@ class UIMainManager {
     #unreadBadge;
     #downloadLogButton;
     #mainNav;
+    #activityModalUI;
 
     #isInitialized = false;
     #isDropdownOpen = false;
@@ -68,6 +70,7 @@ class UIMainManager {
         document.addEventListener('click', this.#handleGlobalClick.bind(this));
         
         this.#mainNav.addEventListener('click', this.#handleNavLinkClick.bind(this));
+        this.#activityModalUI = new ActivityModalUI();
 
         this.#isInitialized = true;
     }

@@ -1,5 +1,6 @@
 import gameManager from '@game/state/GameManager.js';
-import { gameData } from '../core/GameData.js';
+import { router } from '@app/router.js';
+import { FARM_LIST_LIMITS, gameData } from '../core/GameData.js';
 import { getScaledCrannyCapacity, getScaledMerchantCapacityPerUnit, scaleCapacityByGameSpeed } from '../core/capacityScaling.js';
 import GameConfig from '../state/GameConfig.js';
 import { formatNumber, formatTime } from '@shared/lib/formatters.js';
@@ -64,6 +65,12 @@ class BuildingInfoUI {
             const unitDiv = button.closest('div[data-unit-id]');
             const activeVillageId = this.#currentGameState?.activeVillageId;
             if (!activeVillageId) return;
+
+            if (action === 'farm-open-center') {
+                this.hide();
+                router.navigate('/farm-lists');
+                return;
+            }
     
             if (action === 'research' || action === 'upgrade_unit') {
                 button.disabled = true;
@@ -131,6 +138,9 @@ class BuildingInfoUI {
         this.#currentGameState = state;
         if (this.#panelElement.classList.contains('panel-visible')) {
             this._updateCosts();
+            if (this.#viewingType === 'rallyPoint') {
+                this._updateRallyPointFarmListPanel();
+            }
         }
     }
 
@@ -332,6 +342,10 @@ class BuildingInfoUI {
         mainPanel.querySelector('#build-content-container').addEventListener('click', e => {
             const button = e.target.closest('button[data-btype]:not([disabled])');
             if (button) {
+                const timeSinceOpen = Date.now() - this.#lastOpenedAt;
+                if (timeSinceOpen < 320) {
+                    return;
+                }
                 this.#viewingType = button.dataset.btype;
                 this._render();
             }
@@ -421,6 +435,8 @@ class BuildingInfoUI {
             this._renderAcademyResearch(contentContainer);
         } else if (isMilitaryBuilding) {
             this._renderTroopTraining(contentContainer);
+        } else if (this.#viewingType === 'rallyPoint') {
+            this._renderRallyPointFarmListPanel(contentContainer);
         }
     }
 
@@ -475,6 +491,10 @@ class BuildingInfoUI {
         return '';
     }
 
+    _formatCurrentBenefitText(label, value, unit = '') {
+        return `<li>${label}: <span class="font-mono text-green-400">${value}${unit}</span></li>`;
+    }
+
     _getBenefitsHTML(buildingData, currentLevel, nextLevelData, activeVillage) {
         if (!nextLevelData) return '';
     
@@ -525,8 +545,101 @@ class BuildingInfoUI {
                 benefitsList += this._getBenefitText({ [key]: true }, currentValue, nextValue, context);
             }
         }
-    
+
         return benefitsList ? `<div class="p-3 bg-glass-bg rounded-lg text-blue-200 text-sm mb-4 border border-primary-border"><ul>${benefitsList}</ul></div>` : '';
+    }
+
+    _getMaxLevelBenefitsHTML(buildingData, currentLevel, activeVillage) {
+        if (!buildingData || currentLevel <= 0) return '';
+
+        const currentLevelData = buildingData.levels[currentLevel - 1];
+        if (!currentLevelData) return '';
+
+        const activeRace = activeVillage?.race || '';
+        const gameSpeed = this.#gameConfig?.gameSpeed || 1;
+        let benefitsList = '';
+
+        if (currentLevelData.production) {
+            const resType = Object.keys(currentLevelData.production)[0];
+            const rawProduction = Number(currentLevelData.production[resType]) || 0;
+            const displayProduction = Math.round(rawProduction * gameSpeed);
+            benefitsList += this._formatCurrentBenefitText('Produccion', `${formatNumber(displayProduction)}/hr`);
+        }
+
+        const attributes = currentLevelData.attribute || {};
+        for (const key in attributes) {
+            const rawValue = attributes[key];
+
+            if (key === 'storageCapacity') {
+                benefitsList += this._formatCurrentBenefitText('Capacidad', formatNumber(scaleCapacityByGameSpeed(rawValue, gameSpeed)));
+                continue;
+            }
+
+            if (key === 'hidingCapacity') {
+                benefitsList += this._formatCurrentBenefitText('Escondite', formatNumber(getScaledCrannyCapacity(rawValue, activeRace, gameSpeed)));
+                continue;
+            }
+
+            if (key === 'productionBonusPercent') {
+                benefitsList += this._formatCurrentBenefitText('Bono de produccion', `${rawValue}%`);
+                continue;
+            }
+
+            if (key === 'trainingTimeFactor') {
+                const reduction = (1 - rawValue) * 100;
+                benefitsList += this._formatCurrentBenefitText('Reduccion tiempo de entr.', `${reduction.toFixed(1)}%`);
+                continue;
+            }
+
+            if (key === 'constructionTimeFactor') {
+                const reduction = (1 - rawValue) * 100;
+                benefitsList += this._formatCurrentBenefitText('Reduccion tiempo de const.', `${reduction.toFixed(1)}%`);
+                continue;
+            }
+
+            if (key === 'defenseBonusPercent') {
+                benefitsList += this._formatCurrentBenefitText('Bono de defensa', `${rawValue}%`);
+                continue;
+            }
+
+            if (key === 'merchantCapacity') {
+                const merchantUnit = gameData.units[activeRace]?.troops.find(unit => unit.type === 'merchant');
+                const perMerchantCapacity = getScaledMerchantCapacityPerUnit(
+                    activeRace,
+                    gameSpeed,
+                    merchantUnit?.stats?.capacity || 0,
+                );
+                const totalCapacity = Number(rawValue || 0) * perMerchantCapacity;
+
+                benefitsList += this._formatCurrentBenefitText('Mercaderes', Number(rawValue || 0));
+                benefitsList += this._formatCurrentBenefitText('Cap. por mercader', formatNumber(perMerchantCapacity));
+                benefitsList += this._formatCurrentBenefitText('Capacidad total', formatNumber(totalCapacity));
+                continue;
+            }
+
+            if (key === 'memberSlots') {
+                benefitsList += this._formatCurrentBenefitText('Miembros de alianza', Number(rawValue || 0));
+                continue;
+            }
+
+            if (key === 'speedBonusPercent') {
+                benefitsList += this._formatCurrentBenefitText('Bono de velocidad', `+${rawValue}%`);
+                continue;
+            }
+
+            if (key === 'oasisSlots') {
+                benefitsList += this._formatCurrentBenefitText('Oasis conquistables', Number(rawValue || 0));
+                continue;
+            }
+
+            benefitsList += this._formatCurrentBenefitText(key, String(rawValue));
+        }
+
+        if (!benefitsList) {
+            return '';
+        }
+
+        return `<div class="p-3 bg-glass-bg rounded-lg text-blue-200 text-sm mb-4 border border-primary-border"><h3 class="font-bold mb-2 text-gray-300">Bonificacion actual (nivel maximo)</h3><ul>${benefitsList}</ul></div>`;
     }
     
     _createCostsHTML() {
@@ -575,7 +688,8 @@ class BuildingInfoUI {
         if (!upgradeInfoContainer) return;
 
         if (!nextLevelData) {
-            upgradeInfoContainer.innerHTML = '<div class="text-center p-4 max-level-notice">Este edificio ha alcanzado su máximo nivel.</div>';
+            const maxBenefitsHTML = this._getMaxLevelBenefitsHTML(buildingStaticData, effectiveCurrentLevel, activeVillage);
+            upgradeInfoContainer.innerHTML = `${maxBenefitsHTML}<div class="text-center p-4 max-level-notice">Este edificio ha alcanzado su maximo nivel.</div>`;
             footer.classList.add('hidden');
             return;
         }
@@ -821,6 +935,52 @@ class BuildingInfoUI {
         const listContainer = container.querySelector('#unit-list-container');
         this._renderUnitToggleCheckbox(listContainer, this._updateTroopList.bind(this));
         this._updateTroopList();
+    }
+
+    _getActiveVillage() {
+        if (!this.#currentGameState?.activeVillageId) return null;
+        return this.#currentGameState.villages.find(village => village.id === this.#currentGameState.activeVillageId) || null;
+    }
+
+    _getOwnerFarmLists(ownerId) {
+        return this.#currentGameState?.farmListsByOwnerId?.[ownerId]?.lists || [];
+    }
+
+    _renderRallyPointFarmListPanel(container) {
+        const activeVillage = this._getActiveVillage();
+        if (!activeVillage) {
+            container.innerHTML = '<p class="text-sm text-red-400">No se pudo resolver la aldea activa.</p>';
+            return;
+        }
+
+        const ownerId = activeVillage.ownerId;
+        const ownerLists = this._getOwnerFarmLists(ownerId);
+        const totalEntries = ownerLists.reduce((total, list) => total + ((list?.entries || []).length), 0);
+        const missionLabel = FARM_LIST_LIMITS.defaultMissionType === 'raid' ? 'Asalto' : FARM_LIST_LIMITS.defaultMissionType;
+
+        container.innerHTML = `
+            <div class="border-t border-primary-border mt-4 pt-4 space-y-3">
+                <div class="flex items-center justify-between gap-2">
+                    <h3 class="font-bold text-gray-300">Lista de Vacas</h3>
+                    <span class="text-xs text-gray-400">${ownerLists.length}/${FARM_LIST_LIMITS.maxListsPerOwner} listas</span>
+                </div>
+                <p class="text-sm text-gray-300">La gestion completa de listas, objetivos y envios se hace desde el Centro de Listas de Vacas.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div class="rounded-lg border border-primary-border bg-glass-bg p-2 text-gray-300">Objetivos totales: <span class="text-white font-semibold">${totalEntries}/${FARM_LIST_LIMITS.maxListsPerOwner * FARM_LIST_LIMITS.maxEntriesPerList}</span></div>
+                    <div class="rounded-lg border border-primary-border bg-glass-bg p-2 text-gray-300">Cooldown: <span class="text-white font-semibold">${Math.floor(FARM_LIST_LIMITS.minDispatchCooldownMs / 1000)}s</span> por origen/objetivo</div>
+                    <div class="rounded-lg border border-primary-border bg-glass-bg p-2 text-gray-300">Mision por defecto: <span class="text-white font-semibold">${missionLabel}</span></div>
+                    <div class="rounded-lg border border-primary-border bg-glass-bg p-2 text-gray-300">Aldea actual: <span class="text-white font-semibold">${activeVillage.name}</span></div>
+                </div>
+                <button data-action="farm-open-center" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover text-white font-semibold py-2 px-3 rounded-md border border-primary-border">Abrir Centro de Listas de Vacas</button>
+            </div>
+        `;
+    }
+
+    _updateRallyPointFarmListPanel() {
+        if (this.#viewingType !== 'rallyPoint') return;
+        const contentContainer = this.#panelElement.querySelector('#building-details-content');
+        if (!contentContainer) return;
+        this._renderRallyPointFarmListPanel(contentContainer);
     }
     
     _updateTroopList() {

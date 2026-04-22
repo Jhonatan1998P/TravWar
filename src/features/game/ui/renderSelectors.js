@@ -108,6 +108,28 @@ function coordsSignature(coords) {
     return `${coords.x ?? 0}|${coords.y ?? 0}`;
 }
 
+function farmListsSignature(lists = []) {
+    return sortedByIdSignature(lists, 'id', list => {
+        const entriesSignature = sortedByIdSignature(list.entries || [], 'id', entry => {
+            return [
+                entry.id,
+                entry.targetType || '',
+                coordsSignature(entry.targetCoords),
+                objectSignature(entry.troops || {}),
+                objectSignature(entry.lastDispatchAtByOrigin || {}),
+            ].join(':');
+        });
+
+        return [
+            list.id,
+            list.name || '',
+            Number(list.createdAt) || 0,
+            Number(list.updatedAt) || 0,
+            entriesSignature,
+        ].join(':');
+    });
+}
+
 export function selectActiveVillageId(payload) {
     const state = getState(payload);
     return state?.activeVillageId || '';
@@ -283,6 +305,7 @@ export function selectBuildingInfoPanelSignature(payload) {
         completedResearchSignature(activeVillage.research?.completed || []),
         smithyQueueSignature(activeVillage.smithy?.queue || []),
         objectSignature(activeVillage.smithy?.upgrades || {}),
+        farmListsSignature(state.farmListsByOwnerId?.[activeVillage.ownerId]?.lists || []),
     ].join(':');
 }
 
@@ -350,4 +373,23 @@ export function selectTroopsSignature(payload) {
         .join(';');
 
     return `${activeVillage.id}:${activeVillage.race}:${ownTroopsSignature}:${reinforcementsSignature}`;
+}
+
+export function selectFarmListsViewSignature(payload) {
+    const state = getState(payload);
+    if (!state) {
+        return 'no-state';
+    }
+
+    const activeVillage = getActiveVillage(state);
+    const ownerId = activeVillage?.ownerId || getPerspectiveOwnerId(state);
+
+    return [
+        state.activeVillageId || '',
+        ownerId,
+        selectVillageListSignature(payload),
+        farmListsSignature(state.farmListsByOwnerId?.[ownerId]?.lists || []),
+        (state.mapData || []).length,
+        (state.movements || []).length,
+    ].join(':');
 }

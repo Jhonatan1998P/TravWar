@@ -2,9 +2,12 @@
 
 import { buildings, config, oasisTypes, units } from './data/index.js';
 export {
+    FARM_LIST_LIMITS,
     RESOURCE_FIELD_BUILDING_TYPES,
     RESOURCE_LABEL_TO_BUILDING_TYPE,
     STORAGE_BUILDING_BY_RESOURCE,
+    resolveDefaultFarmTroops,
+    resolveDefaultFarmUnitId,
     findFirstUnitByRole,
     findFirstUnitByType,
     findUnitById,

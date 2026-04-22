@@ -10,6 +10,14 @@ import {
     registerOasisAttack as registerOasisAttackStep,
 } from './worker/oasis.js';
 import {
+    handleFarmListAddEntryByCoordsCommand as handleFarmListAddEntryByCoordsCommandStep,
+    handleFarmListAddEntryFromTileCommand as handleFarmListAddEntryFromTileCommandStep,
+    handleFarmListCreateCommand as handleFarmListCreateCommandStep,
+    handleFarmListDeleteCommand as handleFarmListDeleteCommandStep,
+    handleFarmListRemoveEntryCommand as handleFarmListRemoveEntryCommandStep,
+    handleFarmListRenameCommand as handleFarmListRenameCommandStep,
+    handleFarmListSendEntriesCommand as handleFarmListSendEntriesCommandStep,
+    handleFarmListUpdateEntryTroopsCommand as handleFarmListUpdateEntryTroopsCommandStep,
     handleSendMerchantsCommand as handleSendMerchantsCommandStep,
     handleSendMovementCommand as handleSendMovementCommandStep,
 } from './worker/commands.js';
@@ -538,6 +546,97 @@ function handleSendMerchantsCommand(payload) {
     });
 }
 
+function handleFarmListCreateCommand(payload) {
+    return handleFarmListCreateCommandStep({
+        payload,
+        gameState,
+    });
+}
+
+function handleFarmListDeleteCommand(payload) {
+    return handleFarmListDeleteCommandStep({
+        payload,
+        gameState,
+    });
+}
+
+function handleFarmListRenameCommand(payload) {
+    return handleFarmListRenameCommandStep({
+        payload,
+        gameState,
+    });
+}
+
+function handleFarmListAddEntryFromTileCommand(payload) {
+    return handleFarmListAddEntryFromTileCommandStep({
+        payload,
+        gameState,
+        gameData,
+    });
+}
+
+function handleFarmListAddEntryByCoordsCommand(payload) {
+    return handleFarmListAddEntryByCoordsCommandStep({
+        payload,
+        gameState,
+        gameData,
+    });
+}
+
+function handleFarmListUpdateEntryTroopsCommand(payload) {
+    return handleFarmListUpdateEntryTroopsCommandStep({
+        payload,
+        gameState,
+        gameData,
+    });
+}
+
+function handleFarmListRemoveEntryCommand(payload) {
+    return handleFarmListRemoveEntryCommandStep({
+        payload,
+        gameState,
+    });
+}
+
+function handleFarmListSendEntriesCommand(payload) {
+    return handleFarmListSendEntriesCommandStep({
+        payload,
+        gameState,
+        dispatchMovement: handleSendMovementCommand,
+    });
+}
+
+function postFarmListCommandResult(command, request, result) {
+    self.postMessage({
+        type: 'farm_list:command_result',
+        payload: {
+            command,
+            request,
+            result: result || { success: false, reason: 'UNKNOWN_FARM_LIST_RESULT' },
+            at: Date.now(),
+        },
+    });
+}
+
+function postFarmListSendResult(request, result) {
+    self.postMessage({
+        type: 'farm_list:send_result',
+        payload: {
+            command: 'farm_list_send_entries',
+            request,
+            success: Boolean(result?.success),
+            listId: result?.listId || request?.listId || null,
+            originVillageId: result?.originVillageId || request?.originVillageId || null,
+            sentCount: Number(result?.sentCount) || 0,
+            failedCount: Number(result?.failedCount) || 0,
+            results: Array.isArray(result?.results) ? result.results : [],
+            reason: result?.reason || null,
+            details: result?.details || null,
+            at: Date.now(),
+        },
+    });
+}
+
 function handleAICommand(commandType, payload) {
     const villageId = payload.villageId || getActiveVillage()?.id;
     if (!villageId) return { success: false, reason: 'NO_VILLAGE_ID' };
@@ -718,6 +817,33 @@ self.onmessage = function(event) {
         case 'send_merchants':
             handleSendMerchantsCommand(payload);
             break;
+        case 'farm_list_create':
+            postFarmListCommandResult('farm_list_create', payload, handleFarmListCreateCommand(payload));
+            break;
+        case 'farm_list_delete':
+            postFarmListCommandResult('farm_list_delete', payload, handleFarmListDeleteCommand(payload));
+            break;
+        case 'farm_list_rename':
+            postFarmListCommandResult('farm_list_rename', payload, handleFarmListRenameCommand(payload));
+            break;
+        case 'farm_list_add_entry_from_tile':
+            postFarmListCommandResult('farm_list_add_entry_from_tile', payload, handleFarmListAddEntryFromTileCommand(payload));
+            break;
+        case 'farm_list_add_entry_by_coords':
+            postFarmListCommandResult('farm_list_add_entry_by_coords', payload, handleFarmListAddEntryByCoordsCommand(payload));
+            break;
+        case 'farm_list_update_entry_troops':
+            postFarmListCommandResult('farm_list_update_entry_troops', payload, handleFarmListUpdateEntryTroopsCommand(payload));
+            break;
+        case 'farm_list_remove_entry':
+            postFarmListCommandResult('farm_list_remove_entry', payload, handleFarmListRemoveEntryCommand(payload));
+            break;
+        case 'farm_list_send_entries': {
+            const sendResult = handleFarmListSendEntriesCommand(payload);
+            postFarmListCommandResult('farm_list_send_entries', payload, sendResult);
+            postFarmListSendResult(payload, sendResult);
+            break;
+        }
         case 'switch_village':
             if (payload && payload.villageId) gameState.activeVillageId = payload.villageId;
             break;

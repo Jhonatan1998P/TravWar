@@ -1,5 +1,6 @@
 import gameManager from '@game/state/GameManager.js';
-import { gameData } from '../core/GameData.js';
+import { router } from '@app/router.js';
+import { FARM_LIST_LIMITS, gameData } from '../core/GameData.js';
 import { formatNumber } from '@shared/lib/formatters.js';
 import attackPanelUI from './AttackPanelUI.js';
 import tradePanelUI from './TradePanelUI.js';
@@ -35,6 +36,7 @@ class TileInfoUI {
     #boundCloseClick;
     #boundFooterClick;
     #boundGameStateUpdate;
+    #boundFarmListCommandResult;
 
     constructor() {
         this.#mainContainer = document.getElementById('village-container');
@@ -57,10 +59,12 @@ class TileInfoUI {
         this.#boundGameStateUpdate = this._handleGameStateUpdate.bind(this);
         this.#boundCloseClick = this.hide.bind(this);
         this.#boundFooterClick = this._handleFooterClick.bind(this);
+        this.#boundFarmListCommandResult = this._handleFarmListCommandResult.bind(this);
 
         uiRenderScheduler.register(this.#schedulerKey, this.#boundGameStateUpdate, [selectTileInfoPanelSignature]);
         this.#panelElement.querySelector('[data-action="close"]').addEventListener('click', this.#boundCloseClick);
         this.#panelElement.querySelector('#panel-footer').addEventListener('click', this.#boundFooterClick);
+        document.addEventListener('farm_list:command_result', this.#boundFarmListCommandResult);
     }
 
     destroy() {
@@ -71,6 +75,8 @@ class TileInfoUI {
             this.#panelElement.querySelector('#panel-footer')?.removeEventListener('click', this.#boundFooterClick);
             this.#panelElement.remove();
         }
+
+        document.removeEventListener('farm_list:command_result', this.#boundFarmListCommandResult);
 
         this.#panelElement = null;
         this.#currentTile = null;
@@ -133,7 +139,222 @@ class TileInfoUI {
         } else if (action === 'send-merchants') {
             tradePanelUI.show(this.#currentTile, this.#gameState);
             this.hide();
+        } else if (action === 'add-to-farm-list') {
+            this._handleAddToFarmList();
+        } else if (action === 'open-farm-lists') {
+            this.hide();
+            router.navigate('/farm-lists');
         }
+    }
+
+    _handleAddToFarmList() {
+        const activeVillage = this.#gameState?.villages?.find(village => village.id === this.#gameState.activeVillageId);
+        if (!activeVillage) {
+            toastUI.show('No se encontró la aldea activa.', 'error');
+            return;
+        }
+
+        const targetTile = this.#gameState?.mapData?.find(tile => tile.x === this.#currentTile?.x && tile.y === this.#currentTile?.y);
+        if (!targetTile) {
+            toastUI.show('No se pudo resolver el objetivo seleccionado.', 'error');
+            return;
+        }
+
+        const perspectiveOwnerId = activeVillage.ownerId;
+        if (targetTile.type === 'village' && targetTile.ownerId === perspectiveOwnerId) {
+            toastUI.show('No puedes añadir tu propia aldea a una Lista de Vacas.', 'warning');
+            return;
+        }
+
+        if (targetTile.type !== 'village' && targetTile.type !== 'oasis') {
+            toastUI.show('Solo puedes añadir aldeas enemigas u oasis.', 'warning');
+            return;
+        }
+
+        const ownerLists = this.#gameState?.farmListsByOwnerId?.[perspectiveOwnerId]?.lists || [];
+        const listSelection = this._promptFarmListSelection(ownerLists);
+        if (!listSelection) {
+            return;
+        }
+
+        let targetList = ownerLists.find(list => list.id === listSelection.listId) || null;
+        let targetListId = listSelection.listId;
+        let targetListName = targetList?.name || '';
+
+        if (listSelection.createNew) {
+            if (ownerLists.length >= FARM_LIST_LIMITS.maxListsPerOwner) {
+                toastUI.show(`Ya alcanzaste el máximo de ${FARM_LIST_LIMITS.maxListsPerOwner} listas.`, 'error');
+                return;
+            }
+
+            const createdListName = this._promptFarmListName(ownerLists.length + 1);
+            if (createdListName === null) {
+                return;
+            }
+
+            targetListId = `farm_list_ui_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+            targetListName = createdListName;
+            targetList = { id: targetListId, name: createdListName, entries: [] };
+
+            gameManager.sendCommand('farm_list_create', {
+                ownerId: perspectiveOwnerId,
+                listId: targetListId,
+                name: createdListName,
+                meta: {
+                    source: 'tile-info',
+                    listName: createdListName,
+                },
+            });
+        }
+
+        const targetCoords = { x: this.#currentTile.x, y: this.#currentTile.y };
+        if (this._listHasTarget(targetList, targetCoords)) {
+            toastUI.show(`El objetivo ya está registrado en "${targetListName || 'esta lista'}".`, 'warning');
+            return;
+        }
+
+        gameManager.sendCommand('farm_list_add_entry_from_tile', {
+            ownerId: perspectiveOwnerId,
+            listId: targetListId,
+            targetCoords,
+            meta: {
+                source: 'tile-info',
+                listName: targetListName || targetList?.name || 'Lista de Vacas',
+            },
+        });
+    }
+
+    _getFarmListTargetMatches(ownerId, targetCoords) {
+        if (!ownerId || !targetCoords) return [];
+        const ownerLists = this.#gameState?.farmListsByOwnerId?.[ownerId]?.lists || [];
+        const matches = [];
+
+        ownerLists.forEach(list => {
+            (list.entries || []).forEach(entry => {
+                if (entry?.targetCoords?.x === targetCoords.x && entry?.targetCoords?.y === targetCoords.y) {
+                    matches.push({
+                        listId: list.id,
+                        listName: list.name,
+                        entryId: entry.id,
+                        entry,
+                    });
+                }
+            });
+        });
+
+        return matches;
+    }
+
+    _handleFarmListCommandResult(event) {
+        const detail = event?.detail;
+        const command = detail?.command;
+        const request = detail?.request || {};
+        const result = detail?.result || {};
+        const source = request?.meta?.source;
+
+        if (source !== 'tile-info') {
+            return;
+        }
+
+        if (!result.success) {
+            const message = this._resolveFarmListReasonMessage(result.reason, result.details);
+            toastUI.show(message, 'error');
+            return;
+        }
+
+        if (command === 'farm_list_add_entry_from_tile') {
+            const listName = request?.meta?.listName || 'Lista de Vacas';
+            toastUI.show(`Objetivo añadido a "${listName}".`, 'success');
+        }
+    }
+
+    _resolveFarmListReasonMessage(reason, details = null) {
+        if (reason === 'FARM_LIST_MAX_LISTS_REACHED') {
+            return `Ya alcanzaste el máximo de ${details?.maxListsPerOwner || FARM_LIST_LIMITS.maxListsPerOwner} listas.`;
+        }
+        if (reason === 'FARM_LIST_MAX_ENTRIES_REACHED') {
+            return `La lista alcanzó el máximo de ${details?.maxEntriesPerList || FARM_LIST_LIMITS.maxEntriesPerList} objetivos.`;
+        }
+        if (reason === 'FARM_LIST_DUPLICATE_TARGET') {
+            return 'Ese objetivo ya existe en la lista seleccionada.';
+        }
+        if (reason === 'OWN_VILLAGE_NOT_ALLOWED') {
+            return 'No puedes añadir tu propia aldea a una Lista de Vacas.';
+        }
+        if (reason === 'TARGET_COORDS_OUT_OF_MAP') {
+            return 'Las coordenadas del objetivo están fuera del mapa.';
+        }
+        if (reason === 'TARGET_TILE_NOT_ELIGIBLE') {
+            return 'Solo puedes añadir aldeas enemigas u oasis.';
+        }
+        if (reason === 'INVALID_TARGET_COORDS') {
+            return 'Las coordenadas objetivo no son válidas.';
+        }
+        if (reason === 'FARM_LIST_NOT_FOUND') {
+            return 'No se encontró la lista seleccionada.';
+        }
+        if (reason === 'OWNER_NOT_FOUND') {
+            return 'No se encontró el propietario de la lista.';
+        }
+        if (reason === 'INVALID_FARM_LIST_TROOPS') {
+            return 'Debes seleccionar tropas válidas para guardar este objetivo.';
+        }
+        return `No se pudo completar la acción (${reason || 'ERROR_DESCONOCIDO'}).`;
+    }
+
+    _promptFarmListSelection(lists) {
+        if (!Array.isArray(lists) || lists.length === 0) {
+            return { createNew: true, listId: null };
+        }
+
+        const options = lists
+            .map((list, index) => `${index + 1}. ${list.name} (${list.entries.length}/${FARM_LIST_LIMITS.maxEntriesPerList})`)
+            .join('\n');
+        const selectionRaw = window.prompt(
+            `Selecciona una Lista de Vacas:\n${options}\n0. Crear nueva lista`,
+            '1',
+        );
+
+        if (selectionRaw === null) {
+            return null;
+        }
+
+        const selectedIndex = Number.parseInt(selectionRaw, 10);
+        if (!Number.isInteger(selectedIndex)) {
+            toastUI.show('Selección inválida de lista.', 'warning');
+            return null;
+        }
+
+        if (selectedIndex === 0) {
+            return { createNew: true, listId: null };
+        }
+
+        if (selectedIndex < 1 || selectedIndex > lists.length) {
+            toastUI.show('La lista seleccionada no existe.', 'warning');
+            return null;
+        }
+
+        return {
+            createNew: false,
+            listId: lists[selectedIndex - 1].id,
+        };
+    }
+
+    _promptFarmListName(listNumber) {
+        const defaultName = `Lista ${listNumber}`;
+        const enteredValue = window.prompt('Nombre de la nueva Lista de Vacas:', defaultName);
+        if (enteredValue === null) {
+            return null;
+        }
+        const trimmedValue = enteredValue.trim();
+        return trimmedValue || defaultName;
+    }
+
+    _listHasTarget(list, targetCoords) {
+        if (!list || !Array.isArray(list.entries)) {
+            return false;
+        }
+        return list.entries.some(entry => entry?.targetCoords?.x === targetCoords.x && entry?.targetCoords?.y === targetCoords.y);
     }
     
     _handleGameStateUpdate(gameStatePayload) {
@@ -263,7 +484,12 @@ class TileInfoUI {
         const activeVillage = this.#gameState.villages.find(v => v.id === this.#gameState.activeVillageId);
         const canSendTroops = activeVillage && Object.values(activeVillage.unitsInVillage).some(count => count > 0);
         const disabledAttr = canSendTroops ? '' : 'disabled';
-        const footer = `<button data-action="send-troops" class="w-full col-span-2 bg-yellow-600 hover:bg-yellow-500 text-black font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed" ${disabledAttr}>Enviar Movimiento</button>`;
+        const farmMatches = this._getFarmListTargetMatches(activeVillage?.ownerId, { x: data.x, y: data.y });
+        const isAlreadyInFarmList = farmMatches.length > 0;
+        const farmButtonAction = isAlreadyInFarmList ? 'open-farm-lists' : 'add-to-farm-list';
+        const farmButtonLabel = isAlreadyInFarmList ? 'Gestionar listas' : 'Añadir a Lista de Vacas';
+        const footer = `<button data-action="send-troops" class="w-full bg-yellow-600 hover:bg-yellow-500 text-black font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed" ${disabledAttr}>Enviar Movimiento</button>
+                        <button data-action="${farmButtonAction}" class="w-full bg-amber-600 hover:bg-amber-500 text-black font-bold py-2 px-4 rounded-lg transition duration-300">${farmButtonLabel}</button>`;
 
         return { main, footer };
     }
@@ -304,9 +530,17 @@ class TileInfoUI {
         const attackIsDisabled = !canSendTroops || (isProtected && data.ownerId !== perspectiveOwnerId);
         const sendTroopsDisabledAttr = attackIsDisabled ? 'disabled' : '';
         const sendMerchantsDisabled = canSendMerchants ? '' : 'disabled';
+        const farmMatches = this._getFarmListTargetMatches(perspectiveOwnerId, { x: data.x, y: data.y });
+        const isAlreadyInFarmList = farmMatches.length > 0;
+        const farmButtonAction = isAlreadyInFarmList ? 'open-farm-lists' : 'add-to-farm-list';
+        const farmButtonLabel = isAlreadyInFarmList ? 'Gestionar listas' : 'Añadir a Lista de Vacas';
         
         footer = `<button data-action="send-troops" class="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed" ${sendTroopsDisabledAttr}>Enviar Movimiento</button>
                   <button data-action="send-merchants" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed" ${sendMerchantsDisabled}>Enviar Recursos</button>`;
+
+        if (data.ownerId !== perspectiveOwnerId) {
+            footer += `<button data-action="${farmButtonAction}" class="w-full col-span-2 bg-amber-600 hover:bg-amber-500 text-black font-bold py-2 px-4 rounded-lg transition duration-300">${farmButtonLabel}</button>`;
+        }
         
         if (attackIsDisabled && isProtected && data.ownerId !== perspectiveOwnerId) {
              footer += `<p class="col-span-2 text-center text-xs text-sky-400 mt-2">Este jugador está bajo protección de principiante.</p>`;
