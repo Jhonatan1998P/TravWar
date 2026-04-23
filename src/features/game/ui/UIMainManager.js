@@ -36,6 +36,8 @@ class UIMainManager {
     #clickTimeout = null;
     #isRenaming = false;
 
+    #boundFullscreenChange;
+
     constructor() {
         if (UIMainManager.instance) {
             return UIMainManager.instance;
@@ -66,13 +68,75 @@ class UIMainManager {
         document.addEventListener('ai_log_ready_for_download', this.#handleLogReadyForDownload.bind(this));
         
         this.#villageSelector.addEventListener('click', this.#toggleDropdown.bind(this));
-        this.#downloadLogButton.addEventListener('click', this.#handleDownloadLogClick.bind(this));
+        this.#downloadLogButton.addEventListener('click', this.#handleFullscreenToggleClick.bind(this));
         document.addEventListener('click', this.#handleGlobalClick.bind(this));
+        this.#boundFullscreenChange = this.#updateFullscreenButtonState.bind(this);
+        document.addEventListener('fullscreenchange', this.#boundFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', this.#boundFullscreenChange);
         
         this.#mainNav.addEventListener('click', this.#handleNavLinkClick.bind(this));
         this.#activityModalUI = new ActivityModalUI();
+        this.#updateFullscreenButtonState();
 
         this.#isInitialized = true;
+    }
+
+    #isFullscreenActive() {
+        return Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+
+    #requestFullscreen() {
+        const root = document.documentElement;
+        if (root.requestFullscreen) {
+            return root.requestFullscreen();
+        }
+        if (root.webkitRequestFullscreen) {
+            return root.webkitRequestFullscreen();
+        }
+        return null;
+    }
+
+    #exitFullscreen() {
+        if (document.exitFullscreen) {
+            return document.exitFullscreen();
+        }
+        if (document.webkitExitFullscreen) {
+            return document.webkitExitFullscreen();
+        }
+        return null;
+    }
+
+    #updateFullscreenButtonState() {
+        if (!this.#downloadLogButton) return;
+
+        const isFullscreen = this.#isFullscreenActive();
+        this.#downloadLogButton.classList.toggle('active', isFullscreen);
+        this.#downloadLogButton.setAttribute('aria-label', isFullscreen ? 'Salir de pantalla completa' : 'Entrar en pantalla completa');
+        this.#downloadLogButton.title = isFullscreen ? 'Salir de pantalla completa' : 'Entrar en pantalla completa';
+
+        if (isFullscreen) {
+            this.#downloadLogButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3H5a2 2 0 00-2 2v4m16 0V5a2 2 0 00-2-2h-4m0 18h4a2 2 0 002-2v-4M5 15v4a2 2 0 002 2h4" /></svg>`;
+            return;
+        }
+
+        this.#downloadLogButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 9V5a2 2 0 012-2h4m6 0h4a2 2 0 012 2v4m0 6v4a2 2 0 01-2 2h-4m-6 0H5a2 2 0 01-2-2v-4" /></svg>`;
+    }
+
+    async #handleFullscreenToggleClick() {
+        try {
+            if (this.#isFullscreenActive()) {
+                await this.#exitFullscreen();
+            } else {
+                const requestResult = this.#requestFullscreen();
+                if (requestResult && typeof requestResult.then === 'function') {
+                    await requestResult;
+                }
+            }
+        } catch (error) {
+            console.warn('[UIMainManager] No se pudo alternar pantalla completa.', error);
+        }
+
+        this.#updateFullscreenButtonState();
     }
 
     #handleNavLinkClick(event) {
@@ -222,11 +286,6 @@ class UIMainManager {
         }
     }
     
-    #handleDownloadLogClick() {
-        const firstAiId = 'ai_0';
-        gameManager.sendCommand('download_ai_log', { aiId: firstAiId });
-    }
-
     #handleLogReadyForDownload(event) {
         const { logContent, aiId } = event.detail;
         this.#downloadTextFile(logContent, `ia_decision_log_${aiId}.txt`);

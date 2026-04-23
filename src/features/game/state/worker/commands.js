@@ -678,10 +678,24 @@ export function handleFarmListSendEntriesCommand({ payload, gameState, dispatchM
             .map(entryId => entryId.trim())
             .filter(Boolean))];
 
-        entriesToDispatch = uniqueEntryIds.map(entryId => ({
-            entryId,
-            entry: list.entries.find(candidate => candidate.id === entryId) || null,
-        }));
+        const requestedEntryIdSet = new Set(uniqueEntryIds);
+        const existingEntryById = new Map((list.entries || []).map(entry => [entry.id, entry]));
+
+        entriesToDispatch = (list.entries || [])
+            .filter(entry => requestedEntryIdSet.has(entry.id))
+            .map(entry => ({
+                entryId: entry.id,
+                entry,
+            }));
+
+        uniqueEntryIds.forEach(entryId => {
+            if (!existingEntryById.has(entryId)) {
+                entriesToDispatch.push({
+                    entryId,
+                    entry: null,
+                });
+            }
+        });
     } else {
         return {
             success: false,

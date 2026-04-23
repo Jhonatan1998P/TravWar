@@ -34,13 +34,13 @@ class TradePanelUI {
 
     _createPanelHTML() {
         const panelHTML = `
-            <div id="trade-panel" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 transition-all duration-200 ease-out panel-hidden">
-                <div class="bg-gray-800 border-2 border-gray-700/50 rounded-lg shadow-xl w-full max-w-lg m-4 text-white flex flex-col">
+            <div id="trade-panel" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
+                <div class="bg-gray-800 border-2 border-gray-700/50 rounded-lg shadow-xl w-full max-w-lg my-2 sm:my-4 text-white flex flex-col max-h-[calc(100dvh-1rem)]">
                     <header class="flex justify-between items-center p-4 border-b border-gray-700">
                         <h2 id="trade-panel-title" class="text-xl font-bold text-yellow-300">Enviar Recursos</h2>
                         <button data-action="close" class="text-gray-400 text-3xl leading-none hover:text-white">×</button>
                     </header>
-                    <main id="trade-panel-main" class="p-4 overflow-y-auto" style="max-height: 70vh;">
+                    <main id="trade-panel-main" class="p-4 overflow-y-auto min-h-0 max-h-[calc(100dvh-12rem)]">
                         <div id="trade-panel-info" class="grid grid-cols-2 gap-4 mb-4 text-sm"></div>
                         <div id="trade-panel-merchants" class="p-3 bg-gray-900/50 rounded-lg flex justify-between items-center mb-4"></div>
                         <div id="trade-panel-inputs" class="space-y-2"></div>

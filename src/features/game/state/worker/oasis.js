@@ -60,6 +60,15 @@ function canRegenerateBeasts(tile) {
     return tile?.type === 'oasis' && Boolean(tile.state?.beasts) && tile.state.isClearedOnce === true;
 }
 
+function getCurrentOasisBeastCount(beasts) {
+    if (!beasts || typeof beasts !== 'object') return 0;
+    return Object.values(beasts).reduce((sum, amount) => {
+        const parsed = Math.floor(Number(amount));
+        if (!Number.isFinite(parsed) || parsed <= 0) return sum;
+        return sum + parsed;
+    }, 0);
+}
+
 export function registerOasisAttack({ tile, currentTime, gameData }) {
     if (!tile || tile.type !== 'oasis' || !tile.state) return;
 
@@ -104,7 +113,15 @@ export function processOasisRegeneration({ gameState, currentTime, gameData, gam
             const oasisTypeData = gameData.oasisTypes[tile.oasisType];
             if (!oasisTypeData) return;
 
+            const maxBeasts = Math.max(0, Math.floor(Number(tile.state.maxBeasts) || 0));
+            if (maxBeasts <= 0) return;
+
             for (let spawnIndex = 0; spawnIndex < spawnsToProcess; spawnIndex++) {
+                const currentTotalBeasts = getCurrentOasisBeastCount(tile.state.beasts);
+                if (currentTotalBeasts >= maxBeasts) {
+                    break;
+                }
+
                 const beastToSpawn = getWeightedRandomBeast(oasisTypeData.beastSpawnTable, randomFunc);
                 if (!beastToSpawn) continue;
 

@@ -85,13 +85,13 @@ class TileInfoUI {
 
     _createPanelHTML() {
         const panelHTML = `
-            <div id="tile-info-panel" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 transition-all duration-200 ease-out panel-hidden">
-                <div class="bg-gray-800 border-2 border-gray-700/50 rounded-lg shadow-xl w-full max-w-md m-4 text-white flex flex-col">
+            <div id="tile-info-panel" class="fixed inset-0 h-[100dvh] bg-black/60 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
+                <div class="bg-gray-800 border-2 border-gray-700/50 rounded-lg shadow-xl w-full max-w-md my-2 sm:my-4 text-white flex flex-col max-h-[calc(100dvh-1rem)]">
                     <header id="panel-header" class="flex justify-between items-center p-4 border-b border-gray-700">
                         <h2 id="panel-title" class="text-xl font-bold text-yellow-300"></h2>
                         <button data-action="close" class="text-gray-400 text-3xl leading-none hover:text-white">×</button>
                     </header>
-                    <main id="panel-main" class="p-4 overflow-y-auto" style="max-height: 70vh;"></main>
+                    <main id="panel-main" class="p-4 overflow-y-auto min-h-0 max-h-[calc(100dvh-12rem)]"></main>
                     <footer id="panel-footer" class="p-4 border-t border-gray-700 grid grid-cols-2 gap-2"></footer>
                 </div>
             </div>`;

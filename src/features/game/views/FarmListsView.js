@@ -24,6 +24,10 @@ class FarmListsView {
     #gameState = null;
     #selectedListId = null;
     #selectedOriginVillageId = null;
+    #entryEditorContext = null;
+    #selectedEntryIds = new Set();
+    #entryDispatchIndicators = new Map();
+    #entryDispatchIndicatorTimeouts = new Map();
     #didReportFirstMeaningfulPaint = false;
 
     #boundClick;
@@ -77,6 +81,11 @@ class FarmListsView {
         this.#gameState = null;
         this.#selectedListId = null;
         this.#selectedOriginVillageId = null;
+        this.#entryEditorContext = null;
+        this.#selectedEntryIds.clear();
+        this.#entryDispatchIndicators.clear();
+        this.#entryDispatchIndicatorTimeouts.forEach(timeoutId => window.clearTimeout(timeoutId));
+        this.#entryDispatchIndicatorTimeouts.clear();
         this.#didReportFirstMeaningfulPaint = false;
     }
 
@@ -112,6 +121,7 @@ class FarmListsView {
         const ownerId = getPerspectiveOwnerId(this.#gameState);
         const ownerVillages = this._getOwnerVillages(ownerId);
         const ownerLists = this._getOwnerFarmLists(ownerId);
+        const previousSelectedListId = this.#selectedListId;
 
         const preferredOriginVillageId = this.#gameState?.activeVillageId;
         if (!ownerVillages.some(village => village.id === this.#selectedOriginVillageId)) {
@@ -125,6 +135,19 @@ class FarmListsView {
         if (!ownerLists.some(list => list.id === this.#selectedListId)) {
             this.#selectedListId = ownerLists[0]?.id || null;
         }
+
+        if (this.#selectedListId !== previousSelectedListId) {
+            this.#selectedEntryIds.clear();
+            this.#entryEditorContext = null;
+        }
+
+        const selectedList = ownerLists.find(list => list.id === this.#selectedListId) || null;
+        const validEntryIds = new Set((selectedList?.entries || []).map(entry => entry.id));
+        [...this.#selectedEntryIds].forEach(entryId => {
+            if (!validEntryIds.has(entryId)) {
+                this.#selectedEntryIds.delete(entryId);
+            }
+        });
     }
 
     _getSelectedList(ownerId) {
@@ -155,20 +178,6 @@ class FarmListsView {
         return `${tile.type} (${coords.x}|${coords.y})`;
     }
 
-    _resolveEntryCooldownLabel(entry, originVillageId) {
-        const lastDispatch = Number(entry?.lastDispatchAtByOrigin?.[originVillageId]) || 0;
-        if (!lastDispatch) return '';
-
-        const elapsed = Date.now() - lastDispatch;
-        if (elapsed >= FARM_LIST_LIMITS.minDispatchCooldownMs) {
-            return 'Listo';
-        }
-
-        const remainingMs = FARM_LIST_LIMITS.minDispatchCooldownMs - elapsed;
-        const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
-        return `Cooldown ${remainingSeconds}s`;
-    }
-
     _normalizeDefaultTroops(ownerRace) {
         const defaults = resolveDefaultFarmTroops(ownerRace);
         if (defaults && Object.keys(defaults).length > 0) {
@@ -177,6 +186,188 @@ class FarmListsView {
 
         const firstUnit = (gameData.units?.[ownerRace]?.troops || []).find(unit => unit.type !== 'merchant');
         return firstUnit ? { [firstUnit.id]: FARM_LIST_LIMITS.defaultUnitCount } : {};
+    }
+
+    _normalizeEditorTroops(rawTroops, ownerRace, options = {}) {
+        const { allowDefaultFallback = true } = options;
+        const troopCatalog = (gameData.units?.[ownerRace]?.troops || []).filter(unit => unit.type !== 'merchant');
+        const allowedUnitIds = new Set(troopCatalog.map(unit => unit.id));
+        const normalized = {};
+
+        if (rawTroops && typeof rawTroops === 'object') {
+            Object.entries(rawTroops).forEach(([unitId, amount]) => {
+                const parsedAmount = Math.floor(Number(amount));
+                if (!allowedUnitIds.has(unitId) || !Number.isFinite(parsedAmount) || parsedAmount <= 0) return;
+                normalized[unitId] = parsedAmount;
+            });
+        }
+
+        if (Object.keys(normalized).length > 0) {
+            return normalized;
+        }
+
+        if (!allowDefaultFallback) {
+            return {};
+        }
+
+        return this._normalizeDefaultTroops(ownerRace);
+    }
+
+    _getAutoSplitTroopAmount(ownerId, listId, unitId) {
+        const ownerLists = this._getOwnerFarmLists(ownerId);
+        const list = ownerLists.find(candidate => candidate.id === listId) || null;
+        const totalEntries = Math.max(1, Number(list?.entries?.length) || 1);
+
+        const ownerVillages = this._getOwnerVillages(ownerId);
+        const originVillage = ownerVillages.find(village => village.id === this.#selectedOriginVillageId)
+            || ownerVillages[0]
+            || null;
+
+        const totalAvailableUnits = Math.floor(Number(originVillage?.unitsInVillage?.[unitId]) || 0);
+        const fallbackAmount = Math.max(1, Math.floor(Number(FARM_LIST_LIMITS.defaultUnitCount) || 1));
+
+        if (!Number.isFinite(totalAvailableUnits) || totalAvailableUnits <= 0) {
+            return fallbackAmount;
+        }
+
+        const splitAmount = Math.floor(totalAvailableUnits / totalEntries);
+        return Math.max(1, splitAmount);
+    }
+
+    _setEntryDispatchIndicator(entryId, status, message = '') {
+        if (!entryId) return;
+
+        this.#entryDispatchIndicators.set(entryId, { status, message });
+
+        const previousTimeout = this.#entryDispatchIndicatorTimeouts.get(entryId);
+        if (previousTimeout) {
+            window.clearTimeout(previousTimeout);
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            this.#entryDispatchIndicators.delete(entryId);
+            this.#entryDispatchIndicatorTimeouts.delete(entryId);
+            this._render();
+        }, 6000);
+
+        this.#entryDispatchIndicatorTimeouts.set(entryId, timeoutId);
+    }
+
+    _clearEntryDispatchIndicator(entryId) {
+        if (!entryId) return;
+        this.#entryDispatchIndicators.delete(entryId);
+        const timeoutId = this.#entryDispatchIndicatorTimeouts.get(entryId);
+        if (timeoutId) {
+            window.clearTimeout(timeoutId);
+            this.#entryDispatchIndicatorTimeouts.delete(entryId);
+        }
+    }
+
+    _getSelectedEntryIdsInListOrder(entries) {
+        if (!Array.isArray(entries) || entries.length === 0) {
+            return [];
+        }
+        return entries
+            .filter(entry => this.#selectedEntryIds.has(entry.id))
+            .map(entry => entry.id);
+    }
+
+    _resolveEditorEntry(ownerId) {
+        const context = this.#entryEditorContext;
+        if (!context) return null;
+
+        const ownerLists = this._getOwnerFarmLists(ownerId);
+        const list = ownerLists.find(candidate => candidate.id === context.listId) || null;
+        if (!list) return null;
+
+        const entry = (list.entries || []).find(candidate => candidate.id === context.entryId) || null;
+        if (!entry) return null;
+
+        return { list, entry };
+    }
+
+    _buildEntryEditorModalHtml(ownerId, ownerRace, troopCatalog) {
+        const context = this.#entryEditorContext;
+        if (!context) {
+            return '<div id="farm-view-editor-panel" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-[70] panel-hidden"></div>';
+        }
+
+        const resolved = this._resolveEditorEntry(ownerId);
+        if (!resolved) {
+            this.#entryEditorContext = null;
+            return '<div id="farm-view-editor-panel" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-[70] panel-hidden"></div>';
+        }
+
+        const { list, entry } = resolved;
+        const troops = this._normalizeEditorTroops(context.draftTroops, ownerRace);
+        context.draftTroops = troops;
+
+        const rows = troopCatalog.map(unit => {
+            const unitCount = Number(troops?.[unit.id]) || 0;
+            const checked = unitCount > 0;
+            const inputValue = checked ? unitCount : '';
+            const disabledAttr = checked ? '' : 'disabled';
+
+            return `
+                <div class="grid grid-cols-[auto_1fr_auto] items-center gap-3 p-3 bg-gray-900/40 rounded-lg border border-gray-700" data-farm-view-unit-row="${unit.id}">
+                    <input type="checkbox" data-farm-view-unit-toggle="${unit.id}" ${checked ? 'checked' : ''} class="h-4 w-4 rounded border-gray-500 bg-gray-700 text-amber-500 focus:ring-amber-500" ${context.isSaving ? 'disabled' : ''}>
+                    <label class="flex items-center gap-3 min-w-0" for="farm-view-unit-${unit.id}">
+                        ${unitSpriteManager.getUnitSprite(unit.id, ownerRace)}
+                        <span class="font-semibold text-gray-100 truncate">${unit.name}</span>
+                    </label>
+                    <input id="farm-view-unit-${unit.id}" type="number" min="1" step="1" value="${inputValue}" data-farm-view-unit-count="${unit.id}" ${disabledAttr} class="w-24 bg-gray-800 border border-gray-600 text-white rounded-md p-2 text-center font-mono focus:ring-2 focus:ring-amber-500 focus:border-amber-500 disabled:opacity-40 disabled:cursor-not-allowed" ${context.isSaving ? 'disabled' : ''}>
+                </div>
+            `;
+        }).join('');
+
+        return `
+            <div id="farm-view-editor-panel" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-[70]">
+                <div class="bg-gray-800 border-2 border-gray-700/50 rounded-lg shadow-xl w-full max-w-2xl my-2 sm:my-4 text-white flex flex-col max-h-[calc(100dvh-1rem)]">
+                    <header class="flex justify-between items-center p-4 border-b border-gray-700">
+                        <h2 class="text-xl font-bold text-amber-300">Editar Lista de Vacas</h2>
+                        <button data-action="farm-view-close-editor" class="text-gray-400 text-3xl leading-none hover:text-white">x</button>
+                    </header>
+                    <main class="p-4 overflow-y-auto min-h-0 max-h-[calc(100dvh-12rem)]">
+                        <div class="space-y-4">
+                            <div class="rounded-lg border border-gray-700 bg-gray-900/30 p-3">
+                                <p class="text-sm text-gray-300">Objetivo: <span class="font-semibold text-amber-300">${this._resolveTargetLabel(entry)}</span></p>
+                                <p class="text-xs text-gray-400 mt-1">Lista: <span class="font-semibold text-gray-200">${list.name}</span></p>
+                            </div>
+                            <div class="space-y-2">
+                                ${rows || '<p class="text-sm text-red-400">No hay unidades disponibles para editar.</p>'}
+                            </div>
+                        </div>
+                    </main>
+                    <footer class="p-4 border-t border-gray-700 flex flex-col sm:flex-row gap-2 sm:justify-between">
+                        <button data-action="farm-view-delete-editor" class="bg-red-700 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-lg border border-red-600" ${context.isSaving ? 'disabled' : ''}>Eliminar objetivo</button>
+                        <div class="flex flex-col sm:flex-row gap-2 sm:justify-end">
+                        <button data-action="farm-view-reset-editor" class="bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-4 rounded-lg border border-gray-600" ${context.isSaving ? 'disabled' : ''}>Resetear</button>
+                        <button data-action="farm-view-close-editor" class="bg-gray-600 hover:bg-gray-500 text-white font-semibold py-2 px-4 rounded-lg border border-gray-500" ${context.isSaving ? 'disabled' : ''}>Cancelar</button>
+                        <button data-action="farm-view-save-editor" class="bg-amber-600 hover:bg-amber-500 text-black font-bold py-2 px-4 rounded-lg border border-amber-500" ${context.isSaving ? 'disabled' : ''}>Guardar</button>
+                        </div>
+                    </footer>
+                </div>
+            </div>
+        `;
+    }
+
+    _collectEditorTroopsFromDom(ownerRace) {
+        if (!this.#rootElement) return {};
+
+        const rawTroops = {};
+        const toggles = this.#rootElement.querySelectorAll('input[data-farm-view-unit-toggle]');
+        toggles.forEach(toggle => {
+            if (!toggle.checked) return;
+            const unitId = toggle.dataset.farmViewUnitToggle;
+            if (!unitId) return;
+
+            const input = this.#rootElement.querySelector(`input[data-farm-view-unit-count="${unitId}"]`);
+            const parsedCount = Math.floor(Number(input?.value));
+            if (!Number.isFinite(parsedCount) || parsedCount <= 0) return;
+            rawTroops[unitId] = parsedCount;
+        });
+
+        return this._normalizeEditorTroops(rawTroops, ownerRace, { allowDefaultFallback: false });
     }
 
     _render() {
@@ -203,48 +394,88 @@ class FarmListsView {
         }).join('');
 
         const entries = selectedList?.entries || [];
+        const selectedEntryIdsInOrder = this._getSelectedEntryIdsInListOrder(entries);
+        const entriesById = new Map(entries.map(entry => [entry.id, entry]));
+        const selectedEntries = selectedEntryIdsInOrder
+            .map(entryId => entriesById.get(entryId))
+            .filter(Boolean);
+
+        const requiredTroops = {};
+        selectedEntries.forEach(entry => {
+            const troops = this._normalizeEditorTroops(entry?.troops, ownerRace);
+            Object.entries(troops).forEach(([unitId, amount]) => {
+                requiredTroops[unitId] = (requiredTroops[unitId] || 0) + (Number(amount) || 0);
+            });
+        });
+
+        const availableTroops = selectedOriginVillage?.unitsInVillage || {};
+        const requiredUnitIds = Object.keys(requiredTroops);
+        const hasTroopShortage = requiredUnitIds.some(unitId => (requiredTroops[unitId] || 0) > (Number(availableTroops[unitId]) || 0));
+        const requiredRows = requiredUnitIds.map(unitId => {
+            const unitData = troopCatalog.find(unit => unit.id === unitId) || null;
+            const requiredAmount = Number(requiredTroops[unitId]) || 0;
+            const availableAmount = Number(availableTroops[unitId]) || 0;
+            const enough = availableAmount >= requiredAmount;
+            const shortageAmount = Math.max(0, requiredAmount - availableAmount);
+            return `
+                <div class="rounded-lg border ${enough ? 'border-emerald-600/50 bg-emerald-950/20' : 'border-red-600/50 bg-red-950/20'} p-2.5">
+                    <div class="flex items-center justify-between gap-2">
+                        <div class="flex items-center gap-2 min-w-0">
+                            ${unitData ? unitSpriteManager.getUnitSprite(unitData.id, ownerRace) : ''}
+                            <span class="text-xs text-gray-200 truncate">${unitData?.name || unitId}</span>
+                        </div>
+                        <span class="text-[11px] px-1.5 py-0.5 rounded ${enough ? 'text-emerald-300 bg-emerald-900/40 border border-emerald-600/40' : 'text-red-300 bg-red-900/40 border border-red-600/40'}">${enough ? 'OK' : `Falta ${shortageAmount}`}</span>
+                    </div>
+                    <div class="mt-2 grid grid-cols-2 gap-2 text-[11px]">
+                        <div class="rounded bg-black/20 px-2 py-1 text-gray-300">Req: <span class="font-semibold text-gray-100">${requiredAmount}</span></div>
+                        <div class="rounded bg-black/20 px-2 py-1 text-gray-300">Disp: <span class="font-semibold ${enough ? 'text-emerald-300' : 'text-red-300'}">${availableAmount}</span></div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        const selectionSummaryHtml = selectedEntries.length === 0
+            ? '<p class="text-xs text-gray-400">Selecciona entradas para ver el consumo total de tropas.</p>'
+            : `
+                <div class="space-y-2">
+                    <div class="text-xs text-gray-200 font-semibold">Consumo estimado de tropas</div>
+                    <div class="text-xs ${hasTroopShortage ? 'text-red-300' : 'text-emerald-300'}">
+                        ${hasTroopShortage
+                            ? 'No alcanzan las tropas para cubrir toda la selección. Se enviará en orden y puede fallar en entradas finales.'
+                            : 'Tropas suficientes para cubrir toda la selección.'}
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${requiredRows}</div>
+                </div>
+            `;
+
         const entriesHtml = entries.length === 0
             ? '<p class="text-sm text-gray-400">Esta lista no tiene objetivos todavía.</p>'
             : entries.map(entry => {
-                const troops = entry.troops || this._normalizeDefaultTroops(ownerRace);
-                const currentUnitId = Object.keys(troops)[0] || troopCatalog[0]?.id || '';
-                const currentCount = Math.max(1, Number(troops[currentUnitId]) || FARM_LIST_LIMITS.defaultUnitCount);
-                const unitOptions = troopCatalog
-                    .map(unit => `<option value="${unit.id}" ${unit.id === currentUnitId ? 'selected' : ''}>${unit.name}</option>`)
-                    .join('');
-                const currentUnitName = troopCatalog.find(unit => unit.id === currentUnitId)?.name || currentUnitId || 'Unidad';
-                const cooldownLabel = this._resolveEntryCooldownLabel(entry, selectedOriginVillageId);
-                const cooldownClass = cooldownLabel.startsWith('Cooldown') ? 'text-yellow-300' : 'text-emerald-300';
+                const indicator = this.#entryDispatchIndicators.get(entry.id) || null;
+                const indicatorIsSuccess = indicator?.status === 'success';
+                const indicatorSymbol = indicatorIsSuccess ? '✓' : '✕';
+                const indicatorClass = indicatorIsSuccess
+                    ? 'text-emerald-300 bg-emerald-900/40 border-emerald-600/40'
+                    : 'text-red-300 bg-red-900/40 border-red-600/40';
+                const indicatorTitle = indicator?.message || (indicatorIsSuccess ? 'Envío exitoso' : 'Envío fallido');
 
                 return `
-                    <article class="rounded-lg border border-primary-border bg-glass-bg p-3 space-y-3" data-entry-id-row="${entry.id}">
-                        <div class="flex items-start gap-2">
-                            <input type="checkbox" class="farm-view-entry-select mt-1 h-4 w-4" data-entry-id="${entry.id}">
-                            <div class="min-w-0 flex-grow">
-                                <div class="flex flex-wrap items-center justify-between gap-2">
-                                    <p class="font-semibold text-yellow-300 break-words">${this._resolveTargetLabel(entry)}</p>
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-xs ${cooldownClass}">${cooldownLabel || 'Sin cooldown'}</span>
-                                        <button data-action="farm-view-remove-entry" data-entry-id="${entry.id}" class="text-xs px-2 py-1 rounded bg-red-700 hover:bg-red-600 border border-primary-border">Eliminar</button>
-                                    </div>
-                                </div>
-
-                                <div class="mt-2 grid grid-cols-1 sm:grid-cols-[auto_1fr_auto_auto] gap-2 items-center">
-                                    <div class="flex items-center gap-2" data-entry-unit-preview="${entry.id}">
-                                        ${unitSpriteManager.getUnitSprite(currentUnitId, ownerRace)}
-                                        <span class="text-xs text-gray-200" data-entry-unit-name="${entry.id}">${currentUnitName}</span>
-                                    </div>
-                                    <select data-entry-unit-select="${entry.id}" class="bg-btn-secondary-bg border-primary-border text-white rounded-md p-2 text-sm">
-                                        ${unitOptions}
-                                    </select>
-                                    <input type="number" min="1" step="1" value="${currentCount}" data-entry-count-input="${entry.id}" class="w-full sm:w-24 bg-btn-secondary-bg border-primary-border text-white rounded-md p-2 text-center font-mono">
-                                    <button data-action="farm-view-save-entry" data-entry-id="${entry.id}" class="bg-btn-primary-bg hover:bg-btn-primary-hover text-white text-xs font-semibold py-2 px-3 rounded-md border border-primary-border">Guardar</button>
-                                </div>
+                    <article class="rounded-lg border border-primary-border bg-glass-bg p-3" data-entry-id-row="${entry.id}">
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" class="farm-view-entry-select h-4 w-4" data-entry-id="${entry.id}" ${this.#selectedEntryIds.has(entry.id) ? 'checked' : ''}>
+                            <p class="min-w-0 flex-grow font-semibold text-yellow-300 break-words">${this._resolveTargetLabel(entry)}</p>
+                            <div class="flex items-center gap-2">
+                                ${indicator ? `<span title="${indicatorTitle}" class="inline-flex items-center justify-center rounded-md border px-1.5 py-0.5 text-[11px] font-bold ${indicatorClass}">${indicatorSymbol}</span>` : ''}
+                                <button data-action="farm-view-open-editor" data-entry-id="${entry.id}" class="text-xs px-2 py-1 rounded bg-btn-secondary-bg hover:bg-btn-secondary-hover border border-primary-border">Editar</button>
                             </div>
                         </div>
                     </article>
                 `;
             }).join('');
+
+        const dispatchLegendHtml = '<div class="flex flex-wrap items-center gap-2 text-[11px] text-gray-300"><span class="inline-flex items-center gap-1 rounded border border-emerald-600/40 bg-emerald-900/30 px-1.5 py-0.5 text-emerald-300">✓ Enviado</span><span class="inline-flex items-center gap-1 rounded border border-red-600/40 bg-red-900/30 px-1.5 py-0.5 text-red-300">✕ Falló</span><span class="text-gray-400">Indicador temporal por entrada</span></div>';
+
+        const editorModalHtml = this._buildEntryEditorModalHtml(ownerId, ownerRace, troopCatalog);
 
         const ownerRaceLabel = gameData.units?.[ownerRace]?.name || ownerRace || 'Sin raza';
         this.#rootElement.innerHTML = `
@@ -302,10 +533,10 @@ class FarmListsView {
 
                     <div class="space-y-2 pt-2 border-t border-primary-border/60">
                         <label class="text-xs font-semibold text-gray-400">Añadir objetivo por coordenadas</label>
-                        <div class="grid grid-cols-[1fr_1fr_auto] gap-2">
-                            <input id="farm-view-add-x" type="number" placeholder="X" class="bg-btn-secondary-bg border-primary-border text-white rounded-md p-2 text-sm" ${selectedList ? '' : 'disabled'}>
-                            <input id="farm-view-add-y" type="number" placeholder="Y" class="bg-btn-secondary-bg border-primary-border text-white rounded-md p-2 text-sm" ${selectedList ? '' : 'disabled'}>
-                            <button data-action="farm-view-add-entry" class="px-3 py-2 text-xs font-semibold rounded-md bg-amber-600 hover:bg-amber-500 text-black border border-primary-border" ${selectedList ? '' : 'disabled'}>Añadir</button>
+                        <div class="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
+                            <input id="farm-view-add-x" type="number" placeholder="X" class="min-w-0 bg-btn-secondary-bg border-primary-border text-white rounded-md p-2 text-sm" ${selectedList ? '' : 'disabled'}>
+                            <input id="farm-view-add-y" type="number" placeholder="Y" class="min-w-0 bg-btn-secondary-bg border-primary-border text-white rounded-md p-2 text-sm" ${selectedList ? '' : 'disabled'}>
+                            <button data-action="farm-view-add-entry" class="w-full sm:w-auto px-3 py-2 text-xs font-semibold rounded-md bg-amber-600 hover:bg-amber-500 text-black border border-primary-border" ${selectedList ? '' : 'disabled'}>Añadir</button>
                         </div>
                     </div>
                 </aside>
@@ -319,15 +550,24 @@ class FarmListsView {
                         <div class="flex flex-wrap gap-2">
                             <button data-action="farm-view-select-all" class="px-3 py-2 text-xs rounded-md bg-btn-secondary-bg hover:bg-btn-secondary-hover border border-primary-border" ${selectedList ? '' : 'disabled'}>Seleccionar todo</button>
                             <button data-action="farm-view-clear-selection" class="px-3 py-2 text-xs rounded-md bg-btn-secondary-bg hover:bg-btn-secondary-hover border border-primary-border" ${selectedList ? '' : 'disabled'}>Limpiar</button>
-                            <button data-action="farm-view-send-selected" class="px-3 py-2 text-xs rounded-md bg-amber-600 hover:bg-amber-500 text-black font-semibold border border-primary-border" ${selectedList && selectedOriginVillage ? '' : 'disabled'}>Enviar seleccionadas</button>
+                            <button data-action="farm-view-send-selected" class="px-3 py-2 text-xs rounded-md bg-amber-600 hover:bg-amber-500 text-black font-semibold border border-primary-border" ${selectedList && selectedOriginVillage && selectedEntryIdsInOrder.length > 0 ? '' : 'disabled'}>Enviar seleccionadas</button>
                         </div>
                     </div>
 
+                    <div class="rounded-lg border border-primary-border/60 bg-black/20 p-3 space-y-2">
+                        <p class="text-xs text-gray-300">Orden de envío: secuencial según posición en la lista.</p>
+                        <p class="text-xs text-gray-400">Selección actual: ${selectedEntries.length} objetivo(s).</p>
+                        ${selectionSummaryHtml}
+                    </div>
+
                     <div class="space-y-2">
+                        ${dispatchLegendHtml}
                         ${entriesHtml}
                     </div>
                 </section>
             </div>
+
+            ${editorModalHtml}
         `;
     }
 
@@ -445,67 +685,122 @@ class FarmListsView {
             return;
         }
 
-        if (action === 'farm-view-remove-entry') {
+        if (action === 'farm-view-open-editor') {
             if (!selectedList) return;
             const entryId = actionButton.dataset.entryId;
             if (!entryId) return;
 
-            gameManager.sendCommand('farm_list_remove_entry', {
+            this.#entryEditorContext = {
                 ownerId,
+                ownerRace: this._getOwnerRace(ownerId),
                 listId: selectedList.id,
                 entryId,
+                draftTroops: {},
+                isSaving: false,
+            };
+
+            const resolved = this._resolveEditorEntry(ownerId);
+            if (!resolved) {
+                this.#entryEditorContext = null;
+                toastUI.show('No se encontró la entrada seleccionada.', 'warning');
+                return;
+            }
+
+            this.#entryEditorContext.draftTroops = this._normalizeEditorTroops(
+                resolved.entry?.troops,
+                this.#entryEditorContext.ownerRace,
+            );
+            this._render();
+            return;
+        }
+
+        if (action === 'farm-view-delete-editor') {
+            if (!this.#entryEditorContext || this.#entryEditorContext.isSaving) return;
+            const context = this.#entryEditorContext;
+            const resolved = this._resolveEditorEntry(ownerId);
+            if (!resolved) {
+                this.#entryEditorContext = null;
+                toastUI.show('No se encontró la entrada seleccionada.', 'warning');
+                this._render();
+                return;
+            }
+
+            const confirmed = window.confirm(`¿Eliminar el objetivo ${this._resolveTargetLabel(resolved.entry)} de la lista "${resolved.list.name}"?`);
+            if (!confirmed) return;
+
+            context.isSaving = true;
+            this._render();
+
+            gameManager.sendCommand('farm_list_remove_entry', {
+                ownerId,
+                listId: resolved.list.id,
+                entryId: resolved.entry.id,
                 meta: {
                     source: VIEW_SOURCE,
-                    action: 'remove-entry',
-                    listName: selectedList.name,
+                    action: 'remove-entry-modal',
+                    listName: resolved.list.name,
                 },
             });
             return;
         }
 
-        if (action === 'farm-view-save-entry') {
-            if (!selectedList) return;
-            const entryId = actionButton.dataset.entryId;
-            if (!entryId) return;
+        if (action === 'farm-view-close-editor') {
+            this.#entryEditorContext = null;
+            this._render();
+            return;
+        }
 
-            const row = this.#rootElement.querySelector(`[data-entry-id-row="${entryId}"]`);
-            if (!row) return;
+        if (action === 'farm-view-reset-editor') {
+            if (!this.#entryEditorContext || this.#entryEditorContext.isSaving) return;
+            this.#entryEditorContext.draftTroops = this._normalizeDefaultTroops(this.#entryEditorContext.ownerRace);
+            this._render();
+            return;
+        }
 
-            const unitSelect = row.querySelector(`select[data-entry-unit-select="${entryId}"]`);
-            const countInput = row.querySelector(`input[data-entry-count-input="${entryId}"]`);
-            const unitId = unitSelect?.value || '';
-            const count = Number.parseInt(countInput?.value ?? '', 10);
-
-            if (!unitId || !Number.isInteger(count) || count <= 0) {
-                toastUI.show('Configura una unidad y una cantidad válidas.', 'warning');
+        if (action === 'farm-view-save-editor') {
+            if (!this.#entryEditorContext || this.#entryEditorContext.isSaving) return;
+            const context = this.#entryEditorContext;
+            const resolved = this._resolveEditorEntry(ownerId);
+            if (!resolved) {
+                this.#entryEditorContext = null;
+                toastUI.show('No se encontró la entrada seleccionada.', 'warning');
+                this._render();
                 return;
             }
 
+            const troops = this._collectEditorTroopsFromDom(context.ownerRace);
+            if (Object.keys(troops).length === 0) {
+                toastUI.show('Debes seleccionar al menos un tipo de tropa con cantidad válida.', 'warning');
+                return;
+            }
+
+            context.isSaving = true;
+            context.draftTroops = troops;
+            this._render();
+
             gameManager.sendCommand('farm_list_update_entry_troops', {
                 ownerId,
-                listId: selectedList.id,
-                entryId,
-                troops: { [unitId]: count },
+                listId: resolved.list.id,
+                entryId: resolved.entry.id,
+                troops,
                 meta: {
                     source: VIEW_SOURCE,
-                    action: 'save-entry-troops',
-                    listName: selectedList.name,
+                    action: 'save-entry-troops-modal',
+                    listName: resolved.list.name,
                 },
             });
             return;
         }
 
         if (action === 'farm-view-select-all') {
-            this.#rootElement.querySelectorAll('.farm-view-entry-select').forEach(input => {
-                input.checked = true;
-            });
+            (selectedList?.entries || []).forEach(entry => this.#selectedEntryIds.add(entry.id));
+            this._render();
             return;
         }
 
         if (action === 'farm-view-clear-selection') {
-            this.#rootElement.querySelectorAll('.farm-view-entry-select').forEach(input => {
-                input.checked = false;
-            });
+            this.#selectedEntryIds.clear();
+            this._render();
             return;
         }
 
@@ -519,9 +814,7 @@ class FarmListsView {
                 return;
             }
 
-            const selectedEntryIds = [...this.#rootElement.querySelectorAll('.farm-view-entry-select:checked')]
-                .map(input => input.dataset.entryId)
-                .filter(Boolean);
+            const selectedEntryIds = this._getSelectedEntryIdsInListOrder(selectedList?.entries || []);
 
             if (selectedEntryIds.length === 0) {
                 toastUI.show('Selecciona al menos un objetivo.', 'warning');
@@ -554,26 +847,64 @@ class FarmListsView {
 
         if (target.matches('select[data-action="farm-view-select-list"]')) {
             this.#selectedListId = target.value || null;
+            this.#selectedEntryIds.clear();
             this._render();
             return;
         }
 
-        if (target.matches('select[data-entry-unit-select]')) {
-            const entryId = target.dataset.entryUnitSelect;
-            const row = target.closest(`[data-entry-id-row="${entryId}"]`);
-            if (!row || !this.#gameState) return;
-
-            const ownerId = getPerspectiveOwnerId(this.#gameState);
-            const ownerRace = this._getOwnerRace(ownerId);
-            const unitId = target.value;
-            const unitName = gameData.units?.[ownerRace]?.troops?.find(unit => unit.id === unitId)?.name || unitId;
-            const preview = row.querySelector(`[data-entry-unit-preview="${entryId}"]`);
-            const unitNameLabel = row.querySelector(`[data-entry-unit-name="${entryId}"]`);
-            if (preview) {
-                preview.innerHTML = `${unitSpriteManager.getUnitSprite(unitId, ownerRace)}<span class="text-xs text-gray-200" data-entry-unit-name="${entryId}">${unitName}</span>`;
-            } else if (unitNameLabel) {
-                unitNameLabel.textContent = unitName;
+        if (target.matches('input.farm-view-entry-select')) {
+            const entryId = target.dataset.entryId;
+            if (!entryId) return;
+            if (target.checked) {
+                this.#selectedEntryIds.add(entryId);
+            } else {
+                this.#selectedEntryIds.delete(entryId);
             }
+            this._render();
+            return;
+        }
+
+        if (!this.#entryEditorContext || this.#entryEditorContext.isSaving) {
+            return;
+        }
+
+        const unitToggle = target.closest('input[data-farm-view-unit-toggle]');
+        if (unitToggle) {
+            const unitId = unitToggle.dataset.farmViewUnitToggle;
+            const countInput = this.#rootElement.querySelector(`input[data-farm-view-unit-count="${unitId}"]`);
+            if (!countInput) return;
+
+            if (unitToggle.checked) {
+                const parsedCount = this._getAutoSplitTroopAmount(
+                    this.#entryEditorContext.ownerId,
+                    this.#entryEditorContext.listId,
+                    unitId,
+                );
+                countInput.disabled = false;
+                countInput.value = String(parsedCount);
+                this.#entryEditorContext.draftTroops[unitId] = parsedCount;
+            } else {
+                countInput.disabled = true;
+                countInput.value = '';
+                delete this.#entryEditorContext.draftTroops[unitId];
+            }
+
+            return;
+        }
+
+        const countInput = target.closest('input[data-farm-view-unit-count]');
+        if (countInput) {
+            const unitId = countInput.dataset.farmViewUnitCount;
+            const unitToggleInput = this.#rootElement.querySelector(`input[data-farm-view-unit-toggle="${unitId}"]`);
+            if (!unitToggleInput || !unitToggleInput.checked) return;
+
+            const parsedCount = Math.floor(Number(countInput.value));
+            if (!Number.isFinite(parsedCount) || parsedCount <= 0) {
+                delete this.#entryEditorContext.draftTroops[unitId];
+                return;
+            }
+
+            this.#entryEditorContext.draftTroops[unitId] = parsedCount;
         }
     }
 
@@ -592,6 +923,10 @@ class FarmListsView {
         }
 
         if (!result.success) {
+            if (command === 'farm_list_update_entry_troops' && this.#entryEditorContext) {
+                this.#entryEditorContext.isSaving = false;
+                this._render();
+            }
             toastUI.show(this._resolveFarmListReasonMessage(result.reason, result.details), 'error');
             return;
         }
@@ -606,6 +941,10 @@ class FarmListsView {
         } else if (command === 'farm_list_delete') {
             if (result?.deletedListId && result.deletedListId === this.#selectedListId) {
                 this.#selectedListId = null;
+                this.#selectedEntryIds.clear();
+            }
+            if (this.#entryEditorContext && result?.deletedListId === this.#entryEditorContext.listId) {
+                this.#entryEditorContext = null;
             }
             toastUI.show('Lista eliminada.', 'success');
         } else if (command === 'farm_list_add_entry_by_coords') {
@@ -615,8 +954,19 @@ class FarmListsView {
             if (yInput) yInput.value = '';
             toastUI.show('Objetivo añadido a la lista.', 'success');
         } else if (command === 'farm_list_update_entry_troops') {
+            if (this.#entryEditorContext) {
+                this.#entryEditorContext = null;
+            }
             toastUI.show('Preset de tropas actualizado.', 'success');
         } else if (command === 'farm_list_remove_entry') {
+            const removedEntryId = result?.deletedEntryId || request?.entryId || null;
+            if (this.#entryEditorContext && request?.entryId === this.#entryEditorContext.entryId) {
+                this.#entryEditorContext = null;
+            }
+            if (removedEntryId) {
+                this.#selectedEntryIds.delete(removedEntryId);
+                this._clearEntryDispatchIndicator(removedEntryId);
+            }
             toastUI.show('Objetivo eliminado de la lista.', 'success');
         }
 
@@ -633,6 +983,20 @@ class FarmListsView {
         const results = Array.isArray(detail.results) ? detail.results : [];
         const sentCount = Number(detail.sentCount) || 0;
         const failedCount = Number(detail.failedCount) || 0;
+
+        results.forEach(item => {
+            if (!item?.entryId) return;
+            if (item.success) {
+                this._setEntryDispatchIndicator(item.entryId, 'success', 'Movimiento enviado con éxito.');
+                return;
+            }
+            const failMessage = this._resolveFarmListReasonMessage(item.reason, item.details);
+            this._setEntryDispatchIndicator(item.entryId, 'error', failMessage);
+        });
+
+        if (results.length > 0) {
+            this._render();
+        }
 
         if (results.length === 0) {
             if (detail.success) {

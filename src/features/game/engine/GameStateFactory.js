@@ -20,6 +20,16 @@ function getInitialOasisBeastAmount(spawnMin, gameSpeed) {
     return Math.max(1, Math.floor(spawnMin * speedMultiplier));
 }
 
+function getInitialOasisBeastCap(oasisTypeData, gameSpeed) {
+    if (!oasisTypeData || !Array.isArray(oasisTypeData.beastSpawnTable)) {
+        return 0;
+    }
+
+    return oasisTypeData.beastSpawnTable.reduce((sum, spawn) => {
+        return sum + getInitialOasisBeastAmount(spawn.min, gameSpeed);
+    }, 0);
+}
+
 function createDefaultRecruitmentExchangeKpi() {
     return {
         attempts: 0,
@@ -253,6 +263,7 @@ export class GameStateFactory {
                 tile.state = {
                     beasts: {},
                     isClearedOnce: false,
+                    maxBeasts: getInitialOasisBeastCap(oasisTypeData, this.#config.gameSpeed),
                     pressure: { recentAttacks: [], current: 0 },
                 };
                 oasisTypeData.beastSpawnTable.forEach(spawn => {
@@ -353,13 +364,23 @@ export class GameStateFactory {
         savedState.mapData.forEach(tile => {
             if (tile.type === 'oasis' && (!tile.state || !tile.state.beasts)) {
                 const oasisTypeData = gameData.oasisTypes[tile.oasisType];
-                tile.state = { beasts: {}, isClearedOnce: false };
+                tile.state = {
+                    beasts: {},
+                    isClearedOnce: false,
+                    maxBeasts: getInitialOasisBeastCap(oasisTypeData, this.#config.gameSpeed),
+                };
                 oasisTypeData.beastSpawnTable.forEach(spawn => {
                     tile.state.beasts[spawn.unitId] = getInitialOasisBeastAmount(spawn.min, this.#config.gameSpeed);
                 });
             }
 
             if (tile.type === 'oasis' && tile.state) {
+                const oasisTypeData = gameData.oasisTypes[tile.oasisType];
+                tile.state.maxBeasts ??= getInitialOasisBeastCap(oasisTypeData, this.#config.gameSpeed);
+                if (!Number.isFinite(Number(tile.state.maxBeasts)) || Number(tile.state.maxBeasts) < 0) {
+                    tile.state.maxBeasts = getInitialOasisBeastCap(oasisTypeData, this.#config.gameSpeed);
+                }
+                tile.state.maxBeasts = Math.floor(Number(tile.state.maxBeasts));
                 tile.state.isClearedOnce ??= false;
                 tile.state.pressure ??= { recentAttacks: [], current: 0 };
                 tile.state.pressure.recentAttacks ??= [];
