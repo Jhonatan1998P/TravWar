@@ -2,6 +2,7 @@ import { gameData } from '../../core/GameData.js';
 import { CombatFormulas } from '../../core/CombatFormulas.js';
 import { getUnitTotalCost } from '../utils/AIUnitUtils.js';
 import { calculateBeastBountyValue } from '../../core/OasisEconomy.js';
+import { AI_STRATEGY_CONSTANTS } from '../config/AIConstants.js';
 
 const DEFAULT_TRAVEL_COST_PER_DISTANCE = 8;
 const DEFAULT_TRAVEL_COST_PER_MINUTE = 15;
@@ -9,8 +10,7 @@ const OASIS_RAID_BATCH_MAX_TARGETS = 15;
 const OASIS_RAID_MISSION_TYPES = new Set(['attack', 'raid']);
 const OASIS_RETURN_SOURCE_TILE_TYPE = 'oasis';
 const OASIS_RAID_MIN_ATTACK_RATIO = 1.02;
-const OASIS_RAID_COUNT_STEPS = [1, 1.08, 1.15, 1.25, 1.4, 1.6];
-const OASIS_RAID_MIN_GROSS_RETURN_RATIO = 1.25;
+const OASIS_RAID_MIN_GROSS_RETURN_RATIO = 1.10;
 
 function getOasisRequiredGrossReward(lossValue) {
     const invested = Math.max(0, Number(lossValue) || 0);
@@ -68,7 +68,6 @@ function simulateOasisRaidBattleModel({
     defenderTroops,
     attRace,
     attackerSmithyUpgrades,
-    attackerPopulation,
 }) {
     const attackPoints = CombatFormulas.calculateAttackPoints(squad, attRace, attackerSmithyUpgrades || {});
     if ((attackPoints.total || 0) <= 0) {
@@ -80,14 +79,13 @@ function simulateOasisRaidBattleModel({
     }
 
     const attackerProportions = getAttackerProportions(attackPoints);
-    const moraleBonus = CombatFormulas.getMoraleBonus(Math.max(0, attackerPopulation || 0), 0);
     const defensePoints = CombatFormulas.calculateDefensePoints(
         [{ troops: defenderTroops, race: 'nature', smithyUpgrades: {} }],
         attackerProportions,
         'nature',
         0,
         0,
-        moraleBonus,
+        1.0,
     );
 
     const attackerWins = attackPoints.total > defensePoints;
@@ -139,18 +137,157 @@ function getOffensiveRaidUnits(availableTroops, attRace, attackerSmithyUpgrades 
     return offensiveUnits;
 }
 
-function getCandidateCounts(minCount, maxCount) {
-    if (!Number.isFinite(minCount) || !Number.isFinite(maxCount) || maxCount <= 0) return [];
+function getPerAttackOffensiveUnitPool(offensiveUnits, plannedSlots) {
+    const divisor = Math.max(1, Number(plannedSlots) || 1);
 
-    const counts = new Set();
-    counts.add(Math.max(1, Math.min(maxCount, minCount)));
+    return offensiveUnits
+        .map(unit => {
+            const maxCount = Math.floor(unit.count / divisor);
+            if (maxCount <= 0) return null;
+            return {
+                ...unit,
+                maxCount,
+            };
+        })
+        .filter(Boolean);
+}
 
-    OASIS_RAID_COUNT_STEPS.forEach(step => {
-        counts.add(Math.max(1, Math.min(maxCount, Math.ceil(minCount * step))));
+function cloneSquad(squad = {}) {
+    const result = {};
+    Object.entries(squad).forEach(([unitId, count]) => {
+        if ((count || 0) > 0) result[unitId] = count;
+    });
+    return result;
+}
+
+function buildBudgetAwareSquad(unitPool, usageRatio, targetAttack) {
+    if (!Array.isArray(unitPool) || unitPool.length === 0) return null;
+
+    const ratio = Math.max(0.05, Math.min(1, Number(usageRatio) || 0));
+    const squad = {};
+    let currentAttack = 0;
+
+    unitPool.forEach(unit => {
+        const take = Math.max(0, Math.floor(unit.maxCount * ratio));
+        if (take <= 0) return;
+
+        squad[unit.id] = take;
+        currentAttack += take * unit.effectiveAttack;
     });
 
-    counts.add(maxCount);
-    return Array.from(counts).sort((a, b) => a - b);
+    if (Object.keys(squad).length === 0) {
+        const fallback = unitPool[0];
+        if (!fallback) return null;
+        squad[fallback.id] = 1;
+        currentAttack = fallback.effectiveAttack;
+    }
+
+    if (currentAttack >= targetAttack) return squad;
+
+    const byAttackEfficiency = [...unitPool].sort((a, b) => {
+        if (b.attackPerCost !== a.attackPerCost) return b.attackPerCost - a.attackPerCost;
+        return b.effectiveAttack - a.effectiveAttack;
+    });
+
+    byAttackEfficiency.forEach(unit => {
+        if (currentAttack >= targetAttack) return;
+
+        const used = squad[unit.id] || 0;
+        const remaining = Math.max(0, unit.maxCount - used);
+        if (remaining <= 0 || unit.effectiveAttack <= 0) return;
+
+        const needed = Math.ceil((targetAttack - currentAttack) / unit.effectiveAttack);
+        const add = Math.min(remaining, Math.max(0, needed));
+        if (add <= 0) return;
+
+        squad[unit.id] = used + add;
+        currentAttack += add * unit.effectiveAttack;
+    });
+
+    return currentAttack >= targetAttack ? squad : null;
+}
+
+function evaluateOasisRaidOption({
+    squad,
+    defenderTroops,
+    attRace,
+    distance,
+    troopSpeed,
+    attackerSmithyUpgrades,
+    attackerPopulation,
+    profile,
+}) {
+    if (!squad || Object.keys(squad).length === 0) return null;
+
+    const simulation = simulateOasisRaidBattleModel({
+        squad,
+        defenderTroops,
+        attRace,
+        attackerSmithyUpgrades,
+        attackerPopulation,
+    });
+
+    if (simulation.winner !== 'attacker') return null;
+
+    const killedEstimated = simulation.defenderLosses || {};
+    const rewardGross = calculateBeastBountyValue(killedEstimated);
+    const lossValue = calculateLossValue(simulation.losses, attRace);
+    const { distanceCost, minuteCost } = getRaidTravelCostConfig();
+    const travelMinutes = estimateTravelMinutes(distance, squad, attRace, troopSpeed);
+    const travelCost = (distance * distanceCost) + (travelMinutes * minuteCost);
+    const rewardNet = rewardGross - lossValue - travelCost;
+
+    return {
+        squad,
+        profile,
+        rewardGross,
+        lossValue,
+        travelCost,
+        travelMinutes,
+        rewardNet,
+        grossReturnRatio: getOasisGrossReturnRatio(rewardGross, lossValue),
+        minRequiredGrossReward: getOasisRequiredGrossReward(lossValue),
+        killedEstimated,
+        selectedUnitId: null,
+    };
+}
+
+function refineWinningSquad(option, context) {
+    if (!option?.squad) return option;
+
+    let bestOption = option;
+    const unitOrder = Object.entries(option.squad)
+        .filter(([, count]) => (count || 0) > 1)
+        .map(([unitId]) => unitId);
+
+    unitOrder.forEach(unitId => {
+        let keepTrying = true;
+        while (keepTrying) {
+            keepTrying = false;
+            const currentCount = bestOption.squad[unitId] || 0;
+            if (currentCount <= 1) break;
+
+            const reduceBy = Math.max(1, Math.floor(currentCount * 0.08));
+            const nextCount = Math.max(1, currentCount - reduceBy);
+            const trialSquad = cloneSquad(bestOption.squad);
+            trialSquad[unitId] = nextCount;
+
+            const trialOption = evaluateOasisRaidOption({
+                ...context,
+                squad: trialSquad,
+                profile: `${bestOption.profile}_trim_${unitId}`,
+            });
+
+            if (!trialOption) continue;
+
+            if (compareOasisRaidOptions(bestOption, trialOption) > 0) {
+                bestOption = trialOption;
+                keepTrying = true;
+            }
+        }
+    });
+
+    return bestOption;
 }
 
 function compareOasisRaidOptions(left, right) {
@@ -316,54 +453,37 @@ function calculateBestOasisRaidConfig({
     const defPower = getDefensePower(defenderTroops, 'nature');
     if (defPower <= 0) return null;
 
-    const { distanceCost, minuteCost } = getRaidTravelCostConfig();
+    const perAttackUnitPool = getPerAttackOffensiveUnitPool(offensiveUnits, plannedSlots);
+    if (perAttackUnitPool.length === 0) return null;
+
+    const targetAttack = defPower * OASIS_RAID_MIN_ATTACK_RATIO;
+    const candidateUsageRatios = [0.24, 0.32, 0.40, 0.50, 0.62, 0.76, 0.9, 1.0];
     let bestOption = null;
 
-    offensiveUnits.forEach(unit => {
-        const minCount = Math.ceil((defPower * OASIS_RAID_MIN_ATTACK_RATIO) / unit.effectiveAttack);
-        const slotDivisor = Math.max(1, plannedSlots || 1);
-        const perAttackCap = Math.floor(unit.count / slotDivisor);
-        const maxAllowedCount = Math.min(unit.count, perAttackCap);
-        if (maxAllowedCount <= 0 || minCount > maxAllowedCount) return;
+    const evaluationContext = {
+        defenderTroops,
+        attRace,
+        distance,
+        troopSpeed,
+        attackerSmithyUpgrades,
+        attackerPopulation,
+    };
 
-        const candidateCounts = getCandidateCounts(minCount, maxAllowedCount);
-        candidateCounts.forEach(unitCount => {
-            const squad = { [unit.id]: unitCount };
-            const simulation = simulateOasisRaidBattleModel({
-                squad,
-                defenderTroops,
-                attRace,
-                attackerSmithyUpgrades,
-                attackerPopulation,
-            });
+    candidateUsageRatios.forEach(ratio => {
+        const squad = buildBudgetAwareSquad(perAttackUnitPool, ratio, targetAttack);
+        if (!squad) return;
 
-            if (simulation.winner !== 'attacker') return;
-
-            const killedEstimated = simulation.defenderLosses || {};
-            const rewardGross = calculateBeastBountyValue(killedEstimated);
-            const lossValue = calculateLossValue(simulation.losses, attRace);
-            const travelMinutes = estimateTravelMinutes(distance, squad, attRace, troopSpeed);
-            const travelCost = (distance * distanceCost) + (travelMinutes * minuteCost);
-            const rewardNet = rewardGross - lossValue - travelCost;
-
-            const option = {
-                squad,
-                profile: `unidad_optima_${unit.id}`,
-                rewardGross,
-                lossValue,
-                travelCost,
-                travelMinutes,
-                rewardNet,
-                grossReturnRatio: getOasisGrossReturnRatio(rewardGross, lossValue),
-                minRequiredGrossReward: getOasisRequiredGrossReward(lossValue),
-                killedEstimated,
-                selectedUnitId: unit.id,
-            };
-
-            if (!bestOption || compareOasisRaidOptions(bestOption, option) > 0) {
-                bestOption = option;
-            }
+        const option = evaluateOasisRaidOption({
+            ...evaluationContext,
+            squad,
+            profile: `ratio_${Math.round(ratio * 100)}`,
         });
+        if (!option) return;
+
+        const refinedOption = refineWinningSquad(option, evaluationContext);
+        if (!bestOption || compareOasisRaidOptions(bestOption, refinedOption) > 0) {
+            bestOption = refinedOption;
+        }
     });
 
     return bestOption;
@@ -527,7 +647,7 @@ export function performOptimizedFarming({
                     target.coords.x - force.village.coords.x,
                     target.coords.y - force.village.coords.y,
                 );
-                if (dist > 50) return;
+                if (dist > AI_STRATEGY_CONSTANTS.searchRadius) return;
 
                 slotTelemetry.evaluatedOases += 1;
                 const beasts = target.data.state?.beasts || {};
@@ -600,7 +720,7 @@ export function performOptimizedFarming({
     if (!oasisBatchState.hasActiveBatch) {
         let selectedPlan = null;
 
-        for (let plannedSlots = OASIS_RAID_BATCH_MAX_TARGETS; plannedSlots >= 1; plannedSlots--) {
+        for (let plannedSlots = 1; plannedSlots <= OASIS_RAID_BATCH_MAX_TARGETS; plannedSlots++) {
             logs.push(`[FARMEO LOTE] Evaluando lote oasis con ${plannedSlots} slots (division de tropas por ${plannedSlots}).`);
             const slotResult = evaluateOasisSlots(plannedSlots);
             const viableSlots = slotResult.selected.length;
@@ -610,16 +730,26 @@ export function performOptimizedFarming({
             if (viableSlots >= plannedSlots) {
                 selectedPlan = slotResult;
                 targetSlotsForCycle = plannedSlots;
-                logs.push(`[FARMEO LOTE] Lote confirmado: ${plannedSlots} ataques oasis rentables en este ciclo.`);
-                break;
+                logs.push(`[FARMEO LOTE] Lote viable: ${plannedSlots} ataques oasis rentables. Probando expansion.`);
+                continue;
             }
 
-            if (plannedSlots > 1) {
-                logs.push(`[FARMEO LOTE] Slot no rentable detectado. Reintentando con ${plannedSlots - 1} slots.`);
+            if (selectedPlan) {
+                logs.push(
+                    `[FARMEO LOTE] Expansion detenida: ${viableSlots}/${plannedSlots} viables. ` +
+                    `Usando ultimo lote completo rentable de ${targetSlotsForCycle} ataques.`,
+                );
+                break;
             } else {
                 selectedPlan = slotResult;
                 targetSlotsForCycle = 1;
+                logs.push('[FARMEO LOTE] No hay ningun oasis rentable ni siquiera para 1 ataque.');
+                break;
             }
+        }
+
+        if (selectedPlan && selectedPlan.selected.length >= targetSlotsForCycle && targetSlotsForCycle > 0) {
+            logs.push(`[FARMEO LOTE] Lote confirmado: ${targetSlotsForCycle} ataques oasis rentables en este ciclo.`);
         }
 
         if (selectedPlan) {
@@ -655,7 +785,7 @@ export function performOptimizedFarming({
                 target.coords.x - force.village.coords.x,
                 target.coords.y - force.village.coords.y,
             );
-            if (dist > 50) return;
+            if (dist > AI_STRATEGY_CONSTANTS.searchRadius) return;
 
             const resources = target.intel?.payload?.resources;
             const potentialLoot = resources
@@ -693,7 +823,7 @@ export function performOptimizedFarming({
     if (oasisOpportunities.length === 0) {
         telemetry.noProfitableCycle = !oasisBatchState.hasActiveBatch;
         if (!oasisBatchState.hasActiveBatch) {
-            logs.push('[FARMEO ROI] No hay oasis con retorno bruto >= 25% sobre inversion en tropas (RewardGross/LossValue >= 1.25).');
+            logs.push(`[FARMEO ROI] No hay oasis con retorno bruto >= ${Math.round((OASIS_RAID_MIN_GROSS_RETURN_RATIO - 1) * 100)}% sobre inversion en tropas (RewardGross/LossValue >= ${OASIS_RAID_MIN_GROSS_RETURN_RATIO.toFixed(2)}).`);
         }
     } else {
         const ranking = oasisOpportunities
@@ -719,7 +849,7 @@ export function performOptimizedFarming({
             telemetry.rejectedNonPositive += 1;
             const minRequiredGross = getOasisRequiredGrossReward(opportunity.details?.lossValue || 0);
             const grossReturnRatio = getOasisGrossReturnRatio(opportunity.details?.rewardGross || 0, opportunity.details?.lossValue || 0);
-            logs.push(`[FARMEO ROI] Oasis ${opportunity.target.coords.x}|${opportunity.target.coords.y} bloqueado en emision: Gross ${Number(opportunity.details?.rewardGross || 0).toFixed(0)} / Loss ${Number(opportunity.details?.lossValue || 0).toFixed(0)} = ${grossReturnRatio.toFixed(2)} < 1.25 (gross minimo ${minRequiredGross.toFixed(0)}).`);
+            logs.push(`[FARMEO ROI] Oasis ${opportunity.target.coords.x}|${opportunity.target.coords.y} bloqueado en emision: Gross ${Number(opportunity.details?.rewardGross || 0).toFixed(0)} / Loss ${Number(opportunity.details?.lossValue || 0).toFixed(0)} = ${grossReturnRatio.toFixed(2)} < ${OASIS_RAID_MIN_GROSS_RETURN_RATIO.toFixed(2)} (gross minimo ${minRequiredGross.toFixed(0)}).`);
             return;
         }
 

@@ -11,6 +11,9 @@ import {
 const DEV_MODE_AI_VIEW = true;
 
 function getPerspectiveOwnerId(state) {
+    const activeVillage = state?.villages?.find(village => village.id === state.activeVillageId);
+    if (activeVillage?.ownerId) return activeVillage.ownerId;
+
     if (!state?.players) return 'player';
 
     const explicitPlayer = state.players.find(player => player.id === 'player');

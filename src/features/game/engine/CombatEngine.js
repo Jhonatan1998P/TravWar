@@ -299,7 +299,9 @@ export class CombatEngine {
 
         const attackerPop = this._getOwnerPopulation(this._movement.ownerId);
         const defenderPop = this._getOwnerPopulation(defenderVillage?.ownerId);
-        const moraleBonus = CombatFormulas.getMoraleBonus(attackerPop, defenderPop);
+        const moraleBonus = defenderInfo.race === 'nature'
+            ? 1.0
+            : CombatFormulas.getMoraleBonus(attackerPop, defenderPop);
         
         const attackerProportions = { infantry: attackPoints.infantry / attackPoints.total, cavalry: attackPoints.cavalry / attackPoints.total };
         const defensePoints = CombatFormulas.calculateDefensePoints(defendingContingents, attackerProportions, defenderInfo.race, wallLevel, palaceLevel, moraleBonus);

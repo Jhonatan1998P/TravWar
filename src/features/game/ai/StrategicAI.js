@@ -15,6 +15,49 @@ import { dispatchSpies, performGeneralIntelligence, scanAndClassifyTargets } fro
 
 const { searchRadius, scoutsPerMission, minCatsForTrain, maxWaves } = AI_STRATEGY_CONSTANTS;
 const MAX_PRIORITY_GOAL = 'MAX_PRIORITY_GOAL';
+const STRATEGIC_ATTACK_GATE_CONFIG = Object.freeze({
+    baseProbability: 0.10,
+    maxProbability: 0.40,
+    noAttackBonusPerCycle: 0.015,
+    noAttackBonusMaxCycles: 12,
+    nemesisBonus: 0.08,
+    highValueBonus: 0.05,
+    baseCooldownMs: 60 * 60 * 1000,
+    minCooldownAt500Ms: 10 * 60 * 1000,
+    minCooldownAt5000Ms: 5 * 60 * 1000,
+});
+
+function clamp01(value) {
+    return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
+function getStrategicAttackCooldownMs(gameSpeed = 1) {
+    const speed = Math.max(1, Number(gameSpeed) || 1);
+    const scaled = Math.floor(STRATEGIC_ATTACK_GATE_CONFIG.baseCooldownMs / speed);
+
+    if (speed >= 5000) {
+        return Math.max(STRATEGIC_ATTACK_GATE_CONFIG.minCooldownAt5000Ms, scaled);
+    }
+    if (speed >= 500) {
+        return Math.max(STRATEGIC_ATTACK_GATE_CONFIG.minCooldownAt500Ms, scaled);
+    }
+    return Math.max(1000, scaled);
+}
+
+function ensureStrategicAttackGateState(aiState) {
+    if (!aiState.strategicAttackGate || typeof aiState.strategicAttackGate !== 'object') {
+        aiState.strategicAttackGate = {
+            cyclesWithoutAttack: 0,
+            lastAttackAt: null,
+            lastProbability: STRATEGIC_ATTACK_GATE_CONFIG.baseProbability,
+            lastRoll: null,
+            lastDecisionReason: 'initialized',
+            lastCooldownMs: STRATEGIC_ATTACK_GATE_CONFIG.baseCooldownMs,
+        };
+    }
+
+    return aiState.strategicAttackGate;
+}
 
 export default class StrategicAI {
     constructor() {}
@@ -39,6 +82,71 @@ export default class StrategicAI {
 
         const aiState = gameState.aiState[ownerId] || {};
         if (!gameState.aiState[ownerId]) gameState.aiState[ownerId] = aiState;
+        const strategicAttackGateState = ensureStrategicAttackGateState(aiState);
+
+        let strategicAttackGateDecision = null;
+        const evaluateStrategicAttackGate = ({ hasNemesisOpportunity = false, hasHighValueOpportunity = false } = {}) => {
+            if (strategicAttackGateDecision) return strategicAttackGateDecision;
+
+            const now = Date.now();
+            const cooldownMs = getStrategicAttackCooldownMs(gameSpeed);
+            strategicAttackGateState.lastCooldownMs = cooldownMs;
+
+            if (Number.isFinite(strategicAttackGateState.lastAttackAt)) {
+                const elapsed = now - strategicAttackGateState.lastAttackAt;
+                if (elapsed < cooldownMs) {
+                    strategicAttackGateDecision = {
+                        allowed: false,
+                        reason: 'cooldown_active',
+                        probability: strategicAttackGateState.lastProbability || STRATEGIC_ATTACK_GATE_CONFIG.baseProbability,
+                        roll: null,
+                        cooldownRemainingMs: cooldownMs - elapsed,
+                        cooldownMs,
+                    };
+                    strategicAttackGateState.lastDecisionReason = 'cooldown_active';
+                    return strategicAttackGateDecision;
+                }
+            }
+
+            const bonusCycles = Math.min(
+                STRATEGIC_ATTACK_GATE_CONFIG.noAttackBonusMaxCycles,
+                Math.max(0, Number(strategicAttackGateState.cyclesWithoutAttack) || 0),
+            );
+
+            let probability = STRATEGIC_ATTACK_GATE_CONFIG.baseProbability
+                + (bonusCycles * STRATEGIC_ATTACK_GATE_CONFIG.noAttackBonusPerCycle);
+
+            if (hasNemesisOpportunity) probability += STRATEGIC_ATTACK_GATE_CONFIG.nemesisBonus;
+            if (hasHighValueOpportunity) probability += STRATEGIC_ATTACK_GATE_CONFIG.highValueBonus;
+
+            probability = Math.min(STRATEGIC_ATTACK_GATE_CONFIG.maxProbability, clamp01(probability));
+            const roll = Math.random();
+            const allowed = roll <= probability;
+
+            strategicAttackGateState.lastProbability = probability;
+            strategicAttackGateState.lastRoll = roll;
+            strategicAttackGateState.lastDecisionReason = allowed ? 'probability_pass' : 'probability_blocked';
+            if (!allowed) {
+                strategicAttackGateState.cyclesWithoutAttack = Math.max(0, (strategicAttackGateState.cyclesWithoutAttack || 0) + 1);
+            }
+
+            strategicAttackGateDecision = {
+                allowed,
+                reason: allowed ? 'probability_pass' : 'probability_blocked',
+                probability,
+                roll,
+                cooldownRemainingMs: 0,
+                cooldownMs,
+            };
+
+            return strategicAttackGateDecision;
+        };
+
+        const markStrategicAttackCommitted = () => {
+            strategicAttackGateState.lastAttackAt = Date.now();
+            strategicAttackGateState.cyclesWithoutAttack = 0;
+            strategicAttackGateState.lastDecisionReason = 'attack_committed';
+        };
 
         reasoningLog.push(`=== DOCTRINA DE GUERRA PROFESIONAL (${archetype.toUpperCase()}) ===`);
 
@@ -153,6 +261,7 @@ export default class StrategicAI {
         let isMusteringForWar = false;
         let hasMaxPriorityGoal = false;
         let oasisFarmingTelemetry = null;
+        let strategicAttackIssued = false;
 
         if (nemesisId) {
             const nemesisTarget = targets.known.find(t => t.ownerId === nemesisId) || targets.unknown.find(t => t.ownerId === nemesisId);
@@ -185,8 +294,31 @@ export default class StrategicAI {
                                 if (bestForce.power >= requiredPower) {
                                     const attackCmds = this._planNemesisDestruction(bestForce, nemesisTarget, race, archetype, reasoningLog);
                                     if (attackCmds.length > 0) {
-                                        hasMaxPriorityGoal = true;
-                                        commands.push(...this._markCommandsAsMaxPriorityGoal(attackCmds, 'nemesis_assault'));
+                                        const gate = evaluateStrategicAttackGate({
+                                            hasNemesisOpportunity: true,
+                                            hasHighValueOpportunity: true,
+                                        });
+                                        if (gate.allowed) {
+                                            hasMaxPriorityGoal = true;
+                                            commands.push(...this._markCommandsAsMaxPriorityGoal(attackCmds, 'nemesis_assault'));
+                                            strategicAttackIssued = true;
+                                            markStrategicAttackCommitted();
+                                            reasoningLog.push(
+                                                `[PVP-GATE] Némesis habilitado. p=${(gate.probability * 100).toFixed(1)}% ` +
+                                                `roll=${(gate.roll * 100).toFixed(1)}% cd=${Math.round(gate.cooldownMs / 60000)}m.`
+                                            );
+                                        } else {
+                                            if (gate.reason === 'cooldown_active') {
+                                                reasoningLog.push(
+                                                    `[PVP-GATE] Ataque a némesis en cooldown (${Math.ceil(gate.cooldownRemainingMs / 60000)}m restantes).`
+                                                );
+                                            } else {
+                                                reasoningLog.push(
+                                                    `[PVP-GATE] Némesis bloqueado por probabilidad. ` +
+                                                    `p=${(gate.probability * 100).toFixed(1)}% roll=${(gate.roll * 100).toFixed(1)}%.`
+                                                );
+                                            }
+                                        }
                                     }
                                 } else {
                                     reasoningLog.push('[ESTRATEGIA] 🛑 PROTOCOLO DE REAGRUPAMIENTO ACTIVADO.');
@@ -234,49 +366,77 @@ export default class StrategicAI {
             && Boolean(target.intel)
             && target.intelGate?.intelFresh !== false,
         );
-
-        let strategicAttackIssued = false;
         if (!isMusteringForWar && !hasMaxPriorityGoal && strategicPvpTargets.length > 0) {
-            const strategicOffense = this._planDoctrinalStrategicOffense({
-                forces: offensiveReadyForces,
-                targets: strategicPvpTargets,
-                gameState,
-                ownerId,
-                race,
-                nemesisId,
-                doctrine,
-                log: reasoningLog,
+            const hasHighValueStrategicTarget = strategicPvpTargets.some(target => {
+                const targetType = this._classifyStrategicTargetType(target, nemesisId);
+                return targetType === 'nemesis'
+                    || targetType === 'punish_exposed_army'
+                    || targetType === 'high_value_siege_target'
+                    || targetType === 'expansion_village';
             });
 
-            if (strategicOffense.commands.length > 0) {
-                commands.push(...strategicOffense.commands);
-                strategicAttackIssued = true;
-            }
-            if (strategicOffense.logs.length > 0) {
-                reasoningLog.push(...strategicOffense.logs);
+            const gate = evaluateStrategicAttackGate({
+                hasNemesisOpportunity: Boolean(nemesisId),
+                hasHighValueOpportunity: hasHighValueStrategicTarget,
+            });
+
+            if (gate.allowed) {
+                const strategicOffense = this._planDoctrinalStrategicOffense({
+                    forces: offensiveReadyForces,
+                    targets: strategicPvpTargets,
+                    gameState,
+                    ownerId,
+                    race,
+                    nemesisId,
+                    doctrine,
+                    log: reasoningLog,
+                });
+
+                if (strategicOffense.commands.length > 0) {
+                    commands.push(...strategicOffense.commands);
+                    strategicAttackIssued = true;
+                    markStrategicAttackCommitted();
+                } else {
+                    strategicAttackGateState.cyclesWithoutAttack = Math.max(0, (strategicAttackGateState.cyclesWithoutAttack || 0) + 1);
+                }
+
+                if (strategicOffense.logs.length > 0) {
+                    reasoningLog.push(...strategicOffense.logs);
+                }
+
+                reasoningLog.push(
+                    `[PVP-GATE] Ofensiva habilitada. p=${(gate.probability * 100).toFixed(1)}% ` +
+                    `roll=${(gate.roll * 100).toFixed(1)}% cd=${Math.round(gate.cooldownMs / 60000)}m.`
+                );
+            } else if (gate.reason === 'cooldown_active') {
+                reasoningLog.push(`[PVP-GATE] Ofensiva estratégica en cooldown (${Math.ceil(gate.cooldownRemainingMs / 60000)}m restantes).`);
+            } else {
+                reasoningLog.push(
+                    `[PVP-GATE] Ofensiva estratégica omitida por probabilidad. ` +
+                    `p=${(gate.probability * 100).toFixed(1)}% roll=${(gate.roll * 100).toFixed(1)}%.`
+                );
             }
         }
 
         if (!isMusteringForWar) {
             if (hasMaxPriorityGoal || strategicAttackIssued) {
-                const blockReason = hasMaxPriorityGoal ? 'prioridad máxima' : 'ataque estratégico activo';
-                reasoningLog.push(`[FARMEO ROI] farm bloqueado por ${blockReason}.`);
-            } else {
-                const farmingResults = this._performOptimizedFarming(
-                    offensiveReadyForces,
-                    safeKnownTargets,
-                    nemesisId,
-                    race,
-                    personality,
-                    troopSpeed,
-                    gameState,
-                    ownerId,
-                    myVillages.reduce((sum, village) => sum + (village.population?.current || 0), 0),
-                );
-                commands.push(...farmingResults.commands);
-                if (farmingResults.logs.length > 0) reasoningLog.push(...farmingResults.logs);
-                oasisFarmingTelemetry = farmingResults.telemetry || null;
+                reasoningLog.push('[FARMEO ROI] Farm de oasis en paralelo con ofensiva estrategica (tropas remanentes).');
             }
+
+            const farmingResults = this._performOptimizedFarming(
+                offensiveReadyForces,
+                safeKnownTargets,
+                nemesisId,
+                race,
+                personality,
+                troopSpeed,
+                gameState,
+                ownerId,
+                myVillages.reduce((sum, village) => sum + (village.population?.current || 0), 0),
+            );
+            commands.push(...farmingResults.commands);
+            if (farmingResults.logs.length > 0) reasoningLog.push(...farmingResults.logs);
+            oasisFarmingTelemetry = farmingResults.telemetry || null;
         }
 
         return {
@@ -287,9 +447,13 @@ export default class StrategicAI {
                 militaryGate: {
                     hasMaxPriorityGoal,
                     isMusteringForWar,
-                    farmEvaluationExecuted: !hasMaxPriorityGoal && !strategicAttackIssued && !isMusteringForWar,
-                    farmBlockedByMaxPriorityGoal: hasMaxPriorityGoal && !isMusteringForWar,
-                    farmBlockedByStrategicAttack: strategicAttackIssued && !isMusteringForWar,
+                    farmEvaluationExecuted: !isMusteringForWar,
+                    farmBlockedByMaxPriorityGoal: false,
+                    farmBlockedByStrategicAttack: false,
+                    strategicAttackProbability: strategicAttackGateDecision?.probability || strategicAttackGateState.lastProbability || STRATEGIC_ATTACK_GATE_CONFIG.baseProbability,
+                    strategicAttackRoll: strategicAttackGateDecision?.roll ?? strategicAttackGateState.lastRoll,
+                    strategicAttackGateReason: strategicAttackGateDecision?.reason || strategicAttackGateState.lastDecisionReason || 'not_evaluated',
+                    strategicAttackCooldownMs: strategicAttackGateDecision?.cooldownMs || strategicAttackGateState.lastCooldownMs || getStrategicAttackCooldownMs(gameSpeed),
                     offensiveSuppressedByReactive: blockedForces.length > 0,
                     blockedVillagesCount: blockedForces.length,
                     offensiveReadyVillages: offensiveReadyForces.length,

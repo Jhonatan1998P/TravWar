@@ -5,6 +5,7 @@ import { getScaledCrannyCapacity, getScaledMerchantCapacityPerUnit, scaleCapacit
 import GameConfig from '../state/GameConfig.js';
 import { formatNumber, formatTime } from '@shared/lib/formatters.js';
 import toastUI from './ToastUI.js';
+import { markModalOpened, shouldIgnoreModalAction } from './modalInteractionGuard.js';
 import { unitSpriteManager } from './UnitSpriteManager.js';
 import uiRenderScheduler from './UIRenderScheduler.js';
 import { selectBuildingInfoPanelSignature } from './renderSelectors.js';
@@ -59,6 +60,10 @@ class BuildingInfoUI {
         mainPanel.addEventListener('click', e => {
             const button = e.target.closest('button[data-action]');
             if (!button || button.disabled) return;
+
+            if (shouldIgnoreModalAction(this.#lastOpenedAt)) {
+                return;
+            }
     
             const action = button.dataset.action;
             const unitId = button.dataset.unitId;
@@ -147,8 +152,7 @@ class BuildingInfoUI {
     _handleUpgradeClick() {
         if (!this.#currentSlotId || !this.#viewingType) return;
 
-        const timeSinceOpen = Date.now() - this.#lastOpenedAt;
-        if (timeSinceOpen < 500) {
+        if (shouldIgnoreModalAction(this.#lastOpenedAt, 500)) {
             return;
         }
 
@@ -264,7 +268,7 @@ class BuildingInfoUI {
         if (!this.#currentGameState) return;
         document.getElementById('building-tooltip').classList.add('hidden');
 
-        this.#lastOpenedAt = Date.now();
+        this.#lastOpenedAt = markModalOpened();
         
         this.#panelElement.classList.remove('panel-hidden');
         this.#panelElement.classList.add('panel-visible');
@@ -342,8 +346,7 @@ class BuildingInfoUI {
         mainPanel.querySelector('#build-content-container').addEventListener('click', e => {
             const button = e.target.closest('button[data-btype]:not([disabled])');
             if (button) {
-                const timeSinceOpen = Date.now() - this.#lastOpenedAt;
-                if (timeSinceOpen < 320) {
+                if (shouldIgnoreModalAction(this.#lastOpenedAt, 320)) {
                     return;
                 }
                 this.#viewingType = button.dataset.btype;

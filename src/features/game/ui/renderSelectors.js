@@ -10,6 +10,9 @@ function getActiveVillage(state) {
 }
 
 function getPerspectiveOwnerId(state) {
+    const activeVillage = getActiveVillage(state);
+    if (activeVillage?.ownerId) return activeVillage.ownerId;
+
     if (!state || !Array.isArray(state.players)) {
         return 'player';
     }

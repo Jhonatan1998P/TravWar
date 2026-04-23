@@ -1,7 +1,6 @@
 import { countCombatTroopsInVillages } from '../utils/AITroopUtils.js';
 import { MemoryManager } from '../index.js';
 
-const MAX_PRIORITY_GOAL = 'MAX_PRIORITY_GOAL';
 const MILITARY_ALLOWED_COMMANDS = new Set(['ATTACK', 'SPY', 'REINFORCE']);
 
 function getTargetTile(gameState, targetCoords) {
@@ -11,10 +10,6 @@ function getTargetTile(gameState, targetCoords) {
     return gameState.spatialIndex.get(tileKey)
         || gameState.mapData.find(tile => tile.x === targetCoords.x && tile.y === targetCoords.y)
         || null;
-}
-
-function isMaxPriorityGoalCommand(command) {
-    return command?.meta?.priority === MAX_PRIORITY_GOAL;
 }
 
 function isOasisRaidCommand(command, gameState) {
@@ -99,30 +94,7 @@ export function runMilitaryDecision({
     }
 
     const rawCommands = response.comandos || [];
-    const hasMaxPriorityGoal = rawCommands.some(isMaxPriorityGoalCommand);
-    const farmBlockedByMaxPriority = response.telemetry?.militaryGate?.farmBlockedByMaxPriorityGoal || hasMaxPriorityGoal;
-
     let commandsToExecute = rawCommands;
-    if (hasMaxPriorityGoal) {
-        const filteredOutFarmCommands = rawCommands.filter(command => isOasisRaidCommand(command, gameState));
-        if (filteredOutFarmCommands.length > 0) {
-            commandsToExecute = rawCommands.filter(command => !isOasisRaidCommand(command, gameState));
-        }
-
-        if (farmBlockedByMaxPriority) {
-            log(
-                'info',
-                null,
-                'Gate Prioridad Máxima',
-                'farm bloqueado por prioridad máxima.',
-                {
-                    maxPriorityCommands: rawCommands.filter(isMaxPriorityGoalCommand).length,
-                    oasisFarmCommandsFiltered: filteredOutFarmCommands.length,
-                },
-                'military',
-            );
-        }
-    }
 
     if (isUnderBeginnerProtection) {
         const blockedCommands = commandsToExecute.filter(command => !isAllowedUnderBeginnerProtection(command, gameState));

@@ -850,6 +850,7 @@ self.onmessage = function(event) {
         case 'mark_reports_as_read':
             if (gameState.unreadCounts) {
                 const targetOwnerId = payload?.ownerId
+                    || getActiveVillage()?.ownerId
                     || getHumanOwnerId();
                 if (gameState.unreadCounts[targetOwnerId] !== undefined) {
                     gameState.unreadCounts[targetOwnerId] = 0;

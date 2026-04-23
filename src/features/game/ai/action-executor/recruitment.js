@@ -10,7 +10,7 @@ const PHASE_BATCH_CONFIG = {
 const RECRUITMENT_CYCLE_MS = 3 * 60 * 1000;
 const SIEGE_TARGET_RAM_RATIO = 0.7;
 const EXCHANGE_RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
-const RECRUITMENT_BUDGET_BORROW_PROBABILITY = 0.1;
+const RECRUITMENT_BUDGET_BORROW_PROBABILITY = 0.15;
 const RECRUITMENT_BUDGET_BORROW_ECON_SHARE = 0.25;
 const RECRUITMENT_EXCHANGE_PROBABILITY = 0.25;
 const LANE_RECRUITMENT_BATCH_MODES = Object.freeze({
@@ -208,9 +208,7 @@ function maybeBorrowEconomicBudgetForRecruitment({ village, step, log }) {
         return { applied: false, reason: 'NO_AI_BUDGET' };
     }
 
-    const isCycleBatchStep = step?.countMode === 'cycle_batch';
-
-    if (!isCycleBatchStep && Math.random() > RECRUITMENT_BUDGET_BORROW_PROBABILITY) {
+    if (Math.random() > RECRUITMENT_BUDGET_BORROW_PROBABILITY) {
         return {
             applied: false,
             reason: 'PROBABILITY_GATE',
@@ -266,7 +264,7 @@ function maybeBorrowEconomicBudgetForRecruitment({ village, step, log }) {
             'info',
             village,
             'Prestamo Presupuesto',
-            `Prestamo ECO->MIL activado (10%) para reclutamiento. Transferido: ${movedText}. budget.mil final: {${militaryBudgetFinalText}}.`,
+            `Prestamo ECO->MIL activado (15%) para reclutamiento. Transferido: ${movedText}. budget.mil final: {${militaryBudgetFinalText}}.`,
             {
                 probability: RECRUITMENT_BUDGET_BORROW_PROBABILITY,
                 share: RECRUITMENT_BUDGET_BORROW_ECON_SHARE,

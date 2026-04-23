@@ -6,6 +6,9 @@ import { perfCollector } from '@shared/lib/perf.js';
 import { selectReportsSignature, selectUnreadPlayerReports } from '../ui/renderSelectors.js';
 
 function getPerspectiveOwnerId(state) {
+    const activeVillage = state?.villages?.find(village => village.id === state.activeVillageId);
+    if (activeVillage?.ownerId) return activeVillage.ownerId;
+
     if (!state?.players) return 'player';
 
     const explicitPlayer = state.players.find(player => player.id === 'player');
@@ -42,7 +45,6 @@ class ReportsView {
 
         this.#reportListUI = new ReportListUI('reports-container');
         this.initializeEventListeners();
-        gameManager.sendCommand('mark_reports_as_read');
         gameManager.sendCommand('get_latest_state');
 
         perfCollector.markEnd('view.reports.mount');
@@ -69,6 +71,11 @@ class ReportsView {
         this.#gameState = state;
         
         this.#reportListUI.render(state);
+
+        const perspectiveOwnerId = getPerspectiveOwnerId(state);
+        if ((state.unreadCounts?.[perspectiveOwnerId] || 0) > 0) {
+            gameManager.sendCommand('mark_reports_as_read', { ownerId: perspectiveOwnerId });
+        }
 
         if (!this.#didReportFirstMeaningfulPaint) {
             this.#didReportFirstMeaningfulPaint = true;

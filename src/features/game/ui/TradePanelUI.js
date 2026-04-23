@@ -4,6 +4,7 @@ import GameConfig from '../state/GameConfig.js';
 import { getScaledMerchantCapacityPerUnit } from '../core/capacityScaling.js';
 import { formatNumber } from '@shared/lib/formatters.js';
 import toastUI from './ToastUI.js';
+import { markModalOpened, shouldIgnoreModalAction } from './modalInteractionGuard.js';
 
 const ICONS = {
     wood: `<img src="/icons/wood.png" alt="Madera" class="h-5 w-5">`,
@@ -22,6 +23,7 @@ class TradePanelUI {
     #gameConfig = null;
     #merchantCapacity = 0;
     #availableMerchants = 0;
+    #lastOpenedAt = 0;
 
     constructor() {
         this.#mainContainer = document.getElementById('village-container');
@@ -64,6 +66,8 @@ class TradePanelUI {
             const action = e.target.closest('[data-action]')?.dataset.action;
             if (!action) return;
 
+            if (action !== 'close' && shouldIgnoreModalAction(this.#lastOpenedAt)) return;
+
             switch (action) {
                 case 'close': this.hide(); break;
                 case 'send': this._handleSendClick(); break;
@@ -85,6 +89,7 @@ class TradePanelUI {
         this.#gameConfig = new GameConfig().getSettings();
         this.#activeVillage = this.#gameState.villages.find(v => v.id === this.#gameState.activeVillageId);
         if (!this.#activeVillage) return;
+        this.#lastOpenedAt = markModalOpened();
 
         this._render();
         this.#panelElement.classList.remove('panel-hidden');

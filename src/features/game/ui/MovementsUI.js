@@ -7,6 +7,9 @@ import { reconcileList } from './reconcileList.js';
 import countdownService from './CountdownService.js';
 
 function getPerspectiveOwnerId(state) {
+    const activeVillage = state?.villages?.find(village => village.id === state.activeVillageId);
+    if (activeVillage?.ownerId) return activeVillage.ownerId;
+
     if (!state?.players) return 'player';
 
     const explicitPlayer = state.players.find(player => player.id === 'player');

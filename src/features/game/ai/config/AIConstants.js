@@ -7,7 +7,7 @@ export const AI_GOAL_MANAGER_CONSTANTS = Object.freeze({
 });
 
 export const AI_STRATEGY_CONSTANTS = Object.freeze({
-    searchRadius: 100,
+    searchRadius: 30,
     scoutsPerMission: 5,
     minCatsForTrain: 20,
     maxWaves: 5,

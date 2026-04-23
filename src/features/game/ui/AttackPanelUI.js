@@ -2,6 +2,7 @@ import gameManager from '@game/state/GameManager.js';
 import { gameData, NON_TARGETABLE_BUILDINGS } from '../core/GameData.js';
 import { formatNumber } from '@shared/lib/formatters.js';
 import toastUI from './ToastUI.js';
+import { markModalOpened, shouldIgnoreModalAction } from './modalInteractionGuard.js';
 import { unitSpriteManager } from './UnitSpriteManager.js';
 
 class AttackPanelUI {
@@ -11,6 +12,7 @@ class AttackPanelUI {
     #gameState = null;
     #activeVillage = null;
     #troopInputs = new Map();
+    #lastOpenedAt = 0;
 
     constructor() {
         this.#mainContainer = document.getElementById('village-container');
@@ -56,6 +58,8 @@ class AttackPanelUI {
             const action = e.target.closest('[data-action]')?.dataset.action;
             if (!action) return;
 
+            if (action !== 'close' && shouldIgnoreModalAction(this.#lastOpenedAt)) return;
+
             switch (action) {
                 case 'close': this.hide(); break;
                 case 'send': this._handleSendClick(); break;
@@ -87,6 +91,7 @@ class AttackPanelUI {
         this.#gameState = gameState;
         this.#activeVillage = this.#gameState.villages.find(v => v.id === this.#gameState.activeVillageId);
         if (!this.#activeVillage) return;
+        this.#lastOpenedAt = markModalOpened();
         
         this.#troopInputs.clear();
         this._render();

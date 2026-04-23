@@ -1,4 +1,5 @@
 // js/ui/ActivityModalUI.js
+import { markModalOpened, shouldIgnoreModalAction } from './modalInteractionGuard.js';
 
 class ActivityModalUI {
     #modalElement;
@@ -10,6 +11,7 @@ class ActivityModalUI {
     #handleCloseClick;
     #handleTabClick;
     #isInitialized = false;
+    #lastOpenedAt = 0;
 
     constructor() {
         this.#modalElement = document.getElementById('activity-modal');
@@ -62,6 +64,10 @@ class ActivityModalUI {
     }
 
     _switchTab(event) {
+        if (shouldIgnoreModalAction(this.#lastOpenedAt)) {
+            return;
+        }
+
         const tabId = event.currentTarget.dataset.tab;
 
         // Actualiza los estilos de los botones de las pestañas
@@ -76,6 +82,7 @@ class ActivityModalUI {
     }
 
     show() {
+        this.#lastOpenedAt = markModalOpened();
         this.#modalElement.classList.remove('panel-hidden');
         this.#modalElement.classList.add('panel-visible');
     }

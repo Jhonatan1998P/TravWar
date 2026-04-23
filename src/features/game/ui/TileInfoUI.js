@@ -8,6 +8,7 @@ import toastUI from './ToastUI.js';
 import { unitSpriteManager } from './UnitSpriteManager.js';
 import uiRenderScheduler from './UIRenderScheduler.js';
 import { selectTileInfoPanelSignature } from './renderSelectors.js';
+import { markModalOpened, shouldIgnoreModalAction } from './modalInteractionGuard.js';
 
 const ICON_PATHS = {
     wood: '/icons/wood.png',
@@ -37,6 +38,7 @@ class TileInfoUI {
     #boundFooterClick;
     #boundGameStateUpdate;
     #boundFarmListCommandResult;
+    #lastOpenedAt = 0;
 
     constructor() {
         this.#mainContainer = document.getElementById('village-container');
@@ -99,6 +101,10 @@ class TileInfoUI {
     }
 
     _handleFooterClick(event) {
+        if (shouldIgnoreModalAction(this.#lastOpenedAt)) {
+            return;
+        }
+
         const button = event.target.closest('button[data-action]');
         if (!button || button.disabled) return;
 
@@ -370,6 +376,7 @@ class TileInfoUI {
 
         this.#currentTile = tileInfo;
         this.#gameState = gameState;
+        this.#lastOpenedAt = markModalOpened();
 
         this.#panelElement.classList.remove('panel-hidden');
         this.#panelElement.classList.add('panel-visible');

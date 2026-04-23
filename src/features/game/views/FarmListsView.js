@@ -4,12 +4,16 @@ import { FARM_LIST_LIMITS, gameData, resolveDefaultFarmTroops } from '../core/Ga
 import toastUI from '../ui/ToastUI.js';
 import { unitSpriteManager } from '../ui/UnitSpriteManager.js';
 import uiRenderScheduler from '../ui/UIRenderScheduler.js';
+import { markModalOpened, shouldIgnoreModalAction } from '../ui/modalInteractionGuard.js';
 import { perfCollector } from '@shared/lib/perf.js';
 import { selectFarmListsViewSignature } from '../ui/renderSelectors.js';
 
 const VIEW_SOURCE = 'farm-lists-view';
 
 function getPerspectiveOwnerId(state) {
+    const activeVillage = state?.villages?.find(village => village.id === state.activeVillageId);
+    if (activeVillage?.ownerId) return activeVillage.ownerId;
+
     if (!state?.players) return 'player';
 
     const explicitPlayer = state.players.find(player => player.id === 'player');
@@ -697,6 +701,7 @@ class FarmListsView {
                 entryId,
                 draftTroops: {},
                 isSaving: false,
+                openedAt: markModalOpened(),
             };
 
             const resolved = this._resolveEditorEntry(ownerId);
@@ -716,6 +721,7 @@ class FarmListsView {
 
         if (action === 'farm-view-delete-editor') {
             if (!this.#entryEditorContext || this.#entryEditorContext.isSaving) return;
+            if (shouldIgnoreModalAction(this.#entryEditorContext.openedAt)) return;
             const context = this.#entryEditorContext;
             const resolved = this._resolveEditorEntry(ownerId);
             if (!resolved) {
@@ -752,6 +758,7 @@ class FarmListsView {
 
         if (action === 'farm-view-reset-editor') {
             if (!this.#entryEditorContext || this.#entryEditorContext.isSaving) return;
+            if (shouldIgnoreModalAction(this.#entryEditorContext.openedAt)) return;
             this.#entryEditorContext.draftTroops = this._normalizeDefaultTroops(this.#entryEditorContext.ownerRace);
             this._render();
             return;
@@ -759,6 +766,7 @@ class FarmListsView {
 
         if (action === 'farm-view-save-editor') {
             if (!this.#entryEditorContext || this.#entryEditorContext.isSaving) return;
+            if (shouldIgnoreModalAction(this.#entryEditorContext.openedAt)) return;
             const context = this.#entryEditorContext;
             const resolved = this._resolveEditorEntry(ownerId);
             if (!resolved) {
