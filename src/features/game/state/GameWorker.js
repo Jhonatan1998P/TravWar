@@ -23,6 +23,7 @@ import {
 } from './worker/commands.js';
 import { processMovements as processMovementsStep } from './worker/movements.js';
 import { simulateOfflineProgress as simulateOfflineProgressStep } from './worker/offline.js';
+import { compareMovementsByArrival } from './worker/movementOrdering.js';
 import {
     addResourceIncomeToVillage,
     initializeAIVillageBudget,
@@ -501,7 +502,7 @@ function handleTradeArrival(movement) {
     };
     
     gameState.movements.push(returnMovement);
-    gameState.movements.sort((a, b) => a.arrivalTime - b.arrivalTime);
+    gameState.movements.sort(compareMovementsByArrival);
 }
 
 function handleTradeReturnArrival(movement) {}

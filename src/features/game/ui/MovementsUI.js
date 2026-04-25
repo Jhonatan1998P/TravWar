@@ -5,6 +5,10 @@ import uiRenderScheduler from './UIRenderScheduler.js';
 import { selectMovementsSignature } from './renderSelectors.js';
 import { reconcileList } from './reconcileList.js';
 import countdownService from './CountdownService.js';
+import gameManager from '@game/state/GameManager.js';
+import { FARM_LIST_LIMITS } from '../core/data/constants.js';
+
+const QUICK_FARM_LIST_SOURCE = 'activity-movements-quick-send';
 
 function getPerspectiveOwnerId(state) {
     const activeVillage = state?.villages?.find(village => village.id === state.activeVillageId);
@@ -37,6 +41,9 @@ class MovementsUI {
     #emptyState;
     #countdownScope;
     #schedulerKey;
+    #quickFarmListsButton;
+    #handleQuickFarmListsClick;
+    #handleFarmListSendResult;
 
     constructor(containerId) {
         this.#container = document.getElementById(containerId);
@@ -47,8 +54,11 @@ class MovementsUI {
 
         this.#countdownScope = `movements:${containerId}`;
         this.#schedulerKey = `movements-ui-${containerId}`;
+        this.#handleQuickFarmListsClick = () => this.#sendFirstFarmList();
+        this.#handleFarmListSendResult = this.#onFarmListSendResult.bind(this);
 
         this.#setupStaticMarkup();
+        document.addEventListener('farm_list:send_result', this.#handleFarmListSendResult);
 
         uiRenderScheduler.register(this.#schedulerKey, (gameState) => this.render(gameState.state), [
             selectMovementsSignature
@@ -64,10 +74,94 @@ class MovementsUI {
         this.#activeCountdownKeys.clear();
         this.#movementNodes.clear();
         this.#notifiedAttackIds.clear();
+        this.#quickFarmListsButton?.removeEventListener('click', this.#handleQuickFarmListsClick);
+        document.removeEventListener('farm_list:send_result', this.#handleFarmListSendResult);
+    }
+
+    #getFirstFarmListContext() {
+        if (!this.#gameState) return null;
+
+        const ownerId = getPerspectiveOwnerId(this.#gameState);
+        const originVillage = this.#gameState.villages.find(village => village.id === this.#gameState.activeVillageId && village.ownerId === ownerId)
+            || this.#gameState.villages.find(village => village.ownerId === ownerId);
+        const firstList = this.#gameState.farmListsByOwnerId?.[ownerId]?.lists?.[0] || null;
+
+        return { ownerId, originVillage, firstList };
+    }
+
+    #sendFirstFarmList() {
+        const context = this.#getFirstFarmListContext();
+        if (!context?.originVillage) {
+            toastUI.show('No hay aldea de origen disponible para mandar la lista.', 'warning');
+            return;
+        }
+
+        if (!context.firstList) {
+            toastUI.show('No tienes listas de vacas creadas.', 'warning');
+            return;
+        }
+
+        const entries = Array.isArray(context.firstList.entries) ? context.firstList.entries : [];
+        if (entries.length === 0) {
+            toastUI.show(`La lista "${context.firstList.name}" no tiene objetivos.`, 'warning');
+            return;
+        }
+
+        gameManager.sendCommand('farm_list_send_entries', {
+            ownerId: context.ownerId,
+            listId: context.firstList.id,
+            originVillageId: context.originVillage.id,
+            missionType: FARM_LIST_LIMITS.defaultMissionType,
+            meta: {
+                source: QUICK_FARM_LIST_SOURCE,
+                action: 'send-first-list',
+                listName: context.firstList.name,
+            },
+        });
+    }
+
+    #onFarmListSendResult(event) {
+        const detail = event?.detail;
+        if (detail?.request?.meta?.source !== QUICK_FARM_LIST_SOURCE) return;
+
+        const listName = detail.request?.meta?.listName || 'primera lista';
+        const sentCount = Number(detail.sentCount) || 0;
+        const failedCount = Number(detail.failedCount) || 0;
+
+        if (detail.success) {
+            const suffix = failedCount > 0 ? ` (${failedCount} no enviados)` : '';
+            toastUI.show(`Lista "${listName}" enviada: ${sentCount} ataques${suffix}.`, 'success');
+            return;
+        }
+
+        toastUI.show(`No se pudo mandar "${listName}".`, 'error');
     }
 
     #setupStaticMarkup() {
         this.#container.replaceChildren();
+
+        const header = document.createElement('div');
+        header.className = 'mb-3 flex items-center justify-between gap-3 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2';
+
+        const headerText = document.createElement('div');
+        headerText.className = 'min-w-0';
+
+        const title = document.createElement('p');
+        title.className = 'text-xs font-semibold uppercase tracking-wide text-amber-200';
+        title.textContent = 'Listas de vacas';
+
+        const subtitle = document.createElement('p');
+        subtitle.className = 'truncate text-[11px] text-gray-400';
+        subtitle.textContent = 'Acceso rapido para lanzar objetivos guardados';
+
+        this.#quickFarmListsButton = document.createElement('button');
+        this.#quickFarmListsButton.type = 'button';
+        this.#quickFarmListsButton.className = 'shrink-0 rounded-md border border-amber-400/40 bg-amber-500/15 px-3 py-1.5 text-xs font-bold text-amber-100 transition hover:bg-amber-500/25 focus:outline-none focus:ring-2 focus:ring-amber-400/50';
+        this.#quickFarmListsButton.textContent = 'Mandar lista';
+        this.#quickFarmListsButton.addEventListener('click', this.#handleQuickFarmListsClick);
+
+        headerText.append(title, subtitle);
+        header.append(headerText, this.#quickFarmListsButton);
 
         this.#list = document.createElement('ul');
         this.#list.className = 'space-y-3';
@@ -76,7 +170,7 @@ class MovementsUI {
         this.#emptyState.className = 'text-center text-gray-500 text-sm py-4';
         this.#emptyState.textContent = 'No hay movimientos de tropas.';
 
-        this.#container.append(this.#list, this.#emptyState);
+        this.#container.append(header, this.#list, this.#emptyState);
     }
 
     _subscribeCountdown(movement, nextCountdownKeys) {
@@ -287,6 +381,13 @@ class MovementsUI {
         });
 
         this.#emptyState.classList.toggle('hidden', movements.length > 0);
+
+        const firstList = this.#getFirstFarmListContext()?.firstList;
+        if (this.#quickFarmListsButton) {
+            this.#quickFarmListsButton.title = firstList
+                ? `Mandar todas las entradas de "${firstList.name}"`
+                : 'No hay listas de vacas creadas';
+        }
 
         reconcileList(
             this.#list,

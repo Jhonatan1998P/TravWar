@@ -143,6 +143,9 @@ class BuildingInfoUI {
         this.#currentGameState = state;
         if (this.#panelElement.classList.contains('panel-visible')) {
             this._updateCosts();
+            if (this.#viewingType === 'smithy') {
+                this._updateSmithyList();
+            }
             if (this.#viewingType === 'rallyPoint') {
                 this._updateRallyPointFarmListPanel();
             }

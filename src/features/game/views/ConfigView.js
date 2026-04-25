@@ -236,6 +236,8 @@ class ConfigView {
     _updateAISelectors() {
         const count = parseInt(this.#inputs['ai-count'].value, 10);
         const container = document.getElementById('ai-races-container');
+        const existingSelections = Array.from(container.querySelectorAll('select')).map(select => select.value);
+        const savedRaces = this.#config.getSettings().aiRaces || [];
         container.innerHTML = '';
 
         const playableRaces = Object.keys(gameData.units).filter(r => !['nature', 'natars'].includes(r));
@@ -250,12 +252,15 @@ class ConfigView {
             const select = document.createElement('select');
             select.id = `ai-race-${i}`;
             select.className = "mt-1 w-full bg-btn-secondary-bg border border-primary-border text-white rounded-md p-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500";
+            const selectedRace = playableRaces.includes(existingSelections[i])
+                ? existingSelections[i]
+                : (playableRaces.includes(savedRaces[i]) ? savedRaces[i] : playableRaces[(i + 1) % playableRaces.length]);
             
             playableRaces.forEach(raceKey => {
                 const option = document.createElement('option');
                 option.value = raceKey;
                 option.textContent = gameData.units[raceKey].name;
-                if (raceKey === playableRaces[(i + 1) % playableRaces.length]) {
+                if (raceKey === selectedRace) {
                     option.selected = true;
                 }
                 select.appendChild(option);

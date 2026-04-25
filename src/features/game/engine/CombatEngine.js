@@ -5,6 +5,13 @@ import { MemoryManager } from '../ai/index.js';
 import { calculateBeastBountyValue } from '../core/OasisEconomy.js';
 import { getScaledCrannyCapacity } from '../core/capacityScaling.js';
 
+let returnMovementIdSequence = 0;
+
+function createReturnMovementId(now, originVillageId) {
+    returnMovementIdSequence = (returnMovementIdSequence + 1) % 1000000;
+    return `${now}-mov-return-${originVillageId}-${returnMovementIdSequence}`;
+}
+
 export class CombatEngine {
     _gameState;
     _gameConfig;
@@ -473,8 +480,10 @@ export class CombatEngine {
         if (defendingContingents.some(c => c.id === 'nature')) {
             const totalBountyFromBeasts = calculateBeastBountyValue(totalDefenderLosses.losses);
             if (totalBountyFromBeasts > 0) {
-                const distributedBounty = Math.floor(totalBountyFromBeasts / 4);
-                bounty.wood = distributedBounty; bounty.stone = distributedBounty; bounty.iron = distributedBounty; bounty.food = distributedBounty;
+                bounty.wood = Math.floor(totalBountyFromBeasts * 0.3);
+                bounty.stone = Math.floor(totalBountyFromBeasts * 0.3);
+                bounty.iron = Math.floor(totalBountyFromBeasts * 0.3);
+                bounty.food = Math.floor(totalBountyFromBeasts * 0.1);
             }
         }
 
@@ -572,7 +581,7 @@ export class CombatEngine {
         };
         
         return {
-            id: `${now}-mov-return-${originVillage.id}`,
+            id: createReturnMovementId(now, originVillage.id),
             type: 'return',
             ownerId: this._movement.ownerId,
             originVillageId: this._movement.originVillageId,

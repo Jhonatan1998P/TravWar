@@ -1,14 +1,14 @@
 ## FASE 1: Budget Ratios 65/35
 
 **Lane Construcción:**
-- Campos al 6
+- Campos al 8
 - Edificio principal al 10
 - Cuartel al 10
 - Academia al 10
-- Herrería al 10
+- Herrería al 8
 - Almacén y granero al 15
-- Mercado al 3
-- Embajada al 3
+- Escondite al 10
+- Mercado al 1
 - Muralla al 10
 
 **Lane Investigación:**
@@ -27,9 +27,7 @@
 ## FASE 2: Budget Ratios 65/35
 
 **Lane Construcción:**
-- Campos al 8
-- Academia al 15
-- Muralla al 15
+- Campos al 9
 
 **Lane Investigación:**
 

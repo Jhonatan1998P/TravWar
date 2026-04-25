@@ -5,9 +5,16 @@ import {
     resolveDefaultFarmTroops,
 } from '../../core/data/constants.js';
 import { getScaledMerchantCapacityPerUnit } from '../../core/capacityScaling.js';
+import { compareMovementsByArrival } from './movementOrdering.js';
 
 const HOSTILE_MISSION_TYPES = new Set(['attack', 'raid', 'espionage']);
 const FARM_LIST_MISSION_TYPES = new Set(['raid', 'attack', 'espionage']);
+let movementIdSequence = 0;
+
+function createMovementId(prefix, startTime, villageId) {
+    movementIdSequence = (movementIdSequence + 1) % 1000000;
+    return `${startTime}-${prefix}-${villageId}-${movementIdSequence}`;
+}
 
 function getOwnerTotalPopulation(gameState, ownerId) {
     return (gameState?.villages || [])
@@ -361,7 +368,7 @@ export function handleSendMovementCommand({ payload, gameState, gameConfig, game
     }
 
     const newMovement = {
-        id: `${startTime}-mov-${village.id}`,
+        id: createMovementId('mov', startTime, village.id),
         type: missionType,
         ownerId: village.ownerId,
         originVillageId: village.id,
@@ -375,7 +382,7 @@ export function handleSendMovementCommand({ payload, gameState, gameConfig, game
     };
 
     gameState.movements.push(newMovement);
-    gameState.movements.sort((a, b) => a.arrivalTime - b.arrivalTime);
+    gameState.movements.sort(compareMovementsByArrival);
 
     if (targetTile && targetTile.type === 'village' && targetTile.ownerId.startsWith('ai_') && targetTile.ownerId !== village.ownerId) {
         const targetAIController = aiControllers.find(controller => controller.getOwnerId() === targetTile.ownerId);
@@ -453,7 +460,7 @@ export function handleSendMerchantsCommand({ payload, gameState, gameConfig, gam
     const startTime = Date.now();
 
     gameState.movements.push({
-        id: `${startTime}-mov-trade-${village.id}`,
+        id: createMovementId('mov-trade', startTime, village.id),
         type: 'trade',
         ownerId: village.ownerId,
         originVillageId: village.id,
@@ -466,7 +473,7 @@ export function handleSendMerchantsCommand({ payload, gameState, gameConfig, gam
         arrivalTime: startTime + travelTimeMs,
     });
 
-    gameState.movements.sort((a, b) => a.arrivalTime - b.arrivalTime);
+    gameState.movements.sort(compareMovementsByArrival);
     return { success: true };
 }
 

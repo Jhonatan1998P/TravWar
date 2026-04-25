@@ -239,18 +239,16 @@ export class GameStateFactory {
             const ownerId = `ai_${i}`;
             players.push({ id: ownerId, race: aiRace, isUnderProtection: true });
 
-            const { x: aiX, y: aiY, tileIndex: aiTileIndex, valleyType: randomValleyType } = this.#findValidSpawnPoint(mapData, spatialIndex, random);
+            const { x: aiX, y: aiY, tileIndex: aiTileIndex } = this.#findValidSpawnPoint(mapData, spatialIndex, random);
             const aiVillageId = `v_ai_${i}_${Date.now()}`;
-            
-            const finalValleyType = (ownerId === 'ai_0') ? '4-4-4-6' : randomValleyType;
-            
+
             allVillages.push(this.createVillageObject(
                 aiVillageId,
                 `Aldea IA ${i + 1}`,
                 aiRace,
                 ownerId,
                 { x: aiX, y: aiY },
-                finalValleyType,
+                '4-4-4-6',
                 { startResourcesFromBaseCapacityRatio: STARTING_RESOURCES_BASE_CAPACITY_RATIO },
             ));
             mapData[aiTileIndex] = { x: aiX, y: aiY, type: 'village', villageId: aiVillageId, ownerId: ownerId, race: aiRace };

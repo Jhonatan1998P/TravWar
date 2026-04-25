@@ -1,12 +1,6 @@
 import gameManager from '@game/state/GameManager.js';
 import { renderBuildingSlots, initializeBuildingSlotClicks } from '../ui/BuildingSlotsUI.js';
 import { renderResourceBar } from '../ui/ResourceBarUI.js';
-import ConstructionQueueUI from '../ui/ConstructionQueueUI.js';
-import RecruitmentQueueUI from '../ui/RecruitmentQueueUI.js';
-import ResearchQueueUI from '../ui/ResearchQueueUI.js';
-import SmithyQueueUI from '../ui/SmithyQueueUI.js';
-import TroopsUI from '../ui/TroopsUI.js';
-import MovementsUI from '../ui/MovementsUI.js';
 import toastUI from '../ui/ToastUI.js';
 import { gameData } from '../core/GameData.js';
 import { formatNumber } from '@shared/lib/formatters.js';
@@ -17,12 +11,6 @@ import { selectVillageVisualSignature } from '../ui/renderSelectors.js';
 class VillageView {
     #populationDisplay;
     #gameState;
-    #constructionQueueUI;
-    #recruitmentQueueUI;
-    #researchQueueUI;
-    #smithyQueueUI;
-    #troopsUI;
-    #movementsUI;
     #lastVillageRenderSignature = '';
     #didReportFirstMeaningfulPaint = false;
 
@@ -49,13 +37,6 @@ class VillageView {
 
         this.#populationDisplay = document.getElementById('population-display');
 
-        this.#constructionQueueUI = new ConstructionQueueUI('construction-queue-container');
-        this.#recruitmentQueueUI = new RecruitmentQueueUI('tab-panel-recruitment');
-        this.#researchQueueUI = new ResearchQueueUI('research-queue-container', 'research-queue-wrapper');
-        this.#smithyQueueUI = new SmithyQueueUI('smithy-queue-container', 'smithy-queue-wrapper');
-        this.#troopsUI = new TroopsUI('tab-panel-troops');
-        this.#movementsUI = new MovementsUI('tab-panel-movements');
-
         initializeBuildingSlotClicks(document.getElementById('mainViewContainer'));
 
         this.initializeEventListeners();
@@ -70,20 +51,6 @@ class VillageView {
         document.removeEventListener('notify:recruitment_finished', this._handleRecruitmentFinished);
         document.removeEventListener('notify:research_finished', this._handleResearchFinished);
         document.removeEventListener('notify:smithy_finished', this._handleSmithyFinished);
-
-        this.#constructionQueueUI?.destroy?.();
-        this.#recruitmentQueueUI?.destroy?.();
-        this.#researchQueueUI?.destroy?.();
-        this.#smithyQueueUI?.destroy?.();
-        this.#troopsUI?.destroy?.();
-        this.#movementsUI?.destroy?.();
-
-        this.#constructionQueueUI = null;
-        this.#recruitmentQueueUI = null;
-        this.#researchQueueUI = null;
-        this.#smithyQueueUI = null;
-        this.#troopsUI = null;
-        this.#movementsUI = null;
     }
 
     initializeEventListeners() {

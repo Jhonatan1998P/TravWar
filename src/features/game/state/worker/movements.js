@@ -1,3 +1,5 @@
+import { compareMovementsByArrival } from './movementOrdering.js';
+
 function applyVillageUpdates(gameState, villageUpdates) {
     villageUpdates.forEach(update => {
         const village = gameState.villages.find(candidate => candidate.id === update.villageId);
@@ -140,7 +142,7 @@ function processCombatMovement({
     }
 
     if (results.movementsToCreate.length > 0) {
-        gameState.movements.sort((a, b) => a.arrivalTime - b.arrivalTime);
+        gameState.movements.sort(compareMovementsByArrival);
     }
 }
 

@@ -20,26 +20,23 @@ export const EGYPTIAN_PHASE_PROFILE = Object.freeze({
     }),
 
     PHASE_ONE_INFRASTRUCTURE_TARGETS: Object.freeze({
-        resourceFieldsLevel: 6,
+        resourceFieldsLevel: 8,
         buildingLevels: Object.freeze({
             mainBuilding: 10,
             barracks: 10,
             academy: 10,
-            smithy: 10,
+            smithy: 8,
             warehouse: 15,
             granary: 15,
-            marketplace: 3,
-            embassy: 3,
+            cranny: 10,
+            marketplace: 1,
             cityWall: 10,
         }),
     }),
 
     PHASE_TWO_INFRASTRUCTURE_TARGETS: Object.freeze({
-        resourceFieldsLevel: 8,
-        buildingLevels: Object.freeze({
-            academy: 15,
-            cityWall: 15,
-        }),
+        resourceFieldsLevel: 9,
+        buildingLevels: Object.freeze({}),
     }),
 
     PHASE_THREE_INFRASTRUCTURE_TARGETS: Object.freeze({
@@ -91,15 +88,15 @@ export const EGYPTIAN_PHASE_PROFILE = Object.freeze({
     PHASE_LANE_STEPS: Object.freeze({
         phase1: Object.freeze({
             construction: Object.freeze([
-                { type: 'resource_fields_level', level: 6 },
+                { type: 'resource_fields_level', level: 8 },
                 { type: 'building', buildingType: 'mainBuilding', level: 10 },
                 { type: 'building', buildingType: 'barracks', level: 10 },
                 { type: 'building', buildingType: 'academy', level: 10 },
-                { type: 'building', buildingType: 'smithy', level: 10 },
+                { type: 'building', buildingType: 'smithy', level: 8 },
                 { type: 'building', buildingType: 'warehouse', level: 15 },
                 { type: 'building', buildingType: 'granary', level: 15 },
-                { type: 'building', buildingType: 'marketplace', level: 3 },
-                { type: 'building', buildingType: 'embassy', level: 3 },
+                { type: 'building', buildingType: 'cranny', level: 10 },
+                { type: 'building', buildingType: 'marketplace', level: 1 },
                 { type: 'building', buildingType: 'cityWall', level: 10 },
             ]),
             research: Object.freeze([
@@ -112,9 +109,7 @@ export const EGYPTIAN_PHASE_PROFILE = Object.freeze({
         }),
         phase2: Object.freeze({
             construction: Object.freeze([
-                { type: 'resource_fields_level', level: 8 },
-                { type: 'building', buildingType: 'academy', level: 15 },
-                { type: 'building', buildingType: 'cityWall', level: 15 },
+                { type: 'resource_fields_level', level: 9 },
             ]),
             research: Object.freeze([]),
             upgrade: Object.freeze([

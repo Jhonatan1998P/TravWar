@@ -255,7 +255,9 @@ export function selectMovementsSignature(payload) {
         return '';
     }
 
+    const perspectiveOwnerId = getPerspectiveOwnerId(state);
     const villagesSignature = selectVillageListSignature(payload);
+    const ownerFarmListsSignature = farmListsSignature(state.farmListsByOwnerId?.[perspectiveOwnerId]?.lists || []);
     const movementsSignature = (state.movements || [])
         .map(movement => {
             const payloadSignature = objectSignature(movement.payload || {});
@@ -263,7 +265,7 @@ export function selectMovementsSignature(payload) {
         })
         .join(';');
 
-    return `${state.activeVillageId || ''}:${villagesSignature}:${movementsSignature}`;
+    return `${state.activeVillageId || ''}:${perspectiveOwnerId}:${villagesSignature}:${ownerFarmListsSignature}:${movementsSignature}`;
 }
 
 export function selectMapViewSignature(payload) {
