@@ -162,11 +162,14 @@
   }
 
   body {
-    background-color: #120d0a;
+    @apply font-sans;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    line-height: 1.55;
+    background-color: #030303;
     background-image:
-      radial-gradient(circle at 15% 10%, rgba(249, 115, 22, 0.22), transparent 26rem),
-      radial-gradient(circle at 88% 78%, rgba(153, 27, 27, 0.24), transparent 24rem),
-      linear-gradient(rgba(18, 13, 10, 0.45), rgba(18, 13, 10, 0.86)),
+      radial-gradient(circle at 15% 10%, rgba(245, 196, 81, 0.12), transparent 26rem),
+      radial-gradient(circle at 88% 78%, rgba(249, 115, 22, 0.10), transparent 24rem),
+      linear-gradient(rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0.92)),
       url('/background/fondo.jpg');
     background-size: cover;
     background-repeat: no-repeat;
@@ -181,8 +184,8 @@
     pointer-events: none;
     z-index: -1;
     background-image:
-      linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+      linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
     background-size: 34px 34px;
     mask-image: radial-gradient(circle at center, black, transparent 78%);
   }
@@ -197,7 +200,23 @@
   h2,
   h3,
   legend {
-    @apply font-display tracking-wide;
+    @apply font-display tracking-wide text-war-mist;
+    text-wrap: balance;
+    text-shadow: 0 2px 18px rgba(245, 196, 81, 0.10);
+  }
+
+  p,
+  li,
+  label,
+  input,
+  select,
+  button {
+    letter-spacing: -0.01em;
+  }
+
+  small,
+  .text-xs {
+    letter-spacing: 0.015em;
   }
 
   button,
@@ -340,20 +359,31 @@
   }
 
   .nav-button {
-    @apply min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl border border-transparent text-stone-300 transition-all duration-200 ease-out;
+    @apply min-h-10 min-w-12 inline-flex flex-col items-center justify-center gap-0.5 rounded-xl border border-transparent text-stone-300 transition-all duration-200 ease-out font-ui;
+  }
+
+  .nav-button svg {
+    @apply h-4 w-4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.35));
+  }
+
+  .nav-button span {
+    @apply text-[0.56rem] font-semibold leading-none tracking-wide;
   }
 
   .nav-button:hover,
   .nav-button:focus-visible {
-    @apply bg-btn-secondary-bg/80 text-war-gold border-primary-border;
+    @apply bg-white/10 text-war-gold border-primary-border backdrop-blur-xl;
   }
 
   .nav-button.active {
-    @apply bg-gradient-to-br from-war-gold to-war-ember text-primary-bg border-war-gold shadow-[0_0_18px_rgba(249,115,22,0.35)];
+    @apply bg-white/15 text-war-gold border-war-gold/60 shadow-[0_10px_30px_rgba(0,0,0,0.28),0_0_18px_rgba(245,196,81,0.14)] backdrop-blur-xl;
   }
 
   .pagination-button {
-    @apply rounded-xl border border-primary-border text-stone-300;
+    @apply rounded-2xl border border-primary-border text-stone-300 bg-glass-bg backdrop-blur-xl;
   }
 
   .pagination-button.active {
@@ -378,6 +408,7 @@
 
   .building-level {
     @apply bg-war-gold text-primary-bg border-war-mist;
+    font-family: theme('fontFamily.ui');
   }
 
   .tab-button {
@@ -400,17 +431,43 @@
     @apply font-display text-war-mist tracking-wide;
   }
 
+  .icon-medallion {
+    @apply inline-flex items-center justify-center rounded-2xl border border-war-gold/30 bg-white/10 text-war-gold shadow-lg backdrop-blur-xl;
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.12), 0 14px 34px rgba(0, 0, 0, 0.28);
+  }
+
+  .icon-medallion svg,
+  .resource-bar-item img,
+  .report-item img,
+  #activity-overview-btn svg,
+  #population-display + svg {
+    filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
+  }
+
+  #village-name-display,
+  #population-display,
+  #coords-display,
+  [data-prop='current'],
+  [data-prop='capacity'],
+  [data-prop='production'] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  #village-name-display {
+    @apply font-display tracking-wide;
+  }
+
   #tooltip-element,
   #building-tooltip {
-    @apply rounded-xl border border-primary-border bg-primary-bg/90 text-war-mist;
+    @apply rounded-2xl border border-primary-border bg-black/60 text-war-mist backdrop-blur-2xl shadow-lg;
   }
 
   .condition-group {
-    @apply rounded-xl border-primary-border bg-primary-bg/35;
+    @apply rounded-2xl border-primary-border bg-black/35 backdrop-blur-xl;
   }
 
   .condition-rule {
-    @apply rounded-xl bg-btn-secondary-bg/70;
+    @apply rounded-2xl bg-white/5 backdrop-blur-xl;
   }
 
   .group-type-label {
@@ -434,13 +491,15 @@
   }
 
   .input-field {
-    @apply rounded-xl border-primary-border bg-btn-secondary-bg p-2;
+    @apply rounded-2xl border-primary-border bg-black/45 p-2 backdrop-blur-xl;
   }
 
   .panel-visible > div,
   #confirm-dialog > div {
-    background-image: linear-gradient(145deg, rgba(63, 43, 31, 0.94), rgba(18, 13, 10, 0.94));
-    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), inset 0 1px rgba(255, 244, 214, 0.08);
+    background: linear-gradient(145deg, rgba(10, 10, 10, 0.68), rgba(0, 0, 0, 0.48));
+    backdrop-filter: blur(24px) saturate(1.25);
+    -webkit-backdrop-filter: blur(24px) saturate(1.25);
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.42), inset 0 1px rgba(255, 255, 255, 0.10);
   }
 
   #toast-container {
@@ -466,7 +525,9 @@
 #activity-modal [class*='bg-gray-'],
 #farm-lists-view-root [class*='bg-gray-'],
 #reports-container [class*='bg-gray-'] {
-  background-color: rgba(43, 27, 20, 0.72) !important;
+  background-color: rgba(255, 255, 255, 0.055) !important;
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
 }
 
 #building-info-panel [class*='border-gray-'],
@@ -476,7 +537,7 @@
 #activity-modal [class*='border-gray-'],
 #farm-lists-view-root [class*='border-gray-'],
 #reports-container [class*='border-gray-'] {
-  border-color: rgba(138, 90, 43, 0.75) !important;
+  border-color: rgba(245, 196, 81, 0.24) !important;
 }
 
 #building-info-panel button,
@@ -486,7 +547,7 @@
 #activity-modal button,
 #farm-lists-view-root button {
   min-height: 44px;
-  border-radius: 0.75rem;
+  border-radius: 1rem;
 }
 
 #building-info-panel input,
@@ -497,9 +558,11 @@
 #farm-lists-view-root select,
 #farm-lists-view-root textarea {
   min-height: 44px;
-  border-color: rgba(138, 90, 43, 0.85) !important;
-  background-color: rgba(18, 13, 10, 0.82) !important;
+  border-color: rgba(245, 196, 81, 0.26) !important;
+  background-color: rgba(0, 0, 0, 0.42) !important;
   color: #f8e7c5 !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
 #building-info-panel h2,
@@ -516,5 +579,20 @@
 .troop-row,
 .resource-bar-item,
 .report-item {
-  box-shadow: inset 0 1px rgba(255, 244, 214, 0.06), 0 10px 24px rgba(0, 0, 0, 0.18);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.08), 0 12px 32px rgba(0, 0, 0, 0.22);
+}
+
+#village-container,
+#activity-modal,
+#confirm-dialog > div,
+#building-info-panel > div,
+#tile-info-panel > div,
+#attack-panel > div,
+#trade-panel > div,
+.resource-bar-item,
+.report-item,
+.resource-details {
+  backdrop-filter: blur(22px) saturate(1.22);
+  -webkit-backdrop-filter: blur(22px) saturate(1.22);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.30), inset 0 1px rgba(255, 255, 255, 0.08);
 }

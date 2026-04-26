@@ -89,8 +89,11 @@ function cleanupSlotElement(slotElement) {
 function getBuildingState(buildings, constructionQueue, id) {
     const queuedJob = constructionQueue.find(j => j.buildingId === id);
     if (queuedJob) {
+        const displayLevel = queuedJob.jobType === 'demolition'
+            ? queuedJob.targetLevel + 1
+            : queuedJob.targetLevel - 1;
         return { 
-            level: queuedJob.targetLevel - 1, 
+            level: displayLevel, 
             type: queuedJob.buildingType,
             isUnderConstruction: true,
             constructionJob: queuedJob,

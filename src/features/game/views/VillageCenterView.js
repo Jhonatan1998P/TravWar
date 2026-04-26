@@ -97,7 +97,7 @@ class VillageCenterView {
 
         const constructionQueueSignature = [...(activeVillage.constructionQueue || [])]
             .sort((left, right) => String(left.jobId).localeCompare(String(right.jobId)))
-            .map(job => `${job.jobId}:${job.buildingId}:${job.buildingType}:${job.targetLevel}`)
+            .map(job => `${job.jobId}:${job.jobType || 'construction'}:${job.buildingId}:${job.buildingType}:${job.targetLevel}`)
             .join(';');
 
         return `${activeVillageId}:${activeVillage.villageType}:${buildingsSignature}|${constructionQueueSignature}`;
@@ -109,6 +109,10 @@ class VillageCenterView {
 
         completed.forEach(job => {
             const buildingName = gameData.buildings[job.buildingType].name;
+            if (job.jobType === 'demolition') {
+                toastUI.show(`${buildingName} ha sido demolido al nivel ${job.targetLevel}.`, 'warning');
+                return;
+            }
             toastUI.show(`${buildingName} ha subido al nivel ${job.targetLevel}.`, 'success');
         });
     }

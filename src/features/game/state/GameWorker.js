@@ -18,6 +18,7 @@ import {
     handleFarmListRenameCommand as handleFarmListRenameCommandStep,
     handleFarmListSendEntriesCommand as handleFarmListSendEntriesCommandStep,
     handleFarmListUpdateEntryTroopsCommand as handleFarmListUpdateEntryTroopsCommandStep,
+    handleNpcResourceExchangeCommand as handleNpcResourceExchangeCommandStep,
     handleSendMerchantsCommand as handleSendMerchantsCommandStep,
     handleSendMovementCommand as handleSendMovementCommandStep,
 } from './worker/commands.js';
@@ -547,6 +548,13 @@ function handleSendMerchantsCommand(payload) {
     });
 }
 
+function handleNpcResourceExchangeCommand(payload) {
+    return handleNpcResourceExchangeCommandStep({
+        payload,
+        gameState,
+    });
+}
+
 function handleFarmListCreateCommand(payload) {
     return handleFarmListCreateCommandStep({
         payload,
@@ -633,6 +641,17 @@ function postFarmListSendResult(request, result) {
             results: Array.isArray(result?.results) ? result.results : [],
             reason: result?.reason || null,
             details: result?.details || null,
+            at: Date.now(),
+        },
+    });
+}
+
+function postNpcResourceExchangeResult(request, result) {
+    self.postMessage({
+        type: 'npc_resource_exchange:result',
+        payload: {
+            request,
+            result: result || { success: false, reason: 'UNKNOWN_NPC_EXCHANGE_RESULT' },
             at: Date.now(),
         },
     });
@@ -797,6 +816,9 @@ self.onmessage = function(event) {
         case 'upgrade_building':
             if (processor) processor.queueBuildingUpgrade(payload);
             break;
+        case 'demolish_building':
+            if (processor) processor.queueBuildingDemolition(payload);
+            break;
         case 'cancel_construction':
             if (processor) processor.cancelBuilding(payload);
             break;
@@ -817,6 +839,9 @@ self.onmessage = function(event) {
             break;
         case 'send_merchants':
             handleSendMerchantsCommand(payload);
+            break;
+        case 'npc_resource_exchange':
+            postNpcResourceExchangeResult(payload, handleNpcResourceExchangeCommand(payload));
             break;
         case 'farm_list_create':
             postFarmListCommandResult('farm_list_create', payload, handleFarmListCreateCommand(payload));

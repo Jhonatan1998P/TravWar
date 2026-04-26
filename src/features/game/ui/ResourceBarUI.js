@@ -28,7 +28,7 @@ function initialize(container, resources) {
         if (!uiMap) continue;
 
         const wrapper = document.createElement('div');
-        wrapper.className = 'relative min-h-12 p-1.5 bg-glass-bg rounded-xl flex flex-col gap-1 resource-bar-item cursor-pointer border border-primary-border shadow-inner hover:border-war-gold transition-colors';
+        wrapper.className = 'relative min-h-12 p-1.5 bg-glass-bg rounded-2xl flex flex-col gap-1 resource-bar-item cursor-pointer border border-primary-border shadow-inner hover:border-war-gold transition-colors backdrop-blur-xl';
         
         const colorClass = `bg-resource-${uiMap.colorKey}`;
         

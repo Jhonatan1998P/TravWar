@@ -6,26 +6,26 @@
     <title>Project Genesis | Guerra de Tribus</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500&family=Sora:wght@500;600;700&display=swap" rel="stylesheet">
 </head>
 <body class="bg-primary-bg text-stone-100 flex items-center justify-center min-h-[100dvh] font-sans antialiased">
 
-    <div id="village-container" class="w-full max-w-md h-[100dvh] bg-glass-bg rounded-none md:rounded-3xl shadow-2xl border-2 border-primary-border flex flex-col overflow-hidden">
+    <div id="village-container" class="w-full max-w-md h-[100dvh] bg-glass-bg rounded-none md:rounded-[2rem] shadow-2xl border border-primary-border flex flex-col overflow-hidden backdrop-blur-2xl">
         
-        <header id="app-header" class="relative z-30 p-3 flex-shrink-0 flex justify-between items-center bg-glass-light-bg backdrop-blur-md border-b border-contrast-border md:rounded-t-2xl shadow-inner">
-            <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-war-blood via-btn-primary-bg to-war-gold flex items-center justify-center cursor-pointer ring-2 ring-war-gold/60 shadow-[0_0_24px_rgba(249,115,22,0.28)]">
-                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-war-mist" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 1.253v2.404c0 .351.286.635.636.635h6.228a.636.636 0 00.636-.635V1.253c-2.454.51-4.66 1.487-6.5 2.848-1.84-1.36-4.046-2.338-6.5-2.848z" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 22.747v-2.404c0-.351-.286-.635-.636-.635H5.136a.636.636 0 00-.636.635v2.404c2.454-.51 4.66 1.487 6.5-2.848 1.84 1.361 4.046 2.338 6.5 2.848z" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 3.656C7.583 3.656 4.146 7.093 4.146 11.51c0 4.418 3.437 7.854 7.854 7.854s7.854-3.436 7.854-7.854C19.854 7.093 16.417 3.656 12 3.656z" /></svg>
-            </div>
+        <header id="app-header" class="relative z-30 p-1.5 flex-shrink-0 flex justify-between items-center bg-glass-light-bg backdrop-blur-2xl border-b border-contrast-border md:rounded-t-[2rem] shadow-inner">
+            <button id="open-config-menu-btn" type="button" class="icon-medallion w-10 h-10 cursor-pointer" aria-label="Abrir configuracion de partida" title="Configuracion de partida">
+                 <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-war-mist" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3.25l7.25 3.25v4.8c0 4.55-2.95 7.85-7.25 9.45-4.3-1.6-7.25-4.9-7.25-9.45V6.5L12 3.25z"/><path stroke-linecap="round" stroke-linejoin="round" d="M8.75 11.25h6.5M12 8v7.5"/></svg>
+            </button>
             <div id="village-selector" class="relative">
-                <div class="flex min-h-11 items-center gap-2 font-display font-bold text-base text-war-mist rounded-xl px-3 py-2 bg-glass-bg border border-primary-border cursor-pointer hover:bg-btn-secondary-hover transition-colors shadow-inner">
+                <div class="flex min-h-10 items-center gap-1.5 font-display font-bold text-sm text-war-mist rounded-xl px-2.5 py-1.5 bg-glass-bg border border-primary-border cursor-pointer hover:bg-btn-secondary-hover transition-colors shadow-lg backdrop-blur-xl">
                     <span id="village-name-display">Cargando...</span>
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-war-gold" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-war-gold" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
                 </div>
                 <ul id="village-dropdown" class="hidden absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 max-w-[88vw] bg-glass-bg border border-primary-border rounded-xl shadow-2xl z-50 py-1 backdrop-blur-md">
                 </ul>
             </div>
-            <div class="w-11 h-11 rounded-2xl bg-war-leather ring-2 ring-primary-border flex items-center justify-center font-bold text-xl text-war-mist cursor-pointer shadow-inner">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z" clip-rule="evenodd" /></svg>
+            <div class="icon-medallion w-10 h-10 cursor-pointer">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-war-mist" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M7 11.5V9a5 5 0 0110 0v2.5"/><path stroke-linecap="round" stroke-linejoin="round" d="M5.5 11.5h13l-1.2 7.25A2.5 2.5 0 0114.85 21h-5.7a2.5 2.5 0 01-2.45-2.25L5.5 11.5z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 15h6"/></svg>
             </div>
         </header>
 
@@ -35,29 +35,29 @@
         <main id="app-root" class="flex-grow w-full relative overflow-y-auto">
         </main>
 
-        <footer id="app-footer" class="p-2 flex-shrink-0 flex flex-col gap-2 bg-glass-light-bg backdrop-blur-md border-t border-contrast-border md:rounded-b-2xl shadow-inner">
-             <div class="flex justify-between items-center px-2">
-                <div class="flex min-h-12 flex-col items-center p-1 rounded-xl bg-glass-bg border border-primary-border w-24 cursor-pointer shadow-inner">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-war-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <footer id="app-footer" class="p-1 flex-shrink-0 flex flex-col gap-1 bg-glass-light-bg backdrop-blur-2xl border-t border-contrast-border md:rounded-b-[2rem] shadow-inner">
+             <div class="flex justify-between items-center px-1">
+                <div class="flex min-h-9 items-center justify-center gap-1.5 px-2 rounded-lg bg-glass-bg border border-primary-border min-w-20 cursor-pointer shadow-inner">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-war-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.653-.125-1.273-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.125-1.273.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
-                    <span id="population-display" class="text-sm font-mono">0</span>
+                    <span id="population-display" class="text-xs font-mono tabular-nums">0</span>
                 </div>
-                <div id="activity-overview-btn" class="flex min-h-12 flex-col items-center p-1 rounded-xl bg-glass-bg border border-primary-border w-24 cursor-pointer shadow-inner hover:border-war-gold transition-colors">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-orange-300"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
-                    <span class="text-sm font-bold">Actividad</span>
+                <div id="activity-overview-btn" class="flex min-h-9 items-center justify-center gap-1.5 px-2 rounded-lg bg-glass-bg border border-primary-border min-w-24 cursor-pointer shadow-inner hover:border-war-gold transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4 text-orange-300"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+                    <span class="text-xs font-bold">Actividad</span>
                 </div>
             </div>
-             <nav id="main-nav" class="flex justify-around items-center bg-glass-bg rounded-2xl p-1.5 border border-primary-border shadow-inner">
-                <button id="download-ai-log-btn" class="nav-button" aria-label="Pantalla completa"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></button>
-                <a href="/reports" data-route="/reports" class="nav-button relative" aria-label="Informes"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C6.095 4.01 5.25 4.973 5.25 6.108V18.75c0 1.243.801 2.25 1.75 2.25H15a2.25 2.25 0 002.25-2.25v-2.392c-.816-.388-1.58-1.025-2.25-1.845z" /></svg><div id="unread-reports-badge" class="hidden absolute top-0 right-0 w-4 h-4 rounded-full bg-war-blood text-white text-xs flex items-center justify-center ring-2 ring-war-ash"></div></a>
-                <a href="/village" data-route="/village" class="nav-button" aria-label="Campos"><svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 018.25 20.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6A2.25 2.25 0 0115.75 3.75h2.25A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25A2.25 2.25 0 0113.5 8.25V6zM13.5 15.75A2.25 2.25 0 0115.75 13.5h2.25a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg></a>
-                <a href="/village-center" data-route="/village-center" class="nav-button" aria-label="Aldea"><svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h7.5" /></svg></a>
-                <a href="/map" data-route="/map" class="nav-button" aria-label="Mapa"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.37-1.716-.995l-4.124 2.062a2.25 2.25 0 00-1.716.995v11.592c0 .836.88 1.37 1.716.995l4.124-2.062a2.25 2.25 0 001.716-.995V8.25l-4.875 2.437a2.25 2.25 0 01-1.716-.995V6.75c0-.836-.88-1.37-1.716-.995L5.64 7.73a2.25 2.25 0 00-1.716.995v11.592c0 .836.88 1.37 1.716.995l4.124-2.062a2.25 2.25 0 001.716-.995V9.75c0-.836-.88-1.37-1.716-.995L10.5 6.27a2.25 2.25 0 00-1.716-.995L5.64 7.73z" /></svg></a>
+             <nav id="main-nav" class="flex justify-around items-center bg-glass-bg rounded-2xl p-1 border border-primary-border shadow-lg backdrop-blur-xl">
+                <button id="download-ai-log-btn" class="nav-button" aria-label="Pantalla completa"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M4 9V5a1 1 0 011-1h4M15 4h4a1 1 0 011 1v4M20 15v4a1 1 0 01-1 1h-4M9 20H5a1 1 0 01-1-1v-4" /></svg><span>Pantalla</span></button>
+                <a href="/reports" data-route="/reports" class="nav-button relative" aria-label="Informes"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M7 4.5h10l1.5 2v13l-2-1.25-2 1.25-2-1.25-2 1.25-2-1.25-2 1.25v-13l1.5-2z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 9h6M9 12.5h6M9 16h3"/></svg><span>Informes</span><div id="unread-reports-badge" class="hidden absolute top-0 right-0 w-4 h-4 rounded-full bg-war-blood text-white text-xs flex items-center justify-center ring-2 ring-war-ash"></div></a>
+                <a href="/village" data-route="/village" class="nav-button" aria-label="Campos"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7.5c3-1.8 5.8-1.8 8.5 0 2.6 1.7 5.1 1.7 7.5 0M4 12c3-1.8 5.8-1.8 8.5 0 2.6 1.7 5.1 1.7 7.5 0M4 16.5c3-1.8 5.8-1.8 8.5 0 2.6 1.7 5.1 1.7 7.5 0"/><path stroke-linecap="round" stroke-linejoin="round" d="M7 5v14M13 5v14M19 5v14"/></svg><span>Campos</span></a>
+                <a href="/village-center" data-route="/village-center" class="nav-button" aria-label="Aldea"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M4 20h16M6 20V9l6-4 6 4v11"/><path stroke-linecap="round" stroke-linejoin="round" d="M10 20v-6h4v6M8.5 11.5h1.5M14 11.5h1.5"/></svg><span>Aldea</span></a>
+                <a href="/map" data-route="/map" class="nav-button" aria-label="Mapa"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M9 18l-5 2V6l5-2 6 2 5-2v14l-5 2-6-2z"/><path stroke-linecap="round" stroke-linejoin="round" d="M9 4v14M15 6v14"/></svg><span>Mapa</span></a>
             </nav>
         </footer>
         
-        <div id="building-tooltip" class="hidden absolute z-50 px-3 py-1.5 text-sm font-semibold text-white bg-gray-900/80 backdrop-blur-sm rounded-md shadow-lg pointer-events-none"></div>
+        <div id="building-tooltip" class="hidden fixed z-[2147483647] px-3 py-1.5 text-sm font-semibold text-white bg-gray-900/80 backdrop-blur-sm rounded-md shadow-lg pointer-events-none"></div>
 
     </div>
 

@@ -208,7 +208,7 @@ class Router {
         navButtons.forEach(btn => {
             btn.classList.remove('active');
             const route = btn.dataset.route;
-            if (route && path.startsWith(route)) { 
+            if (route && path === route) { 
                 btn.classList.add('active');
             }
         });

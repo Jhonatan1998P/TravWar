@@ -18,7 +18,7 @@ const ICONS = {
     attack: `<img src="/icons/sword.png" alt="Ataque" class="h-8 w-8">`,
     defense: `<img src="/icons/shield.png" alt="Defensa" class="h-8 w-8">`,
     espionage: `<img src="/icons/report.png" alt="Espionaje" class="h-8 w-8">`,
-    settlement: `<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-blue-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2V5a2 2 0 00-2-2H5zm0 2h10v7h-2V7a1 1 0 00-1-1H6V5zm1 5a1 1 0 011-1h4a1 1 0 110 2H7a1 1 0 01-1-1z" clip-rule="evenodd" /></svg>`,
+    settlement: `<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-war-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M4 20h16M6 20V9l6-4 6 4v11"/><path stroke-linecap="round" stroke-linejoin="round" d="M10 20v-6h4v6"/></svg>`,
     delete: `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>`
 };
 
@@ -247,7 +247,7 @@ class ReportListUI {
 
     #createReportNode() {
         const item = document.createElement('div');
-        item.className = 'report-item bg-glass-bg hover:bg-btn-secondary-bg/80 rounded-2xl shadow-md flex items-center gap-4 transition-colors cursor-pointer border border-primary-border overflow-hidden';
+        item.className = 'report-item bg-glass-bg hover:bg-white/10 rounded-[1.35rem] shadow-md flex items-center gap-4 transition-colors cursor-pointer border border-primary-border overflow-hidden backdrop-blur-xl';
 
         const icon = document.createElement('div');
         icon.className = 'pl-3';

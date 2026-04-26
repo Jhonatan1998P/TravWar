@@ -40,7 +40,7 @@ class ConfigView {
                     <p class="text-stone-300 mt-3 max-w-2xl mx-auto">Forja tu linaje, elige enemigos y levanta una conquista sobre territorios hostiles.</p>
                 </header>
                 
-                <div class="bg-glass-bg backdrop-blur-sm rounded-3xl p-5 md:p-8 border-2 border-primary-border shadow-2xl">
+                <div class="bg-glass-bg backdrop-blur-2xl rounded-[2rem] p-5 md:p-8 border border-primary-border shadow-2xl">
                     <form id="config-form" class="space-y-6">
                         
                         <fieldset class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">

@@ -12,6 +12,10 @@ class TooltipUI {
             return;
         }
 
+        if (this.#tooltipElement.parentElement !== document.body) {
+            document.body.appendChild(this.#tooltipElement);
+        }
+
         this._handleMouseOver = this._handleMouseOver.bind(this);
         this._handleMouseLeave = this._handleMouseLeave.bind(this);
         this._initializeEventListeners();
@@ -73,23 +77,20 @@ class TooltipUI {
         const resourceBar = document.getElementById('resource-bar');
         if (!resourceBar) return;
 
-        const containerRect = this.#container.getBoundingClientRect();
         const resourceBarRect = resourceBar.getBoundingClientRect();
 
         this.#tooltipElement.classList.remove('hidden', 'opacity-0'); // Show and prepare for fade in
         const tooltipRect = this.#tooltipElement.getBoundingClientRect();
 
-        // Position relative to the resource bar, but within the main container
-        const top = (resourceBarRect.bottom - containerRect.top) + 23;
+        const top = resourceBarRect.bottom + 12;
         
-        let left = (resourceBarRect.left - containerRect.left) + (resourceBarRect.width / 2) - (tooltipRect.width / 2);
+        let left = resourceBarRect.left + (resourceBarRect.width / 2) - (tooltipRect.width / 2);
 
-        // Clamp to container boundaries
-        if (left < 4) {
-            left = 4;
+        if (left < 8) {
+            left = 8;
         }
-        if (left + tooltipRect.width > containerRect.width) {
-            left = containerRect.width - tooltipRect.width - 4;
+        if (left + tooltipRect.width > window.innerWidth - 8) {
+            left = window.innerWidth - tooltipRect.width - 8;
         }
 
         this.#tooltipElement.style.top = `${top}px`;

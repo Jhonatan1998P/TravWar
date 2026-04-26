@@ -3,6 +3,7 @@ import { gameData } from '../core/GameData.js';
 import { getCapacitySpeedMultiplier } from '../core/capacityScaling.js';
 
 const CONSTRUCTION_CANCEL_REFUND_PERCENT = 0.45;
+const DEMOLITION_BUILD_TIME_FACTOR = 0.5;
 const BASE_PRODUCTION = 12;
 const SMITHY_UPGRADE_COST_MULTIPLIER = 1.6;
 const RECRUITMENT_NOTIFICATION_BATCH_INTERVAL_MS = 30000;
@@ -31,6 +32,9 @@ export class VillageProcessor {
         }
         if (this.#village.budgetRatio) {
             this.#ensureBudgetState();
+        }
+        if ((this.#village.buildings.find(b => b.type === 'mainBuilding')?.level || 0) >= 10) {
+            this.#village.demolitionUnlocked = true;
         }
         
         this.#calculateStorage();
@@ -163,6 +167,9 @@ export class VillageProcessor {
         if (!buildingState) return { success: false, reason: 'BUILDING_NOT_FOUND' };
     
         const jobsForThisBuilding = this.#village.constructionQueue.filter(j => j.buildingId === buildingId);
+        if (jobsForThisBuilding.some(job => job.jobType === 'demolition')) {
+            return { success: false, reason: 'BUILDING_BUSY' };
+        }
         const highestQueuedLevel = jobsForThisBuilding.length > 0
             ? Math.max(...jobsForThisBuilding.map(j => j.targetLevel))
             : buildingState.level;
@@ -230,6 +237,49 @@ export class VillageProcessor {
         this.#village.constructionQueue.sort((a, b) => a.endTime - b.endTime);
         return { success: true };
     }    
+
+    queueBuildingDemolition(payload) {
+        const { buildingId } = payload;
+        if (!this.#village.demolitionUnlocked) {
+            return { success: false, reason: 'DEMOLITION_LOCKED' };
+        }
+
+        if (this.#village.constructionQueue.length >= this.#village.maxConstructionSlots) {
+            return { success: false, reason: 'QUEUE_FULL', details: `La cola general está llena.` };
+        }
+
+        const buildingState = this.#village.buildings.find(b => b.id === buildingId);
+        if (!buildingState || buildingState.type === 'empty' || buildingState.level <= 0) {
+            return { success: false, reason: 'BUILDING_NOT_DEMOLISHABLE' };
+        }
+
+        if (this.#village.constructionQueue.some(j => j.buildingId === buildingId)) {
+            return { success: false, reason: 'BUILDING_BUSY' };
+        }
+
+        const buildingData = gameData.buildings[buildingState.type];
+        const levelData = buildingData?.levels?.[buildingState.level - 1];
+        if (!levelData) return { success: false, reason: 'INVALID_LEVEL_DATA' };
+
+        const mainBuildingLevel = this.#village.buildings.find(b => b.type === 'mainBuilding')?.level || 0;
+        const timeFactor = mainBuildingLevel > 0 ? gameData.buildings.mainBuilding.levels[mainBuildingLevel - 1].attribute.constructionTimeFactor : 1.0;
+        const allianceTimeFactor = 1 - (this.allianceBonuses.constructionTimeBonusPercent / 100);
+        const demolitionTimeInMs = (levelData.buildTime / this.#config.gameSpeed) * timeFactor * allianceTimeFactor * DEMOLITION_BUILD_TIME_FACTOR * 1000;
+
+        const now = Date.now();
+        const targetLevel = Math.max(0, buildingState.level - 1);
+        this.#village.constructionQueue.push({
+            jobId: `${now}-demolish-${buildingId}`,
+            jobType: 'demolition',
+            buildingId,
+            buildingType: buildingState.type,
+            targetLevel,
+            startTime: now,
+            endTime: now + demolitionTimeInMs,
+        });
+        this.#village.constructionQueue.sort((a, b) => a.endTime - b.endTime);
+        return { success: true };
+    }
     
     cancelBuilding(payload) {
         const { jobId } = payload;
@@ -240,14 +290,16 @@ export class VillageProcessor {
         const jobToCancel = this.#village.constructionQueue[jobIndex];
         const levelData = gameData.buildings[jobToCancel.buildingType].levels[jobToCancel.targetLevel - 1];
 
-        // REEMBOLSO: Al budget correcto
-        for (const resource in levelData.cost) {
-            const refund = Math.floor(levelData.cost[resource] * CONSTRUCTION_CANCEL_REFUND_PERCENT);
-            if (this.#village.budgetRatio) {
-                this.#village.budget.econ[resource] += refund;
-                this.#village.resources[resource].current = this.#village.budget.econ[resource] + this.#village.budget.mil[resource];
-            } else {
-                this.#village.resources[resource].current += refund;
+        if (jobToCancel.jobType !== 'demolition' && levelData) {
+            // REEMBOLSO: Al budget correcto
+            for (const resource in levelData.cost) {
+                const refund = Math.floor(levelData.cost[resource] * CONSTRUCTION_CANCEL_REFUND_PERCENT);
+                if (this.#village.budgetRatio) {
+                    this.#village.budget.econ[resource] += refund;
+                    this.#village.resources[resource].current = this.#village.budget.econ[resource] + this.#village.budget.mil[resource];
+                } else {
+                    this.#village.resources[resource].current += refund;
+                }
             }
         }
 
@@ -485,8 +537,23 @@ export class VillageProcessor {
             const job = this.#village.constructionQueue.shift();
             const building = this.#village.buildings.find(b => b.id === job.buildingId);
             if (building) {
-                building.level = job.targetLevel;
-                if (building.type === 'empty') building.type = job.buildingType;
+                if (job.jobType === 'demolition') {
+                    building.level = job.targetLevel;
+                    const shouldReleaseSlot = job.targetLevel <= 0
+                        && !/^[wcif]/.test(job.buildingId)
+                        && building.type !== 'mainBuilding'
+                        && building.type !== 'rallyPoint'
+                        && job.buildingId !== 'v_wall';
+                    if (shouldReleaseSlot) {
+                        building.type = 'empty';
+                    }
+                } else {
+                    building.level = job.targetLevel;
+                    if (building.type === 'empty') building.type = job.buildingType;
+                    if (building.type === 'mainBuilding' && building.level >= 10) {
+                        this.#village.demolitionUnlocked = true;
+                    }
+                }
                 
             }
             completedConstructionJobs.push(job);

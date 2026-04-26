@@ -5,10 +5,12 @@ import {
     resolveDefaultFarmTroops,
 } from '../../core/data/constants.js';
 import { getScaledMerchantCapacityPerUnit } from '../../core/capacityScaling.js';
+import { createNpcExchangeState, getRandomNpcExchangeCooldownMs } from '../../core/npcExchange.js';
 import { compareMovementsByArrival } from './movementOrdering.js';
 
 const HOSTILE_MISSION_TYPES = new Set(['attack', 'raid', 'espionage']);
 const FARM_LIST_MISSION_TYPES = new Set(['raid', 'attack', 'espionage']);
+const RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
 let movementIdSequence = 0;
 
 function createMovementId(prefix, startTime, villageId) {
@@ -475,6 +477,78 @@ export function handleSendMerchantsCommand({ payload, gameState, gameConfig, gam
 
     gameState.movements.sort(compareMovementsByArrival);
     return { success: true };
+}
+
+export function handleNpcResourceExchangeCommand({ payload, gameState }) {
+    const villageId = payload?.villageId;
+    const village = gameState.villages.find(candidate => candidate.id === villageId);
+    if (!village) return { success: false, reason: 'VILLAGE_NOT_FOUND' };
+
+    const marketplace = village.buildings.find(building => building.type === 'marketplace');
+    if (!marketplace || marketplace.level === 0) return { success: false, reason: 'MARKETPLACE_REQUIRED' };
+
+    const now = Date.now();
+    village.npcExchange ??= createNpcExchangeState(now);
+    const nextAvailableAt = Number(village.npcExchange.nextAvailableAt) || 0;
+    if (nextAvailableAt > now) {
+        return {
+            success: false,
+            reason: 'NPC_EXCHANGE_COOLDOWN',
+            details: { nextAvailableAt, remainingMs: nextAvailableAt - now },
+        };
+    }
+
+    const requestedResources = payload?.resources;
+    if (!requestedResources || typeof requestedResources !== 'object' || Array.isArray(requestedResources)) {
+        return { success: false, reason: 'INVALID_RESOURCE_DISTRIBUTION' };
+    }
+
+    const currentTotal = RESOURCE_KEYS.reduce((sum, resourceKey) => {
+        return sum + Math.floor(Number(village.resources?.[resourceKey]?.current) || 0);
+    }, 0);
+
+    const normalizedResources = {};
+    let requestedTotal = 0;
+    for (const resourceKey of RESOURCE_KEYS) {
+        const amount = Math.floor(Number(requestedResources[resourceKey]) || 0);
+        if (!Number.isFinite(amount) || amount < 0) {
+            return { success: false, reason: 'INVALID_RESOURCE_AMOUNT', details: { resourceKey } };
+        }
+
+        const capacity = Math.floor(Number(village.resources?.[resourceKey]?.capacity) || 0);
+        if (amount > capacity) {
+            return {
+                success: false,
+                reason: 'RESOURCE_CAPACITY_EXCEEDED',
+                details: { resourceKey, amount, capacity },
+            };
+        }
+
+        normalizedResources[resourceKey] = amount;
+        requestedTotal += amount;
+    }
+
+    if (requestedTotal !== currentTotal) {
+        return {
+            success: false,
+            reason: 'NPC_EXCHANGE_TOTAL_MISMATCH',
+            details: { requestedTotal, currentTotal },
+        };
+    }
+
+    for (const resourceKey of RESOURCE_KEYS) {
+        village.resources[resourceKey].current = normalizedResources[resourceKey];
+    }
+
+    village.npcExchange.lastExchangeAt = now;
+    village.npcExchange.nextAvailableAt = now + getRandomNpcExchangeCooldownMs();
+
+    return {
+        success: true,
+        villageId: village.id,
+        resources: normalizedResources,
+        nextAvailableAt: village.npcExchange.nextAvailableAt,
+    };
 }
 
 export function handleFarmListCreateCommand({ payload, gameState }) {

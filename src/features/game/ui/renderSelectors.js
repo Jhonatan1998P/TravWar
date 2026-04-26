@@ -63,7 +63,7 @@ function buildingsSignature(buildings = []) {
 }
 
 function constructionQueueSignature(queue = []) {
-    return sortedByIdSignature(queue, 'jobId', job => `${job.jobId}:${job.buildingId}:${job.buildingType}:${job.targetLevel}:${job.endTime}`);
+    return sortedByIdSignature(queue, 'jobId', job => `${job.jobId}:${job.jobType || 'construction'}:${job.buildingId}:${job.buildingType}:${job.targetLevel}:${job.endTime}`);
 }
 
 function recruitmentQueueSignature(queue = []) {
@@ -192,7 +192,7 @@ export function selectConstructionQueueSignature(payload) {
 
     const queue = activeVillage.constructionQueue || [];
     const queueSignature = queue
-        .map(job => `${job.jobId}:${job.buildingId}:${job.buildingType}:${job.targetLevel}:${job.endTime}`)
+        .map(job => `${job.jobId}:${job.jobType || 'construction'}:${job.buildingId}:${job.buildingType}:${job.targetLevel}:${job.endTime}`)
         .join(';');
 
     return `${activeVillage.id}:${activeVillage.maxConstructionSlots || 0}:${queueSignature}`;
@@ -301,6 +301,7 @@ export function selectBuildingInfoPanelSignature(payload) {
     return [
         'visible',
         activeVillage.id,
+        activeVillage.demolitionUnlocked ? 'demolition-unlocked' : 'demolition-locked',
         resourceSignature(activeVillage.resources),
         populationSignature(activeVillage.population),
         buildingsSignature(activeVillage.buildings || []),

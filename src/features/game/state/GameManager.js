@@ -257,6 +257,10 @@ class GameManager {
             case 'farm_list:send_result':
                 document.dispatchEvent(new CustomEvent('farm_list:send_result', { detail: payload }));
                 break;
+
+            case 'npc_resource_exchange:result':
+                document.dispatchEvent(new CustomEvent('npc_resource_exchange:result', { detail: payload }));
+                break;
         }
     }
 

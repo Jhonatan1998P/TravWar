@@ -19,7 +19,7 @@ class ToastUI {
     }
 
     _setupContainer() {
-        this.#container.className = 'fixed bottom-24 left-4 z-[70] flex max-w-[calc(100vw-2rem)] flex-col items-start gap-3 pointer-events-none';
+        this.#container.className = 'fixed bottom-24 left-4 z-[1000] flex max-w-[calc(100vw-2rem)] flex-col items-start gap-3 pointer-events-none';
     }
     
     setPosition(newPosition) {

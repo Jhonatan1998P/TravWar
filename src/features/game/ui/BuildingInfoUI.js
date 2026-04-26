@@ -24,6 +24,9 @@ const RESOURCE_ICON_MAP = {
     time: 'time', population: 'population'
 };
 
+const RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
+const RESOURCE_LABELS = { wood: 'Madera', stone: 'Barro', iron: 'Hierro', food: 'Cereal' };
+
 const BUILDING_CATEGORIES = {
     infrastructure: ['embassy', 'palace', 'heroMansion'],
     military: ['barracks', 'stable', 'workshop', 'smithy', 'academy', 'hospital', 'greatBarracks', 'greatStable', 'tournamentSquare'],
@@ -55,6 +58,7 @@ class BuildingInfoUI {
         this.#panelElement = document.getElementById('building-info-panel');
         this.#panelElement.querySelector('[data-action="close"]').addEventListener('click', () => this.hide());
         this.#panelElement.querySelector('[data-action="upgrade"]').addEventListener('click', () => this._handleUpgradeClick());
+        this.#panelElement.querySelector('[data-action="demolish"]').addEventListener('click', () => this._handleDemolishClick());
     
         const mainPanel = this.#panelElement.querySelector('#panel-main');
         mainPanel.addEventListener('click', e => {
@@ -74,6 +78,16 @@ class BuildingInfoUI {
             if (action === 'farm-open-center') {
                 this.hide();
                 router.navigate('/farm-lists');
+                return;
+            }
+
+            if (action === 'npc-max-resource') {
+                this._handleNpcMaxClick(button.dataset.res);
+                return;
+            }
+
+            if (action === 'npc-exchange') {
+                this._handleNpcExchangeClick(activeVillageId);
                 return;
             }
     
@@ -117,19 +131,32 @@ class BuildingInfoUI {
                 gameManager.sendCommand('upgrade_unit', { unitId, villageId: activeVillageId });
             }
         });
+
+        mainPanel.addEventListener('input', e => {
+            if (e.target.matches('[data-npc-resource-input]')) {
+                this._handleNpcResourceInput(e.target);
+                this._updateNpcExchangeState();
+            }
+        });
+
+        document.addEventListener('npc_resource_exchange:result', e => this._handleNpcExchangeResult(e.detail));
     }
 
     _createPanelHTML() {
         const panelHTML = `
             <div id="building-info-panel" class="fixed inset-0 h-[100dvh] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
-                <div class="bg-glass-bg border-2 border-primary-border rounded-2xl shadow-2xl w-full max-w-md my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(100dvh-1rem)]">
+                <div class="bg-glass-bg border border-primary-border rounded-[2rem] shadow-2xl w-full max-w-md my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(100dvh-1rem)] backdrop-blur-2xl">
                     <header id="panel-header" class="flex justify-between items-center p-4 border-b border-primary-border">
                         <h2 id="panel-title" class="text-xl font-display font-bold text-war-gold"></h2>
                         <button data-action="close" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar">×</button>
                     </header>
                     <main id="panel-main" class="flex flex-col p-4 overflow-y-auto min-h-0 max-h-[calc(100dvh-12rem)]"></main>
-                    <footer id="panel-footer" class="p-4 border-t border-primary-border">
+                    <footer id="panel-footer" class="p-4 border-t border-primary-border space-y-2">
                         <button id="upgrade-button" data-action="upgrade" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover text-war-mist font-bold py-3 px-4 rounded-xl transition duration-300 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed border border-primary-border">
+                        </button>
+                        <button id="demolish-button" data-action="demolish" class="w-full bg-red-950/70 hover:bg-red-900/80 text-red-100 font-bold py-3 px-4 rounded-xl transition duration-300 disabled:bg-btn-secondary-bg disabled:text-gray-500 disabled:cursor-not-allowed border border-red-500/35 flex items-center justify-center gap-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 20h16M7 20l1.5-9h7L17 20M9 11V8a3 3 0 016 0v3M6 6l12 12" /></svg>
+                            <span>Demoler un nivel</span>
                         </button>
                     </footer>
                 </div>
@@ -149,6 +176,9 @@ class BuildingInfoUI {
             if (this.#viewingType === 'rallyPoint') {
                 this._updateRallyPointFarmListPanel();
             }
+            if (this.#viewingType === 'marketplace') {
+                this._updateNpcExchangeState();
+            }
         }
     }
 
@@ -164,6 +194,36 @@ class BuildingInfoUI {
             buildingType: this.#viewingType
         });
         this.hide();
+    }
+
+    _handleDemolishClick() {
+        if (!this.#currentSlotId || !this.#viewingType) return;
+
+        if (shouldIgnoreModalAction(this.#lastOpenedAt, 500)) {
+            return;
+        }
+
+        gameManager.sendCommand('demolish_building', {
+            buildingId: this.#currentSlotId,
+        });
+        this.hide();
+    }
+
+    _getDemolitionState(activeVillage, buildingState, queuedJobsForSlot) {
+        const currentLevel = buildingState?.type === this.#viewingType ? buildingState.level : 0;
+        const demolitionUnlocked = Boolean(activeVillage.demolitionUnlocked)
+            || (activeVillage.buildings.find(b => b.type === 'mainBuilding')?.level || 0) >= 10;
+        const canDemolish = demolitionUnlocked
+            && currentLevel > 0
+            && this.#viewingType !== 'empty'
+            && queuedJobsForSlot.length === 0;
+
+        return {
+            canDemolish,
+            currentLevel,
+            demolitionUnlocked,
+            targetLevel: Math.max(0, currentLevel - 1),
+        };
     }
 
     _getFinalBuildTime(baseTime) {
@@ -443,7 +503,165 @@ class BuildingInfoUI {
             this._renderTroopTraining(contentContainer);
         } else if (this.#viewingType === 'rallyPoint') {
             this._renderRallyPointFarmListPanel(contentContainer);
+        } else if (this.#viewingType === 'marketplace') {
+            this._renderNpcExchangePanel(contentContainer);
         }
+    }
+
+    _renderNpcExchangePanel(container) {
+        const activeVillage = this.#currentGameState.villages.find(v => v.id === this.#currentGameState.activeVillageId);
+        if (!activeVillage) return;
+
+        const resourcesHTML = RESOURCE_KEYS.map(resourceKey => {
+            const resource = activeVillage.resources[resourceKey];
+            const iconKey = RESOURCE_ICON_MAP[resourceKey];
+            const current = Math.floor(resource?.current || 0);
+            const capacity = Math.floor(resource?.capacity || 0);
+
+            return `
+                <div class="flex items-center gap-3 p-2 bg-gray-900/45 rounded-lg border border-primary-border/50">
+                    <div class="w-8 h-8 flex items-center justify-center">${ICONS[iconKey]}</div>
+                    <div class="flex-grow">
+                        <div class="font-semibold text-sm text-white">${RESOURCE_LABELS[resourceKey]}</div>
+                        <div class="text-xs text-gray-400">Actual: ${formatNumber(current)} / ${formatNumber(capacity)}</div>
+                    </div>
+                    <input data-npc-resource-input data-res="${resourceKey}" type="number" min="0" max="${capacity}" value="${current}" class="w-24 bg-gray-950 border border-primary-border text-white rounded-md p-1 text-center font-mono focus:ring-2 focus:ring-war-gold/60 focus:border-war-gold">
+                    <button data-action="npc-max-resource" data-res="${resourceKey}" class="px-2 py-1 text-xs bg-btn-secondary-bg hover:bg-btn-secondary-hover rounded-md border border-primary-border">Máx</button>
+                </div>`;
+        }).join('');
+
+        container.innerHTML = `
+            <section id="npc-exchange-panel" class="border-t border-primary-border mt-4 pt-4 space-y-3">
+                <div>
+                    <h3 class="text-lg font-bold text-war-gold">NPC de intercambio</h3>
+                    <p class="text-xs text-gray-400 mt-1">Redistribuye todos tus recursos actuales entre madera, barro, hierro y cereal. El próximo uso se desbloquea aleatoriamente cada 15-30 minutos, incluso si estás offline.</p>
+                </div>
+                <div id="npc-exchange-status" class="text-sm p-3 rounded-lg bg-gray-900/50 border border-primary-border/50"></div>
+                <div class="space-y-2">${resourcesHTML}</div>
+                <div class="flex justify-between text-sm bg-gray-900/45 rounded-lg p-3 border border-primary-border/50">
+                    <span class="text-gray-400">Total asignado / disponible</span>
+                    <span id="npc-exchange-total" class="font-mono font-semibold text-white"></span>
+                </div>
+                <button data-action="npc-exchange" id="npc-exchange-button" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover text-war-mist font-bold py-3 px-4 rounded-xl transition duration-300 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed border border-primary-border">
+                    Intercambiar recursos
+                </button>
+            </section>`;
+
+        this._updateNpcExchangeState();
+    }
+
+    _getNpcExchangeTotals() {
+        const activeVillage = this.#currentGameState?.villages.find(v => v.id === this.#currentGameState.activeVillageId);
+        const totalAvailable = RESOURCE_KEYS.reduce((sum, resourceKey) => {
+            return sum + Math.floor(activeVillage?.resources?.[resourceKey]?.current || 0);
+        }, 0);
+        const inputs = this.#panelElement.querySelectorAll('[data-npc-resource-input]');
+        const resources = {};
+        let totalAssigned = 0;
+
+        inputs.forEach(input => {
+            const amount = Math.floor(Number(input.value) || 0);
+            resources[input.dataset.res] = amount;
+            totalAssigned += amount;
+        });
+
+        return { resources, totalAssigned, totalAvailable };
+    }
+
+    _formatRemainingTime(ms) {
+        return formatTime(Math.ceil(Math.max(0, ms) / 1000));
+    }
+
+    _updateNpcExchangeState() {
+        const panel = this.#panelElement.querySelector('#npc-exchange-panel');
+        if (!panel) return;
+
+        const activeVillage = this.#currentGameState?.villages.find(v => v.id === this.#currentGameState.activeVillageId);
+        if (!activeVillage) return;
+
+        const { totalAssigned, totalAvailable } = this._getNpcExchangeTotals();
+        const nextAvailableAt = Number(activeVillage.npcExchange?.nextAvailableAt) || 0;
+        const remainingMs = nextAvailableAt - Date.now();
+        const isAvailable = remainingMs <= 0;
+        const totalsMatch = totalAssigned === totalAvailable;
+
+        const totalEl = panel.querySelector('#npc-exchange-total');
+        const statusEl = panel.querySelector('#npc-exchange-status');
+        const button = panel.querySelector('#npc-exchange-button');
+
+        if (totalEl) {
+            totalEl.textContent = `${formatNumber(totalAssigned)} / ${formatNumber(totalAvailable)}`;
+            totalEl.classList.toggle('text-green-400', totalsMatch);
+            totalEl.classList.toggle('text-red-400', !totalsMatch);
+        }
+
+        if (statusEl) {
+            statusEl.textContent = isAvailable
+                ? 'Disponible ahora. Ajusta las cantidades y confirma el intercambio.'
+                : `Disponible en ${this._formatRemainingTime(remainingMs)}.`;
+            statusEl.classList.toggle('text-green-300', isAvailable);
+            statusEl.classList.toggle('text-yellow-300', !isAvailable);
+        }
+
+        if (button) {
+            button.disabled = !isAvailable || !totalsMatch || totalAvailable <= 0;
+        }
+    }
+
+    _handleNpcResourceInput(input) {
+        const max = Math.floor(Number(input.max) || 0);
+        let value = Math.floor(Number(input.value) || 0);
+        value = Math.max(0, Math.min(value, max));
+        input.value = value > 0 ? value : '0';
+    }
+
+    _handleNpcMaxClick(resourceKey) {
+        const targetInput = this.#panelElement.querySelector(`[data-npc-resource-input][data-res="${resourceKey}"]`);
+        if (!targetInput) return;
+
+        const inputs = Array.from(this.#panelElement.querySelectorAll('[data-npc-resource-input]'));
+        const activeVillage = this.#currentGameState?.villages.find(v => v.id === this.#currentGameState.activeVillageId);
+        const totalAvailable = RESOURCE_KEYS.reduce((sum, key) => sum + Math.floor(activeVillage?.resources?.[key]?.current || 0), 0);
+        const otherTotal = inputs
+            .filter(input => input !== targetInput)
+            .reduce((sum, input) => sum + (Math.floor(Number(input.value) || 0)), 0);
+        const capacity = Math.floor(Number(targetInput.max) || 0);
+
+        targetInput.value = Math.max(0, Math.min(capacity, totalAvailable - otherTotal));
+        this._updateNpcExchangeState();
+    }
+
+    _handleNpcExchangeClick(activeVillageId) {
+        const { resources, totalAssigned, totalAvailable } = this._getNpcExchangeTotals();
+        if (totalAssigned !== totalAvailable) {
+            toastUI.show('El total asignado debe coincidir con tus recursos actuales.', 'warning');
+            return;
+        }
+
+        gameManager.sendCommand('npc_resource_exchange', {
+            villageId: activeVillageId,
+            resources,
+        });
+    }
+
+    _handleNpcExchangeResult(payload) {
+        const result = payload?.result;
+        if (!result) return;
+
+        if (result.success) {
+            toastUI.show('Intercambio NPC completado correctamente.', 'success');
+            return;
+        }
+
+        const messages = {
+            MARKETPLACE_REQUIRED: 'Necesitas un Mercado construido para usar el intercambio NPC.',
+            NPC_EXCHANGE_COOLDOWN: 'El NPC de intercambio aún no está disponible.',
+            NPC_EXCHANGE_TOTAL_MISMATCH: 'El total asignado no coincide con tus recursos actuales.',
+            RESOURCE_CAPACITY_EXCEEDED: 'Una cantidad supera la capacidad de almacenamiento.',
+            INVALID_RESOURCE_DISTRIBUTION: 'La distribución de recursos no es válida.',
+            INVALID_RESOURCE_AMOUNT: 'Una cantidad de recursos no es válida.',
+        };
+        toastUI.show(messages[result.reason] || 'No se pudo completar el intercambio NPC.', 'error');
     }
 
     _getBenefitText(attribute, currentValue, nextValue, context = {}) {
@@ -693,10 +911,27 @@ class BuildingInfoUI {
         const upgradeInfoContainer = this.#panelElement.querySelector('#upgrade-info-container');
         if (!upgradeInfoContainer) return;
 
+        const demolishButton = this.#panelElement.querySelector('#demolish-button');
+        const demolitionState = this._getDemolitionState(activeVillage, buildingState, queuedJobsForSlot);
+        if (demolishButton) {
+            demolishButton.disabled = !demolitionState.canDemolish;
+            const demolishLabel = demolishButton.querySelector('span');
+            if (demolishLabel) {
+                demolishLabel.textContent = demolitionState.demolitionUnlocked
+                    ? `Demoler a Nivel ${demolitionState.targetLevel}`
+                    : 'Requiere Edificio Principal Nivel 10';
+            }
+            demolishButton.title = demolitionState.demolitionUnlocked
+                ? 'Demoler no devuelve recursos y tarda la mitad que construir este nivel.'
+                : 'Sube el Edificio Principal a Nivel 10 para desbloquear demolición.';
+        }
+
         if (!nextLevelData) {
             const maxBenefitsHTML = this._getMaxLevelBenefitsHTML(buildingStaticData, effectiveCurrentLevel, activeVillage);
             upgradeInfoContainer.innerHTML = `${maxBenefitsHTML}<div class="text-center p-4 max-level-notice">Este edificio ha alcanzado su maximo nivel.</div>`;
-            footer.classList.add('hidden');
+            footer.classList.toggle('hidden', !demolitionState.canDemolish && !demolitionState.demolitionUnlocked);
+            const upgradeButton = this.#panelElement.querySelector('#upgrade-button');
+            if (upgradeButton) upgradeButton.classList.add('hidden');
             return;
         }
         
@@ -734,8 +969,10 @@ class BuildingInfoUI {
         }
         
         const upgradeButton = this.#panelElement.querySelector('#upgrade-button');
+        upgradeButton.classList.remove('hidden');
         const requirementsMet = this._checkRequirements(this.#viewingType);
-        upgradeButton.disabled = !canAfford || !requirementsMet;
+        const hasDemolitionQueued = queuedJobsForSlot.some(job => job.jobType === 'demolition');
+        upgradeButton.disabled = !canAfford || !requirementsMet || hasDemolitionQueued;
         upgradeButton.textContent = currentLevelOnRecord === 0 ? `Construir a Nivel 1` : `Subir a Nivel ${nextLevel}`;
     }
     

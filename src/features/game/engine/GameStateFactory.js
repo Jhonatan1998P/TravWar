@@ -10,6 +10,7 @@ import {
     resolveDefaultFarmTroops,
 } from '../core/data/constants.js';
 import { scaleCapacityByGameSpeed } from '../core/capacityScaling.js';
+import { createNpcExchangeState } from '../core/npcExchange.js';
 
 const MIN_VILLAGE_DISTANCE = 5;
 const PLAYER_SPAWN_RADIUS = 5;
@@ -312,6 +313,8 @@ export class GameStateFactory {
             village.maxConstructionSlots ??= (village.race === 'romans' ? 3 : 2);
             village.recruitmentQueue ??= [];
             village.constructionQueue ??= [];
+            village.demolitionUnlocked ??= (village.buildings?.find(b => b.type === 'mainBuilding')?.level || 0) >= 10;
+            village.npcExchange ??= createNpcExchangeState();
             village.unitsInVillage ??= {};
             village.reinforcements ??= [];
             village.population ??= { current: 0, foodConsumption: 0 };
@@ -447,8 +450,8 @@ export class GameStateFactory {
                 food: { current: startingFood, production: 0, capacity: 0 }
             },
             population: { current: 2, foodConsumption: 2 }, unitsInVillage: {}, reinforcements: [], recruitmentQueue: [],
-            constructionQueue: [], maxConstructionSlots: race === 'romans' ? 3 : 2,
-            research: { completed: [], queue: [] }, smithy: { upgrades: {}, queue: [] }
+            constructionQueue: [], maxConstructionSlots: race === 'romans' ? 3 : 2, demolitionUnlocked: false,
+            research: { completed: [], queue: [] }, smithy: { upgrades: {}, queue: [] }, npcExchange: createNpcExchangeState()
         };
 
         // Inicializar estructura de presupuesto para IA.

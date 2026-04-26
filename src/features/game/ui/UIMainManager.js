@@ -31,6 +31,7 @@ class UIMainManager {
     #villageDropdown;
     #unreadBadge;
     #downloadLogButton;
+    #configMenuButton;
     #mainNav;
     #activityModalUI;
 
@@ -56,9 +57,10 @@ class UIMainManager {
         this.#villageDropdown = document.getElementById('village-dropdown');
         this.#unreadBadge = document.getElementById('unread-reports-badge');
         this.#downloadLogButton = document.getElementById('download-ai-log-btn');
+        this.#configMenuButton = document.getElementById('open-config-menu-btn');
         this.#mainNav = document.getElementById('main-nav');
 
-        if (!this.#villageSelector || !this.#unreadBadge || !this.#downloadLogButton || !this.#mainNav) {
+        if (!this.#villageSelector || !this.#unreadBadge || !this.#downloadLogButton || !this.#configMenuButton || !this.#mainNav) {
             console.error('[UIMainManager] No se pudieron encontrar los elementos esenciales de la UI.');
             return;
         }
@@ -71,6 +73,7 @@ class UIMainManager {
         document.addEventListener('ai_log_ready_for_download', this.#handleLogReadyForDownload.bind(this));
         
         this.#villageSelector.addEventListener('click', this.#toggleDropdown.bind(this));
+        this.#configMenuButton.addEventListener('click', this.#handleConfigMenuClick.bind(this));
         this.#downloadLogButton.addEventListener('click', this.#handleFullscreenToggleClick.bind(this));
         document.addEventListener('click', this.#handleGlobalClick.bind(this));
         this.#boundFullscreenChange = this.#updateFullscreenButtonState.bind(this);
@@ -118,11 +121,11 @@ class UIMainManager {
         this.#downloadLogButton.title = isFullscreen ? 'Salir de pantalla completa' : 'Entrar en pantalla completa';
 
         if (isFullscreen) {
-            this.#downloadLogButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 3H5a2 2 0 00-2 2v4m16 0V5a2 2 0 00-2-2h-4m0 18h4a2 2 0 002-2v-4M5 15v4a2 2 0 002 2h4" /></svg>`;
+            this.#downloadLogButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M9 4H5a1 1 0 00-1 1v4m16 0V5a1 1 0 00-1-1h-4m0 16h4a1 1 0 001-1v-4M4 15v4a1 1 0 001 1h4" /></svg><span>Salir</span>`;
             return;
         }
 
-        this.#downloadLogButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 9V5a2 2 0 012-2h4m6 0h4a2 2 0 012 2v4m0 6v4a2 2 0 01-2 2h-4m-6 0H5a2 2 0 01-2-2v-4" /></svg>`;
+        this.#downloadLogButton.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9"><path stroke-linecap="round" stroke-linejoin="round" d="M4 9V5a1 1 0 011-1h4M15 4h4a1 1 0 011 1v4M20 15v4a1 1 0 01-1 1h-4M9 20H5a1 1 0 01-1-1v-4" /></svg><span>Pantalla</span>`;
     }
 
     async #handleFullscreenToggleClick() {
@@ -153,6 +156,11 @@ class UIMainManager {
             });
             target.classList.add('active');
         }
+    }
+
+    #handleConfigMenuClick() {
+        this.#closeDropdown();
+        router.navigate('/config');
     }
 
     #handleGameStateUpdate(gameStatePayload) {
