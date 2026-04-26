@@ -235,7 +235,15 @@ export class GameStateFactory {
             { startResourcesFromBaseCapacityRatio: STARTING_RESOURCES_BASE_CAPACITY_RATIO },
         ));
         
-        mapData[playerTileIndex] = { x: playerX, y: playerY, type: 'village', villageId: playerVillageId, ownerId: 'player', race: this.#config.playerRace };
+        mapData[playerTileIndex] = {
+            x: playerX,
+            y: playerY,
+            type: 'village',
+            villageId: playerVillageId,
+            ownerId: 'player',
+            race: this.#config.playerRace,
+            terrainVariant: mapData[playerTileIndex]?.terrainVariant,
+        };
         spatialIndex.set(`${playerX}|${playerY}`, mapData[playerTileIndex]);
 
         for (let i = 0; i < this.#config.aiCount; i++) {
@@ -255,7 +263,15 @@ export class GameStateFactory {
                 aiValleyType || '4-4-4-6',
                 { startResourcesFromBaseCapacityRatio: STARTING_RESOURCES_BASE_CAPACITY_RATIO },
             ));
-            mapData[aiTileIndex] = { x: aiX, y: aiY, type: 'village', villageId: aiVillageId, ownerId: ownerId, race: aiRace };
+            mapData[aiTileIndex] = {
+                x: aiX,
+                y: aiY,
+                type: 'village',
+                villageId: aiVillageId,
+                ownerId: ownerId,
+                race: aiRace,
+                terrainVariant: mapData[aiTileIndex]?.terrainVariant,
+            };
             spatialIndex.set(`${aiX}|${aiY}`, mapData[aiTileIndex]);
         }
         

@@ -11,19 +11,19 @@ import { selectTileInfoPanelSignature } from './renderSelectors.js';
 import { markModalOpened, shouldIgnoreModalAction } from './modalInteractionGuard.js';
 
 const ICON_PATHS = {
-    wood: '/icons/wood.png',
-    clay: '/icons/clay.png',
-    iron: '/icons/iron.png',
-    wheat: '/icons/wheat.png',
+    wood: '/icons/wood.webp',
+    clay: '/icons/clay.webp',
+    iron: '/icons/iron.webp',
+    wheat: '/icons/wheat.webp',
     beast: '/icons/sword.png',
     protection: '/icons/shield.png'
 };
 
 const ICONS = {
-    wood: `<img src="${ICON_PATHS.wood}" class="h-5 w-5 inline-block" alt="Madera">`,
-    clay: `<img src="${ICON_PATHS.clay}" class="h-5 w-5 inline-block" alt="Barro">`,
-    iron: `<img src="${ICON_PATHS.iron}" class="h-5 w-5 inline-block" alt="Hierro">`,
-    wheat: `<img src="${ICON_PATHS.wheat}" class="h-5 w-5 inline-block" alt="Cereal">`,
+    wood: `<img src="${ICON_PATHS.wood}" class="h-[25px] w-[25px] inline-block" alt="Madera">`,
+    clay: `<img src="${ICON_PATHS.clay}" class="h-[25px] w-[25px] inline-block" alt="Barro">`,
+    iron: `<img src="${ICON_PATHS.iron}" class="h-[25px] w-[25px] inline-block" alt="Hierro">`,
+    wheat: `<img src="${ICON_PATHS.wheat}" class="h-[25px] w-[25px] inline-block" alt="Cereal">`,
     beast: `<img src="${ICON_PATHS.beast}" class="h-5 w-5 inline-block" alt="Bestias">`,
     protection: `<img src="${ICON_PATHS.protection}" class="h-5 w-5 inline-block" alt="Protección">`
 };

@@ -1,10 +1,10 @@
 import { formatNumber } from '@shared/lib/formatters.js';
 
 const ICON_PATHS = {
-    wood: '/icons/wood.png',
-    clay: '/icons/clay.png',
-    iron: '/icons/iron.png',
-    wheat: '/icons/wheat.png'
+    wood: '/icons/wood.webp',
+    clay: '/icons/clay.webp',
+    iron: '/icons/iron.webp',
+    wheat: '/icons/wheat.webp'
 };
 
 const RESOURCE_UI_MAP = {
@@ -34,7 +34,7 @@ function initialize(container, resources) {
         
         wrapper.innerHTML = `
             <div class="flex items-center gap-1.5">
-                <img src="${ICON_PATHS[uiMap.iconKey]}" alt="${uiMap.colorKey}" class="h-4 w-4">
+                <img src="${ICON_PATHS[uiMap.iconKey]}" alt="${uiMap.colorKey}" class="h-5 w-5">
                 <span class="font-bold text-base" data-prop="current"></span>
             </div>
             <div class="w-full bg-primary-bg rounded-full h-1.5">

@@ -5,6 +5,46 @@ import { analyzeMapDistribution } from './mapValidator.js';
 
 const DEFAULT_MAP_SIZE = 25;
 
+function buildBiomeVariantResolver(seed, mapSize) {
+    const biomeRandom = createSeededRandom(`wasteland-biomes:${seed || 'default-world'}:${mapSize}`);
+    const biomeCount = Math.max(8, Math.min(24, Math.round((mapSize * 2 + 1) / 4)));
+
+    const baseVariants = [1, 2, 3, 4, 5, 6];
+    shuffleInPlace(baseVariants, biomeRandom);
+
+    const variantPool = [];
+    while (variantPool.length < biomeCount) {
+        variantPool.push(...baseVariants);
+    }
+
+    const biomeCenters = [];
+    for (let i = 0; i < biomeCount; i += 1) {
+        biomeCenters.push({
+            x: Math.round((biomeRandom() * 2 - 1) * mapSize),
+            y: Math.round((biomeRandom() * 2 - 1) * mapSize),
+            variant: variantPool[i],
+            influence: 0.82 + biomeRandom() * 0.4,
+        });
+    }
+
+    return (x, y) => {
+        let selectedVariant = 1;
+        let bestScore = Number.POSITIVE_INFINITY;
+
+        for (const biome of biomeCenters) {
+            const dx = x - biome.x;
+            const dy = y - biome.y;
+            const distanceScore = Math.hypot(dx, dy) * biome.influence;
+            if (distanceScore < bestScore) {
+                bestScore = distanceScore;
+                selectedVariant = biome.variant;
+            }
+        }
+
+        return selectedVariant;
+    };
+}
+
 function normalizeMapSize(value) {
     const numeric = Math.floor(Number(value));
     if (!Number.isFinite(numeric)) return DEFAULT_MAP_SIZE;
@@ -95,7 +135,7 @@ function placeSpecialCropOasis(mapData, random, mapSize, tileIndexByCoords) {
             if (!canPlaceOasis(tile, mapData, tileIndexByCoords, rules.minDistance)) continue;
 
             const oasisType = pickWeighted(WHEAT_OASIS_DISTRIBUTION, random)?.id || 'wheat_25';
-            mapData[candidateIndex] = { x: tile.x, y: tile.y, type: 'oasis', oasisType };
+            mapData[candidateIndex] = { x: tile.x, y: tile.y, type: 'oasis', oasisType, terrainVariant: tile.terrainVariant };
             placed += 1;
         }
     }
@@ -116,7 +156,7 @@ function placeAmbientOasis(mapData, random, mapSize, tileIndexByCoords) {
         if (!canPlaceOasis(tile, mapData, tileIndexByCoords, rules.minDistance)) continue;
 
         const oasisType = pickWeighted(OASIS_TYPE_DISTRIBUTION, random)?.id || 'wheat_25';
-        mapData[index] = { x: tile.x, y: tile.y, type: 'oasis', oasisType };
+        mapData[index] = { x: tile.x, y: tile.y, type: 'oasis', oasisType, terrainVariant: tile.terrainVariant };
         currentOasisCount += 1;
     }
 }
@@ -124,6 +164,7 @@ function placeAmbientOasis(mapData, random, mapSize, tileIndexByCoords) {
 export function generateMapData({ seed, mapSize = DEFAULT_MAP_SIZE } = {}) {
     const normalizedMapSize = normalizeMapSize(mapSize);
     const random = createSeededRandom(`${seed || 'default-world'}:${normalizedMapSize}`);
+    const pickBiomeVariant = buildBiomeVariantResolver(seed, normalizedMapSize);
     const mapData = [];
     const rareValleys = [];
 
@@ -131,7 +172,7 @@ export function generateMapData({ seed, mapSize = DEFAULT_MAP_SIZE } = {}) {
         for (let x = -normalizedMapSize; x <= normalizedMapSize; x += 1) {
             const tile = { x, y };
             const valleyType = pickValleyType({ mapData, tile, random, mapSize: normalizedMapSize, rareValleys });
-            mapData.push({ x, y, type: 'valley', valleyType });
+            mapData.push({ x, y, type: 'valley', valleyType, terrainVariant: pickBiomeVariant(x, y) });
         }
     }
 

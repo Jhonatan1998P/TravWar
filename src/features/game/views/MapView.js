@@ -15,13 +15,49 @@ const LOD_SCALE_THRESHOLD = 0.7;
 
 const ASSET_PATHS = {
     village: '/icons/village.png',
-    wood: '/icons/wood.png',
-    clay: '/icons/clay.png',
-    iron: '/icons/iron.png',
-    wheat: '/icons/wheat.png',
-    wasteland: '/icons/baldio.png',
-    compass: '/icons/compass.png'
+    compass: '/icons/compass.png',
+    wasteland1: '/map/Wasteland_1.webp',
+    wasteland2: '/map/Wasteland_2.webp',
+    wasteland3: '/map/Wasteland_3.webp',
+    wasteland4: '/map/Wasteland_4.webp',
+    wasteland5: '/map/Wasteland_5.webp',
+    wasteland6: '/map/Wasteland_6.webp',
+    lumber25: '/map/Lumber25.webp',
+    lumber50: '/map/Lumber50.webp',
+    clay25: '/map/Clay25.webp',
+    clay50: '/map/Clay50.webp',
+    iron25: '/map/Iron25.webp',
+    iron50: '/map/Iron50.webp',
+    wheat25: '/map/Wheat25.webp',
+    wheat50: '/map/Wheat50.webp'
 };
+
+const WASTELAND_VARIANT_KEYS = ['wasteland1', 'wasteland2', 'wasteland3', 'wasteland4', 'wasteland5', 'wasteland6'];
+
+const OASIS_TEXTURE_BY_TYPE = {
+    wood_25: 'lumber25',
+    wood_50: 'lumber50',
+    clay_25: 'clay25',
+    clay_50: 'clay50',
+    iron_25: 'iron25',
+    iron_50: 'iron50',
+    wheat_25: 'wheat25',
+    wheat_50: 'wheat50',
+};
+
+function stableHash(x, y) {
+    let hash = ((x * 73856093) ^ (y * 19349663)) >>> 0;
+    hash = (hash ^ (hash >>> 13)) >>> 0;
+    hash = Math.imul(hash, 1274126177) >>> 0;
+    return hash >>> 0;
+}
+
+function getWastelandVariantIndex(x, y) {
+    const biomeCellSize = 7;
+    const biomeX = Math.floor((x + 4096) / biomeCellSize);
+    const biomeY = Math.floor((y + 4096) / biomeCellSize);
+    return stableHash(biomeX, biomeY) % WASTELAND_VARIANT_KEYS.length;
+}
 
 const SHARED_MAP_RUNTIME = {
     assets: null,
@@ -520,7 +556,7 @@ class MapView {
                 const tilePixelX = (gridX - startGridX) * TILE_SIZE;
                 const tilePixelY = (gridY - startGridY) * TILE_SIZE;
                 
-                this._drawTileTerrain(terrainCtx, tilePixelX, tilePixelY, tileData, useLowDetail);
+                this._drawTileTerrain(terrainCtx, tilePixelX, tilePixelY, tileData, useLowDetail, mapX, mapY);
                 if (!useLowDetail) {
                     this._drawTileDetails(detailsCtx, tilePixelX, tilePixelY, tileData);
                 }
@@ -608,19 +644,36 @@ class MapView {
         }
     }
 
-    _drawTileTerrain(ctx, px, py, tileData, useLowDetail) {
+    _drawTileTerrain(ctx, px, py, tileData, useLowDetail, mapX, mapY) {
         const activeVillage = this.#gameState?.villages?.find(village => village.id === this.#gameState?.activeVillageId);
         const perspectiveOwnerId = activeVillage?.ownerId || 'player';
 
-        let bgColor = '#2D3748';
-        if (!tileData || tileData.type === 'valley') {
-            bgColor = '#6B4F4B';
-        } else if (tileData.type === 'oasis') {
-            bgColor = '#2F855A';
+        const tileX = Number.isFinite(tileData?.x) ? tileData.x : mapX;
+        const tileY = Number.isFinite(tileData?.y) ? tileData.y : mapY;
+        const fallbackVariant = getWastelandVariantIndex(tileX, tileY) + 1;
+        const terrainVariant = Number.isFinite(tileData?.terrainVariant) ? tileData.terrainVariant : fallbackVariant;
+        const wastelandKey = `wasteland${Math.max(1, Math.min(6, terrainVariant))}`;
+        const wastelandTexture = this.#assets[wastelandKey] || this.#assets.wasteland1;
+
+        if (wastelandTexture) {
+            ctx.drawImage(wastelandTexture, px, py, TILE_SIZE, TILE_SIZE);
+        } else {
+            ctx.fillStyle = '#6B4F4B';
+            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
         }
-        
-        ctx.fillStyle = bgColor;
-        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+
+        if (tileData?.type === 'oasis') {
+            const oasisTextureKey = OASIS_TEXTURE_BY_TYPE[tileData.oasisType];
+            const oasisTexture = this.#assets[oasisTextureKey];
+            if (oasisTexture) {
+                ctx.drawImage(oasisTexture, px, py, TILE_SIZE, TILE_SIZE);
+            }
+        }
+
+        if (tileData?.type === 'village') {
+            ctx.fillStyle = tileData.ownerId === perspectiveOwnerId ? 'rgba(56, 178, 172, 0.18)' : 'rgba(229, 62, 62, 0.18)';
+            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+        }
 
         if (useLowDetail) {
             let detailColor = null;
@@ -636,7 +689,10 @@ class MapView {
             }
             if (detailColor) {
                 ctx.fillStyle = detailColor;
-                ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+                const markerSize = Math.max(6, Math.floor(TILE_SIZE * 0.3));
+                const markerX = px + Math.floor((TILE_SIZE - markerSize) / 2);
+                const markerY = py + Math.floor((TILE_SIZE - markerSize) / 2);
+                ctx.fillRect(markerX, markerY, markerSize, markerSize);
             }
         }
     }
@@ -651,9 +707,6 @@ class MapView {
         let isDashed = false;
 
         if (!tileData || tileData.type === 'valley') {
-            if (this.#showWastelandIcons) {
-                icon = this.#assets.wasteland;
-            }
             borderColor = '#718096';
             isDashed = false;
         } else if (tileData.type === 'oasis') {
@@ -661,13 +714,13 @@ class MapView {
             const resourceType = oasisDetails.bonus.resource;
             const colorMap = { wood: '#A0522D', stone: '#B22222', iron: '#778899', food: '#FFD700' };
             borderColor = colorMap[resourceType];
-            const iconMap = { wood: 'wood', stone: 'clay', iron: 'iron', food: 'wheat' };
-            icon = this.#assets[iconMap[resourceType]];
             isDashed = true;
 
         } else if (tileData.type === 'village') {
             const village = this.#gameState.villages.find(v => v.id === tileData.villageId);
-            icon = this.#assets.village;
+            if (this.#showWastelandIcons) {
+                icon = this.#assets.village;
+            }
 
             if (tileData.ownerId === perspectiveOwnerId) {
                 borderColor = (village && village.id === this.#gameState.activeVillageId) ? '#FFFFFF' : '#48BB78';
@@ -710,7 +763,7 @@ class MapView {
             }
         }
 
-        if (tileData?.type === 'oasis') {
+        if (this.#showWastelandIcons && tileData?.type === 'oasis') {
             const bonusPercentage = gameData.oasisTypes[tileData.oasisType]?.bonus?.percentage;
             if (bonusPercentage) {
                 this._drawOasisBonusLabel(ctx, px, py, bonusPercentage);

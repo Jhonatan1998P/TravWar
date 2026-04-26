@@ -7,10 +7,10 @@ import toastUI from './ToastUI.js';
 import { markModalOpened, shouldIgnoreModalAction } from './modalInteractionGuard.js';
 
 const ICONS = {
-    wood: `<img src="/icons/wood.png" alt="Madera" class="h-5 w-5">`,
-    clay: `<img src="/icons/clay.png" alt="Barro" class="h-5 w-5">`,
-    iron: `<img src="/icons/iron.png" alt="Hierro" class="h-5 w-5">`,
-    wheat: `<img src="/icons/wheat.png" alt="Cereal" class="h-5 w-5">`,
+    wood: `<img src="/icons/wood.webp" alt="Madera" class="h-[25px] w-[25px]">`,
+    clay: `<img src="/icons/clay.webp" alt="Barro" class="h-[25px] w-[25px]">`,
+    iron: `<img src="/icons/iron.webp" alt="Hierro" class="h-[25px] w-[25px]">`,
+    wheat: `<img src="/icons/wheat.webp" alt="Cereal" class="h-[25px] w-[25px]">`,
     merchant: `<img src="/icons/merchant.png" alt="Mercader" class="h-6 w-6">`
 };
 

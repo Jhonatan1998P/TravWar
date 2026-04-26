@@ -410,8 +410,14 @@ function handleSettleArrival(movement) {
     villageProcessors.push(newProcessor);
 
     gameState.villages.push(newVillage);
-    gameState.mapData[targetTileIndex] = { 
-        x: targetCoords.x, y: targetCoords.y, type: 'village', villageId: newVillage.id, ownerId: originVillage.ownerId, race: originVillage.race 
+    gameState.mapData[targetTileIndex] = {
+        x: targetCoords.x,
+        y: targetCoords.y,
+        type: 'village',
+        villageId: newVillage.id,
+        ownerId: originVillage.ownerId,
+        race: originVillage.race,
+        terrainVariant: targetTile?.terrainVariant,
     };
 
     const report = {

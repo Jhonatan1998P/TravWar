@@ -13,10 +13,10 @@ import { selectBuildingInfoPanelSignature } from './renderSelectors.js';
 const ICONS = {
     time: `<img src="/icons/timer.png" alt="Tiempo" class="h-5 w-5">`,
     population: `<img src="/icons/population.png" alt="Población" class="h-5 w-5">`,
-    wood: `<img src="/icons/wood.png" alt="Madera" class="h-5 w-5">`,
-    clay: `<img src="/icons/clay.png" alt="Barro" class="h-5 w-5">`,
-    iron: `<img src="/icons/iron.png" alt="Hierro" class="h-5 w-5">`,
-    wheat: `<img src="/icons/wheat.png" alt="Cereal" class="h-5 w-5">`,
+    wood: `<img src="/icons/wood.webp" alt="Madera" class="h-[25px] w-[25px]">`,
+    clay: `<img src="/icons/clay.webp" alt="Barro" class="h-[25px] w-[25px]">`,
+    iron: `<img src="/icons/iron.webp" alt="Hierro" class="h-[25px] w-[25px]">`,
+    wheat: `<img src="/icons/wheat.webp" alt="Cereal" class="h-[25px] w-[25px]">`,
     exchange: `<img src="/icons/bolsa.png" alt="Intercambio" class="block h-3.5 w-3.5 sm:h-4 sm:w-4 object-contain">`,
 };
 
