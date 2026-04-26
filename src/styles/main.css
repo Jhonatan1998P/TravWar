@@ -2,20 +2,83 @@
 @tailwind components;
 @tailwind utilities;
 
+@property --range-progress {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 0%;
+}
+
 @layer components {
   .input-range::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
     width: 20px;
     height: 20px;
+    margin-top: -6px;
     border-radius: 50%;
     cursor: pointer;
-    @apply bg-blue-500;
-    transition: transform 0.1s ease-in-out;
+    @apply bg-war-gold border-2 border-orange-950 shadow-lg;
+    box-shadow: 0 0 0 3px rgba(3, 3, 3, 0.72), 0 0 18px rgba(245, 196, 81, 0.34);
+    transition: transform 0.12s ease-out, box-shadow 0.18s ease-out;
+  }
+
+  .input-range {
+    --range-progress: 0%;
+    --range-fill-start: #f8df8c;
+    --range-fill-end: #c46a1f;
+    --range-track: rgba(41, 37, 36, 0.92);
+    background: linear-gradient(90deg, var(--range-fill-start) 0%, #f5c451 calc(var(--range-progress) * 0.62), var(--range-fill-end) var(--range-progress), var(--range-track) var(--range-progress), var(--range-track) 100%);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(245, 196, 81, 0.13);
+    transition: --range-progress 0.28s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease-out;
+  }
+
+  .input-range::-webkit-slider-runnable-track {
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: transparent;
+  }
+
+  .input-range::-moz-range-track {
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: var(--range-track);
+  }
+
+  .input-range::-moz-range-progress {
+    height: 0.5rem;
+    border-radius: 9999px;
+    background: linear-gradient(90deg, var(--range-fill-start) 0%, #f5c451 62%, var(--range-fill-end) 100%);
+    transition: width 0.25s ease-out;
+  }
+
+  .input-range::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #431407;
+    border-radius: 50%;
+    background: #f5c451;
+    cursor: pointer;
+    box-shadow: 0 0 0 3px rgba(3, 3, 3, 0.72), 0 0 18px rgba(245, 196, 81, 0.34);
+    transition: transform 0.12s ease-out, box-shadow 0.18s ease-out;
   }
 
   .input-range:active::-webkit-slider-thumb {
     transform: scale(1.2);
+    box-shadow: 0 0 0 4px rgba(3, 3, 3, 0.78), 0 0 24px rgba(245, 196, 81, 0.48);
+  }
+
+  .input-range:active::-moz-range-thumb {
+    transform: scale(1.2);
+    box-shadow: 0 0 0 4px rgba(3, 3, 3, 0.78), 0 0 24px rgba(245, 196, 81, 0.48);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .input-range,
+    .input-range::-webkit-slider-thumb,
+    .input-range::-moz-range-progress,
+    .input-range::-moz-range-thumb {
+      transition: none;
+    }
   }
 
   .archetype-btn {
@@ -347,7 +410,8 @@
 
 @layer components {
   .input-range::-webkit-slider-thumb {
-    @apply bg-war-gold border-2 border-orange-900 shadow-lg;
+    @apply bg-war-gold border-2 border-orange-950;
+    box-shadow: 0 0 0 3px rgba(3, 3, 3, 0.72), 0 0 18px rgba(245, 196, 81, 0.34);
   }
 
   .archetype-btn {

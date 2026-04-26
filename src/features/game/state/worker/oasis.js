@@ -57,7 +57,7 @@ function calculateOasisPressure(oasisState, currentTime, gameData) {
 }
 
 function canRegenerateBeasts(tile) {
-    return tile?.type === 'oasis' && Boolean(tile.state?.beasts) && tile.state.isClearedOnce === true;
+    return tile?.type === 'oasis' && !tile.ownerId && Boolean(tile.state?.beasts) && tile.state.isClearedOnce === true;
 }
 
 function getCurrentOasisBeastCount(beasts) {

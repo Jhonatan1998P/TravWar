@@ -317,6 +317,7 @@ export class GameStateFactory {
             village.npcExchange ??= createNpcExchangeState();
             village.unitsInVillage ??= {};
             village.reinforcements ??= [];
+            village.oases ??= [];
             village.population ??= { current: 0, foodConsumption: 0 };
             village.villageType ??= '4-4-4-6';
             village.race ??= savedState.players.find(p => p.id === village.ownerId)?.race;
@@ -449,7 +450,7 @@ export class GameStateFactory {
                 iron: { current: startingIron, production: 0, capacity: 0 },
                 food: { current: startingFood, production: 0, capacity: 0 }
             },
-            population: { current: 2, foodConsumption: 2 }, unitsInVillage: {}, reinforcements: [], recruitmentQueue: [],
+            population: { current: 2, foodConsumption: 2 }, unitsInVillage: {}, reinforcements: [], recruitmentQueue: [], oases: [],
             constructionQueue: [], maxConstructionSlots: race === 'romans' ? 3 : 2, demolitionUnlocked: false,
             research: { completed: [], queue: [] }, smithy: { upgrades: {}, queue: [] }, npcExchange: createNpcExchangeState()
         };

@@ -12,6 +12,23 @@ function createReturnMovementId(now, originVillageId) {
     return `${now}-mov-return-${originVillageId}-${returnMovementIdSequence}`;
 }
 
+function getHeroMansionOasisSlots(village) {
+    const level = village?.buildings?.find(building => building.type === 'heroMansion')?.level || 0;
+    if (level >= 20) return 3;
+    if (level >= 15) return 2;
+    if (level >= 10) return 1;
+    return 0;
+}
+
+function isOasisInCaptureRange(village, targetCoords) {
+    return Math.abs(targetCoords.x - village.coords.x) <= 3
+        && Math.abs(targetCoords.y - village.coords.y) <= 3;
+}
+
+function hasLivingBeasts(beasts = {}) {
+    return Object.values(beasts).some(count => count > 0);
+}
+
 export class CombatEngine {
     _gameState;
     _gameConfig;
@@ -261,6 +278,7 @@ export class CombatEngine {
         let palaceLevel = defenderVillage ? defenderVillage.buildings.find(b => b.type === 'residence' || b.type === 'palace')?.level || 0 : 0;
         let wallDamage = null;
         let buildingDamage = [];
+        let oasisConquest = null;
 
         const defendingContingents = [];
         if (defenderVillage) {
@@ -516,7 +534,49 @@ export class CombatEngine {
                 this._results.stateChanges.villageUpdates.push({ villageId: defenderVillage.id, changes: { plunder: plunder } });
             }
         }
-        
+
+        if (targetTile?.type === 'oasis' && this._movement.payload.conquerOasis === true) {
+            const currentBeasts = { ...(targetTile.state?.beasts || {}) };
+            for (const unitId in totalDefenderLosses.losses) {
+                currentBeasts[unitId] = Math.max(0, (currentBeasts[unitId] || 0) - totalDefenderLosses.losses[unitId]);
+            }
+
+            const hasFreeSlot = attackerVillage && (attackerVillage.oases?.length || 0) < getHeroMansionOasisSlots(attackerVillage);
+            const canConquer = attackerWins
+                && attackerVillage
+                && hasFreeSlot
+                && isOasisInCaptureRange(attackerVillage, this._movement.targetCoords)
+                && !hasLivingBeasts(currentBeasts);
+
+            if (canConquer) {
+                const previousVillageId = targetTile.villageId || targetTile.state?.villageId || null;
+                const oasisRecord = {
+                    x: targetTile.x,
+                    y: targetTile.y,
+                    oasisType: targetTile.oasisType,
+                };
+
+                if (previousVillageId && previousVillageId !== attackerVillage.id) {
+                    this._results.stateChanges.villageUpdates.push({
+                        villageId: previousVillageId,
+                        changes: { removeOasis: { x: targetTile.x, y: targetTile.y } },
+                    });
+                }
+
+                this._results.stateChanges.villageUpdates.push({
+                    villageId: attackerVillage.id,
+                    changes: { addOasis: oasisRecord },
+                });
+                this._results.stateChanges.tileUpdates.push({
+                    coords: targetTile,
+                    changes: { captureOasis: { ownerId: attackerVillage.ownerId, villageId: attackerVillage.id } },
+                });
+                oasisConquest = { success: true, oasis: oasisRecord };
+            } else {
+                oasisConquest = { success: false };
+            }
+        }
+         
         const defenderReportContingents = defenderContingentResults.map(c => {
             let contingentInfo;
             if (c.id === 'nature') {
@@ -533,7 +593,7 @@ export class CombatEngine {
             winner: winnerName,
             attacker: { ...attackerInfo, troops: this._movement.payload.troops, losses: attackerResults.losses, carryCapacity: totalLootCapacity },
             defender: { ...defenderInfo, tropas_totales: totalDefenderTroops, contingents: defenderReportContingents },
-            plunder, bounty, wallDamage, buildingDamage,
+            plunder, bounty, wallDamage, buildingDamage, oasisConquest,
             summary: {
                 attacker: { attackPower: attackPoints.total, lostUpkeep: attackerResults.lostUpkeep, lostResources: attackerResults.lostResources },
                 defender: { defensePower: defensePoints, lostUpkeep: totalDefenderLosses.lostUpkeep, lostResources: totalDefenderLosses.lostResources }

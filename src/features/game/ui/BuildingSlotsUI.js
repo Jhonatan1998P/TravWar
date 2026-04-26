@@ -72,6 +72,7 @@ const typeToClassMap = {
     'ironFoundry': 'bg-stone-700',
     'grainMill': 'bg-yellow-800',
     'bakery': 'bg-yellow-600',
+    'waterworks': 'bg-cyan-700',
 };
 
 const layoutCacheByVillageType = new Map();

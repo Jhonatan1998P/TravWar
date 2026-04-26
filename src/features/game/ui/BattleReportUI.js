@@ -229,6 +229,7 @@ class BattleReportUI {
                         ${this._renderSide(report.attacker, 'Atacante')}
                         ${defenderHTML}
                     </div>
+                    ${this._renderOasisConquestSection(report)}
                     ${this._renderLootSection(report)}
                     ${this._renderSiegeDamageSection(report)}
                     ${this._renderSummary(report.summary)}
@@ -344,6 +345,23 @@ class BattleReportUI {
         }
     
         return `<div>${resourcesHTML}${buildingsHTML}${troopsHTML}</div>`;
+    }
+
+    _renderOasisConquestSection(report) {
+        if (!report.oasisConquest) return '';
+
+        if (report.oasisConquest.success) {
+            const oasis = report.oasisConquest.oasis;
+            return `<div class="mt-4 p-3 rounded-lg bg-green-900/30 border border-green-700/50 text-green-200">
+                <h4 class="font-bold text-green-300">Oasis conquistado</h4>
+                <p class="text-sm mt-1">El oasis (${oasis.x}|${oasis.y}) ahora pertenece a esta aldea.</p>
+            </div>`;
+        }
+
+        return `<div class="mt-4 p-3 rounded-lg bg-yellow-900/30 border border-yellow-700/50 text-yellow-200">
+            <h4 class="font-bold text-yellow-300">Conquista de oasis fallida</h4>
+            <p class="text-sm mt-1">El ataque no cumplió todas las condiciones de conquista.</p>
+        </div>`;
     }
 
     _renderSide(sideData, fallbackTitle) {

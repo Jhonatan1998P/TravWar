@@ -17,6 +17,7 @@ const ICONS = {
     clay: `<img src="/icons/clay.png" alt="Barro" class="h-5 w-5">`,
     iron: `<img src="/icons/iron.png" alt="Hierro" class="h-5 w-5">`,
     wheat: `<img src="/icons/wheat.png" alt="Cereal" class="h-5 w-5">`,
+    exchange: `<img src="/icons/bolsa.png" alt="Intercambio" class="block h-3.5 w-3.5 sm:h-4 sm:w-4 object-contain">`,
 };
 
 const RESOURCE_ICON_MAP = {
@@ -26,11 +27,17 @@ const RESOURCE_ICON_MAP = {
 
 const RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
 const RESOURCE_LABELS = { wood: 'Madera', stone: 'Barro', iron: 'Hierro', food: 'Cereal' };
+const UNIT_TYPE_LABELS = {
+    infantry: 'Infanteria', cavalry: 'Caballeria', siege: 'Asedio', scout: 'Exploracion', settler: 'Colonizacion', chief: 'Conquista', merchant: 'Comercio'
+};
+const UNIT_ROLE_LABELS = {
+    offensive: 'Ofensiva', defensive: 'Defensiva', versatile: 'Versatil', scout: 'Explorador', ram: 'Ariete', catapult: 'Catapulta', conquest: 'Fundador', colonization: 'Conquista', trade: 'Comercio'
+};
 
 const BUILDING_CATEGORIES = {
     infrastructure: ['embassy', 'palace', 'heroMansion'],
     military: ['barracks', 'stable', 'workshop', 'smithy', 'academy', 'hospital', 'greatBarracks', 'greatStable', 'tournamentSquare'],
-    economy: ['warehouse', 'granary', 'cranny', 'marketplace', 'tradeOffice', 'sawmill', 'brickyard', 'ironFoundry', 'grainMill', 'bakery']
+    economy: ['warehouse', 'granary', 'cranny', 'marketplace', 'tradeOffice', 'sawmill', 'brickyard', 'ironFoundry', 'grainMill', 'bakery', 'waterworks']
 };
 
 const MULTIPLE_ALLOWED_BUILDINGS = ['warehouse', 'granary', 'cranny'];
@@ -59,6 +66,10 @@ class BuildingInfoUI {
         this.#panelElement.querySelector('[data-action="close"]').addEventListener('click', () => this.hide());
         this.#panelElement.querySelector('[data-action="upgrade"]').addEventListener('click', () => this._handleUpgradeClick());
         this.#panelElement.querySelector('[data-action="demolish"]').addEventListener('click', () => this._handleDemolishClick());
+        this.#panelElement.querySelector('[data-action="close-unit-info"]').addEventListener('click', () => this._hideUnitInfoModal());
+        this.#panelElement.querySelector('#unit-info-modal').addEventListener('click', e => {
+            if (e.target.id === 'unit-info-modal') this._hideUnitInfoModal();
+        });
     
         const mainPanel = this.#panelElement.querySelector('#panel-main');
         mainPanel.addEventListener('click', e => {
@@ -75,6 +86,16 @@ class BuildingInfoUI {
             const activeVillageId = this.#currentGameState?.activeVillageId;
             if (!activeVillageId) return;
 
+            if (action === 'unit-info') {
+                this._showUnitInfoModal(unitId);
+                return;
+            }
+
+            if (action === 'optimize-unit-exchange') {
+                this._handleOptimizeUnitExchange(unitId, activeVillageId);
+                return;
+            }
+
             if (action === 'farm-open-center') {
                 this.hide();
                 router.navigate('/farm-lists');
@@ -89,12 +110,6 @@ class BuildingInfoUI {
             if (action === 'npc-exchange') {
                 this._handleNpcExchangeClick(activeVillageId);
                 return;
-            }
-    
-            if (action === 'research' || action === 'upgrade_unit') {
-                button.disabled = true;
-                const card = button.closest('[data-unit-id]');
-                if (card) card.classList.add('opacity-50', 'cursor-wait');
             }
     
             if (action === 'train') {
@@ -160,6 +175,18 @@ class BuildingInfoUI {
                         </button>
                     </footer>
                 </div>
+                <div id="unit-info-modal" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm hidden items-center justify-center p-3 sm:p-4 z-[60]">
+                    <div class="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-primary-border bg-gray-950/95 shadow-2xl text-war-mist">
+                        <header class="flex items-center justify-between gap-3 p-4 border-b border-primary-border sticky top-0 bg-gray-950/95 backdrop-blur-xl">
+                            <div class="min-w-0">
+                                <h3 id="unit-info-title" class="text-xl font-display font-bold text-war-gold truncate"></h3>
+                                <p id="unit-info-subtitle" class="text-xs text-gray-400 mt-1"></p>
+                            </div>
+                            <button data-action="close-unit-info" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar informacion de unidad">×</button>
+                        </header>
+                        <div id="unit-info-content" class="p-4 space-y-4"></div>
+                    </div>
+                </div>
             </div>`;
         this.#mainContainer.insertAdjacentHTML('beforeend', panelHTML);
     }
@@ -172,6 +199,16 @@ class BuildingInfoUI {
             this._updateCosts();
             if (this.#viewingType === 'smithy') {
                 this._updateSmithyList();
+            }
+            if (this.#viewingType === 'academy') {
+                this._updateAcademyList();
+            }
+            if (['barracks', 'stable', 'workshop', 'greatBarracks', 'greatStable', 'palace'].includes(this.#viewingType)) {
+                this._updateTroopList();
+            }
+            if (this.#viewingType === 'hospital') {
+                const contentContainer = this.#panelElement.querySelector('#building-details-content');
+                if (contentContainer) this._renderHospitalUnits(contentContainer);
             }
             if (this.#viewingType === 'rallyPoint') {
                 this._updateRallyPointFarmListPanel();
@@ -244,10 +281,10 @@ class BuildingInfoUI {
 
     _checkRequirements(buildingId) {
         const buildingData = gameData.buildings[buildingId];
-        if (!buildingData.requires) return true;
-
         const activeVillage = this.#currentGameState.villages.find(v => v.id === this.#currentGameState.activeVillageId);
         if (!activeVillage) return false;
+        if (buildingData.allowedRaces && !buildingData.allowedRaces.includes(activeVillage.race)) return false;
+        if (!buildingData.requires) return true;
 
         const resourceFieldTypes = ['woodcutter', 'clayPit', 'ironMine', 'cropland'];
 
@@ -272,13 +309,20 @@ class BuildingInfoUI {
     
     _getMissingBuildingRequirementsHTML(buildingId) {
         const buildingData = gameData.buildings[buildingId];
-        if (!buildingData.requires) return '';
-
         const activeVillage = this.#currentGameState.villages.find(v => v.id === this.#currentGameState.activeVillageId);
         if (!activeVillage) return '';
 
         let html = '<div class="mt-2 border-t border-primary-border pt-2 text-xs space-y-1">';
         html += `<span class="text-gray-400 font-semibold">Requisitos:</span>`;
+
+        if (buildingData.allowedRaces && !buildingData.allowedRaces.includes(activeVillage.race)) {
+            html += `<p class="text-red-400">Solo disponible para Egipcios</p>`;
+        }
+
+        if (!buildingData.requires) {
+            html += '</div>';
+            return html;
+        }
 
         const resourceFieldTypes = ['woodcutter', 'clayPit', 'ironMine', 'cropland'];
 
@@ -353,6 +397,7 @@ class BuildingInfoUI {
     }
 
     hide() {
+        this._hideUnitInfoModal();
         this.#panelElement.classList.remove('panel-visible');
         this.#panelElement.classList.add('panel-hidden');
         this.#currentSlotId = null;
@@ -499,6 +544,8 @@ class BuildingInfoUI {
             this._renderSmithyUpgrades(contentContainer);
         } else if (this.#viewingType === 'academy') {
             this._renderAcademyResearch(contentContainer);
+        } else if (this.#viewingType === 'hospital') {
+            this._renderHospitalUnits(contentContainer);
         } else if (isMilitaryBuilding) {
             this._renderTroopTraining(contentContainer);
         } else if (this.#viewingType === 'rallyPoint') {
@@ -647,8 +694,16 @@ class BuildingInfoUI {
     _handleNpcExchangeResult(payload) {
         const result = payload?.result;
         if (!result) return;
+        const request = payload?.request || {};
+        const isUnitOptimalExchange = request.mode === 'unit_optimal_exchange';
 
         if (result.success) {
+            if (isUnitOptimalExchange) {
+                const previousMax = formatNumber(request.currentMax || 0);
+                const exchangeMax = formatNumber(request.exchangeMax || 0);
+                toastUI.show(`Intercambio optimo aplicado para ${request.unitName || 'la unidad'}: ${previousMax} -> ${exchangeMax} reclutables.`, 'success');
+                return;
+            }
             toastUI.show('Intercambio NPC completado correctamente.', 'success');
             return;
         }
@@ -661,7 +716,10 @@ class BuildingInfoUI {
             INVALID_RESOURCE_DISTRIBUTION: 'La distribución de recursos no es válida.',
             INVALID_RESOURCE_AMOUNT: 'Una cantidad de recursos no es válida.',
         };
-        toastUI.show(messages[result.reason] || 'No se pudo completar el intercambio NPC.', 'error');
+        const fallbackMessage = isUnitOptimalExchange
+            ? `No se pudo aplicar el intercambio optimo para ${request.unitName || 'la unidad'}.`
+            : 'No se pudo completar el intercambio NPC.';
+        toastUI.show(messages[result.reason] || fallbackMessage, 'error');
     }
 
     _getBenefitText(attribute, currentValue, nextValue, context = {}) {
@@ -677,6 +735,9 @@ class BuildingInfoUI {
         }
         if (attribute.productionBonusPercent) {
             return formatBenefit('Bono de producción', `${currentValue}%`, `${nextValue}%`);
+        }
+        if (attribute.oasisBonusMultiplierPercent) {
+            return formatBenefit('Bono sobre oasis', `+${currentValue}%`, `+${nextValue}%`);
         }
         if (attribute.trainingTimeFactor) {
             const currentReduction = (1 - currentValue) * 100;
@@ -806,6 +867,11 @@ class BuildingInfoUI {
 
             if (key === 'productionBonusPercent') {
                 benefitsList += this._formatCurrentBenefitText('Bono de produccion', `${rawValue}%`);
+                continue;
+            }
+
+            if (key === 'oasisBonusMultiplierPercent') {
+                benefitsList += this._formatCurrentBenefitText('Bono sobre oasis', `+${rawValue}%`);
                 continue;
             }
 
@@ -994,6 +1060,280 @@ class BuildingInfoUI {
         return true;
     }
 
+    _getUnitNameButtonHTML(unit) {
+        return `<button data-action="unit-info" data-unit-id="${unit.id}" class="text-left font-bold text-yellow-400 hover:text-yellow-200 underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-war-gold/70 rounded px-1 -ml-1">${unit.name}</button>`;
+    }
+
+    _getUnitHeaderHTML(unit, { showExchange = false } = {}) {
+        return `<div class="inline-flex items-center gap-1.5 min-w-0 align-middle leading-none">
+            ${this._getUnitNameButtonHTML(unit)}
+            ${showExchange ? `<button data-action="optimize-unit-exchange" data-unit-id="${unit.id}" class="shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-md text-amber-200 hover:bg-amber-500/15 focus:outline-none focus:ring-1 focus:ring-war-gold/70" title="Intercambio optimo para reclutar mas ${unit.name}" aria-label="Intercambio optimo para ${unit.name}">${ICONS.exchange}</button>` : ''}
+        </div>`;
+    }
+
+    _getUnitTotalCost(cost = {}) {
+        return RESOURCE_KEYS.reduce((sum, resourceKey) => sum + Math.max(0, Number(cost[resourceKey]) || 0), 0);
+    }
+
+    _getCurrentResourceSnapshot(activeVillage) {
+        return RESOURCE_KEYS.reduce((snapshot, resourceKey) => {
+            snapshot[resourceKey] = Math.floor(Number(activeVillage.resources?.[resourceKey]?.current) || 0);
+            return snapshot;
+        }, {});
+    }
+
+    _getMaxAffordableUnitCount(unitCost = {}, resources = {}) {
+        let maxAffordable = Infinity;
+        for (const resourceKey of RESOURCE_KEYS) {
+            const cost = Math.max(0, Number(unitCost[resourceKey]) || 0);
+            if (cost <= 0) continue;
+            maxAffordable = Math.min(maxAffordable, Math.floor((resources[resourceKey] || 0) / cost));
+        }
+        return Number.isFinite(maxAffordable) ? Math.max(0, maxAffordable) : 0;
+    }
+
+    _getOptimalUnitExchangeResources(unit, activeVillage) {
+        const unitCost = unit?.cost || {};
+        const totalCost = this._getUnitTotalCost(unitCost);
+        if (totalCost <= 0) return { success: false, reason: 'INVALID_UNIT_COST' };
+
+        const currentResources = this._getCurrentResourceSnapshot(activeVillage);
+        const totalResources = RESOURCE_KEYS.reduce((sum, resourceKey) => sum + currentResources[resourceKey], 0);
+        const capacities = RESOURCE_KEYS.reduce((snapshot, resourceKey) => {
+            snapshot[resourceKey] = Math.floor(Number(activeVillage.resources?.[resourceKey]?.capacity) || 0);
+            return snapshot;
+        }, {});
+
+        const currentMax = this._getMaxAffordableUnitCount(unitCost, currentResources);
+        let exchangeMax = Math.floor(totalResources / totalCost);
+        for (const resourceKey of RESOURCE_KEYS) {
+            const cost = Math.max(0, Number(unitCost[resourceKey]) || 0);
+            if (cost > 0) exchangeMax = Math.min(exchangeMax, Math.floor(capacities[resourceKey] / cost));
+        }
+
+        if (!Number.isFinite(exchangeMax) || exchangeMax <= 0) {
+            return { success: false, reason: 'NOT_ENOUGH_TOTAL_RESOURCES', currentMax, exchangeMax: 0 };
+        }
+        if (exchangeMax <= currentMax) {
+            return { success: false, reason: 'NO_EFFICIENCY_GAIN', currentMax, exchangeMax };
+        }
+
+        const resources = {};
+        let allocated = 0;
+        for (const resourceKey of RESOURCE_KEYS) {
+            resources[resourceKey] = Math.max(0, Number(unitCost[resourceKey]) || 0) * exchangeMax;
+            allocated += resources[resourceKey];
+        }
+
+        let remaining = totalResources - allocated;
+        const preferredResources = RESOURCE_KEYS.slice().sort((a, b) => (unitCost[b] || 0) - (unitCost[a] || 0));
+        for (const resourceKey of preferredResources) {
+            if (remaining <= 0) break;
+            const availableCapacity = Math.max(0, capacities[resourceKey] - resources[resourceKey]);
+            const amount = Math.min(remaining, availableCapacity);
+            resources[resourceKey] += amount;
+            remaining -= amount;
+        }
+
+        if (remaining > 0) {
+            return { success: false, reason: 'RESOURCE_CAPACITY_EXCEEDED', currentMax, exchangeMax };
+        }
+
+        return { success: true, resources, currentMax, exchangeMax };
+    }
+
+    _handleOptimizeUnitExchange(unitId, activeVillageId) {
+        const activeVillage = this.#currentGameState?.villages.find(v => v.id === activeVillageId);
+        if (!activeVillage || !unitId) return;
+
+        const unit = gameData.units[activeVillage.race]?.troops.find(troop => troop.id === unitId);
+        if (!unit) {
+            toastUI.show('No se encontro la unidad para optimizar recursos.', 'error');
+            return;
+        }
+
+        const exchange = this._getOptimalUnitExchangeResources(unit, activeVillage);
+        if (!exchange.success) {
+            const messages = {
+                INVALID_UNIT_COST: 'Esta unidad no tiene un coste valido para intercambio.',
+                NOT_ENOUGH_TOTAL_RESOURCES: `No hay recursos totales suficientes para optimizar ${unit.name}.`,
+                NO_EFFICIENCY_GAIN: `La distribucion actual ya permite reclutar ${exchange.currentMax || 0} ${unit.name}; el intercambio no mejora el resultado.`,
+                RESOURCE_CAPACITY_EXCEEDED: 'No hay capacidad suficiente para guardar la distribucion optima.',
+            };
+            toastUI.show(messages[exchange.reason] || 'No se pudo calcular el intercambio optimo.', 'warning');
+            return;
+        }
+
+        gameManager.sendCommand('npc_resource_exchange', {
+            villageId: activeVillageId,
+            resources: exchange.resources,
+            mode: 'unit_optimal_exchange',
+            unitId,
+            unitName: unit.name,
+            currentMax: exchange.currentMax,
+            exchangeMax: exchange.exchangeMax,
+        });
+    }
+
+    _formatPreciseTime(totalSeconds) {
+        if (!Number.isFinite(totalSeconds) || totalSeconds <= 0) return '0s';
+
+        let remainingMs = Math.round(totalSeconds * 1000);
+        const days = Math.floor(remainingMs / 86400000);
+        remainingMs %= 86400000;
+        const hours = Math.floor(remainingMs / 3600000);
+        remainingMs %= 3600000;
+        const minutes = Math.floor(remainingMs / 60000);
+        remainingMs %= 60000;
+        const seconds = Math.floor(remainingMs / 1000);
+        const milliseconds = remainingMs % 1000;
+
+        const parts = [];
+        if (days > 0) parts.push(`${days}d`);
+        if (hours > 0) parts.push(`${hours}h`);
+        if (minutes > 0) parts.push(`${minutes}min`);
+        if (seconds > 0) parts.push(`${seconds}s`);
+        if (milliseconds > 0) parts.push(`${milliseconds}ms`);
+
+        return parts.join(' ') || '0ms';
+    }
+
+    _getUnitTrainingTime(unit, activeVillage) {
+        let trainingTimeFactor = 1.0;
+        const trainingBuildingsByType = {
+            infantry: ['barracks', 'greatBarracks'],
+            cavalry: ['stable', 'greatStable'],
+            scout: ['stable', 'greatStable'],
+            siege: ['workshop'],
+            settler: ['palace'],
+            chief: ['palace'],
+        };
+        const candidateTypes = trainingBuildingsByType[unit.type] || [];
+        const preferredBuilding = candidateTypes.includes(this.#viewingType)
+            ? activeVillage.buildings.find(building => building.id === this.#currentSlotId && building.type === this.#viewingType)
+            : activeVillage.buildings.find(building => candidateTypes.includes(building.type));
+
+        if (preferredBuilding?.level > 0) {
+            trainingTimeFactor = gameData.buildings[preferredBuilding.type]?.levels[preferredBuilding.level - 1]?.attribute?.trainingTimeFactor || 1.0;
+        }
+
+        return (unit.trainTime / trainingTimeFactor) / this.#gameConfig.gameSpeed;
+    }
+
+    _getUnitContextDetails(unit, activeVillage) {
+        if (this.#viewingType === 'academy' && unit.research) {
+            return {
+                title: 'Investigacion',
+                cost: unit.research.cost,
+                time: unit.research.time / this.#gameConfig.gameSpeed,
+            };
+        }
+
+        if (this.#viewingType === 'smithy') {
+            const currentUpgradeLevel = activeVillage.smithy?.upgrades?.[unit.id] || 0;
+            return {
+                title: `Mejora a nivel ${currentUpgradeLevel + 1}`,
+                cost: this._calculateSmithyUpgradeCost(unit, currentUpgradeLevel + 1),
+                time: unit.trainTime / this.#gameConfig.gameSpeed,
+            };
+        }
+
+        return {
+            title: 'Entrenamiento',
+            cost: unit.cost || {},
+            time: this._getUnitTrainingTime(unit, activeVillage),
+        };
+    }
+
+    _getCostGridHTML(cost = {}) {
+        return RESOURCE_KEYS.map(resourceKey => `
+            <div class="flex items-center gap-2 rounded-lg bg-gray-900/60 border border-primary-border/60 p-2" title="${RESOURCE_LABELS[resourceKey]}">
+                ${ICONS[RESOURCE_ICON_MAP[resourceKey]]}
+                <span class="text-gray-300">${formatNumber(cost[resourceKey] || 0)}</span>
+            </div>
+        `).join('');
+    }
+
+    _showUnitInfoModal(unitId) {
+        const activeVillage = this.#currentGameState?.villages.find(v => v.id === this.#currentGameState.activeVillageId);
+        if (!activeVillage || !unitId) return;
+
+        const unit = gameData.units[activeVillage.race]?.troops.find(troop => troop.id === unitId);
+        if (!unit) return;
+
+        const modal = this.#panelElement.querySelector('#unit-info-modal');
+        const title = modal.querySelector('#unit-info-title');
+        const subtitle = modal.querySelector('#unit-info-subtitle');
+        const content = modal.querySelector('#unit-info-content');
+        const contextDetails = this._getUnitContextDetails(unit, activeVillage);
+        const stats = unit.stats || {};
+        const defense = stats.defense || {};
+
+        title.textContent = unit.name;
+        subtitle.textContent = `${UNIT_TYPE_LABELS[unit.type] || unit.type || 'Unidad'} · ${UNIT_ROLE_LABELS[unit.role] || unit.role || 'Sin rol definido'}`;
+        content.innerHTML = `
+            <div class="flex items-start gap-3">
+                <div class="shrink-0 mt-1">${unitSpriteManager.getUnitSprite(unit.id, activeVillage.race)}</div>
+                <p class="text-sm leading-6 text-gray-300">${unit.description || 'Sin descripcion disponible.'}</p>
+            </div>
+
+            <section class="rounded-xl border border-primary-border bg-glass-bg p-3">
+                <h4 class="font-bold text-gray-200 mb-2">${contextDetails.title}</h4>
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm mb-3">
+                    ${this._getCostGridHTML(contextDetails.cost)}
+                </div>
+                <div class="flex items-center gap-2 rounded-lg bg-gray-900/60 border border-primary-border/60 p-2 text-sm">
+                    ${ICONS.time}
+                    <span class="text-gray-400">Tiempo:</span>
+                    <span class="font-mono text-white">${this._formatPreciseTime(contextDetails.time)}</span>
+                </div>
+            </section>
+
+            <section class="rounded-xl border border-primary-border bg-glass-bg p-3">
+                <h4 class="font-bold text-gray-200 mb-2">Estadisticas</h4>
+                <div class="grid grid-cols-2 gap-2 text-sm">
+                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2"><span class="text-gray-400">Ataque</span><div class="font-mono text-white">${formatNumber(stats.attack || 0)}</div></div>
+                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2"><span class="text-gray-400">Def. infanteria</span><div class="font-mono text-white">${formatNumber(defense.infantry || 0)}</div></div>
+                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2"><span class="text-gray-400">Def. caballeria</span><div class="font-mono text-white">${formatNumber(defense.cavalry || 0)}</div></div>
+                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2"><span class="text-gray-400">Velocidad</span><div class="font-mono text-white">${formatNumber(stats.speed || 0)} casillas/h</div></div>
+                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2"><span class="text-gray-400">Carga</span><div class="font-mono text-white">${formatNumber(stats.capacity || 0)}</div></div>
+                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2"><span class="text-gray-400">Consumo</span><div class="font-mono text-white">${formatNumber(unit.upkeep || 0)} cereal/h</div></div>
+                </div>
+            </section>
+        `;
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+    }
+
+    _hideUnitInfoModal() {
+        const modal = this.#panelElement.querySelector('#unit-info-modal');
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+
+    _renderHospitalUnits(container) {
+        const activeVillage = this.#currentGameState.villages.find(v => v.id === this.#currentGameState.activeVillageId);
+        if (!activeVillage) return;
+
+        const combatUnits = gameData.units[activeVillage.race]?.troops.filter(unit => ['infantry', 'cavalry', 'siege', 'scout'].includes(unit.type)) || [];
+        const unitRows = combatUnits.map(unit => `
+            <div class="flex items-center justify-between gap-3 p-3 bg-glass-bg rounded-lg border border-primary-border" data-unit-id="${unit.id}">
+                <div class="flex items-center gap-3 min-w-0">
+                    ${unitSpriteManager.getUnitSprite(unit.id, activeVillage.race)}
+                    ${this._getUnitHeaderHTML(unit, { showExchange: true })}
+                </div>
+                <span class="text-xs text-gray-400">${UNIT_TYPE_LABELS[unit.type] || unit.type}</span>
+            </div>
+        `).join('');
+
+        container.innerHTML = `<div class="border-t border-primary-border mt-4 pt-4">
+            <h3 class="font-bold mb-2 text-gray-400">Unidades</h3>
+            <p class="text-xs text-gray-500 mb-3">Haz click en el nombre de una unidad para ver costes, tiempo preciso y estadisticas.</p>
+            <div class="space-y-2">${unitRows || '<p class="text-center text-gray-500 text-sm py-4">No hay unidades disponibles.</p>'}</div>
+        </div>`;
+    }
+
     _renderUnitToggleCheckbox(container, updateFunction) {
         const label = this.#viewingType === 'academy' ? 'Mostrar todas las unidades' : 'Mostrar no investigadas';
         container.innerHTML = `
@@ -1051,7 +1391,7 @@ class BuildingInfoUI {
                 <div class="p-3 bg-glass-bg rounded-lg ${disabledClasses} border border-primary-border" data-unit-id="${unit.id}">
                     <div class="flex items-center gap-3">
                         ${unitSpriteManager.getUnitSprite(unit.id, activeVillage.race)}
-                        <span class="font-bold text-yellow-400">${unit.name}</span>
+                        ${this._getUnitNameButtonHTML(unit)}
                     </div>
                     <p class="text-xs text-gray-400 mt-1 mb-2">${unit.description}</p>
                     <div class="grid grid-cols-2 gap-2 mb-3 text-sm">
@@ -1147,7 +1487,7 @@ class BuildingInfoUI {
                     <div class="flex justify-between items-center mb-2">
                         <div class="flex items-center gap-3">
                             ${unitSpriteManager.getUnitSprite(unit.id, activeVillage.race)}
-                            <span class="font-bold text-yellow-400">${unit.name}</span>
+                            ${this._getUnitNameButtonHTML(unit)}
                         </div>
                         <span class="font-mono text-sm">Nivel: <span class="font-bold text-white">${currentUpgradeLevel}</span> / ${smithyLevel}</span>
                     </div>
@@ -1270,6 +1610,7 @@ class BuildingInfoUI {
 
         const levelData = currentLevel > 0 ? buildingStaticData.levels[currentLevel - 1] : null;
         const trainingTimeFactor = levelData?.attribute?.trainingTimeFactor || 1.0;
+        const showUnitExchange = ['barracks', 'stable', 'workshop', 'greatBarracks', 'greatStable'].includes(this.#viewingType);
         let unitsToShowHTML = '';
 
         for (const unit of trainableUnits) {
@@ -1317,7 +1658,7 @@ class BuildingInfoUI {
                     <div class="flex justify-between items-center mb-2">
                         <div class="flex items-center gap-3">
                             ${unitSpriteManager.getUnitSprite(unit.id, activeVillage.race)}
-                            <span class="font-bold text-yellow-400">${unit.name}</span>
+                            ${this._getUnitHeaderHTML(unit, { showExchange: showUnitExchange && canTrain })}
                         </div>
                         <div class="flex items-center gap-1 text-xs text-gray-400" title="Tiempo de entrenamiento por unidad">
                             ${ICONS.time} ${formatTime(finalTrainTime)}

@@ -34,6 +34,18 @@ function applyVillageUpdates(gameState, villageUpdates) {
                 }
             }
         }
+
+        if (update.changes.addOasis) {
+            village.oases ??= [];
+            const oasis = update.changes.addOasis;
+            const alreadyLinked = village.oases.some(item => item.x === oasis.x && item.y === oasis.y);
+            if (!alreadyLinked) village.oases.push(oasis);
+        }
+
+        if (update.changes.removeOasis) {
+            const oasis = update.changes.removeOasis;
+            village.oases = (village.oases || []).filter(item => item.x !== oasis.x || item.y !== oasis.y);
+        }
     });
 }
 
@@ -62,6 +74,13 @@ function applyTileUpdates(gameState, tileUpdates) {
 
         if (update.changes.enableRegeneration) {
             tile.state.isClearedOnce = true;
+        }
+
+        if (update.changes.captureOasis) {
+            tile.ownerId = update.changes.captureOasis.ownerId;
+            tile.villageId = update.changes.captureOasis.villageId;
+            tile.state.ownerId = update.changes.captureOasis.ownerId;
+            tile.state.villageId = update.changes.captureOasis.villageId;
         }
     });
 }

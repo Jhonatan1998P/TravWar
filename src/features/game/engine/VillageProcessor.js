@@ -8,6 +8,16 @@ const BASE_PRODUCTION = 12;
 const SMITHY_UPGRADE_COST_MULTIPLIER = 1.6;
 const RECRUITMENT_NOTIFICATION_BATCH_INTERVAL_MS = 30000;
 
+function resolveOasisBonus(oasis) {
+    if (!oasis) return null;
+    if (oasis.bonus?.resource && Number.isFinite(Number(oasis.bonus.percentage))) {
+        return oasis.bonus;
+    }
+
+    const oasisTypeId = typeof oasis === 'string' ? oasis : oasis.oasisType || oasis.type || oasis.id;
+    return gameData.oasisTypes[oasisTypeId]?.bonus || null;
+}
+
 export class VillageProcessor {
     #village;
     #config;
@@ -78,6 +88,7 @@ export class VillageProcessor {
         const hourlyProduction = { wood: BASE_PRODUCTION, stone: BASE_PRODUCTION, iron: BASE_PRODUCTION, food: BASE_PRODUCTION };
         const bonusPercent = { wood: 0, stone: 0, iron: 0, food: 0 };
         const allianceProdBonus = this.allianceBonuses.productionBonusPercent / 100;
+        let oasisBonusMultiplierPercent = 0;
 
         for (const building of this.#village.buildings) {
             if (building.level <= 0 || !building.type || building.type === 'empty') continue;
@@ -111,7 +122,20 @@ export class VillageProcessor {
                     bonusPercent[resourceType] += levelData.attribute.productionBonusPercent;
                 }
             }
+
+            if (levelData.attribute?.oasisBonusMultiplierPercent) {
+                oasisBonusMultiplierPercent += levelData.attribute.oasisBonusMultiplierPercent;
+            }
         }
+
+        const oasisBonusMultiplier = 1 + (oasisBonusMultiplierPercent / 100);
+        (this.#village.oases || this.#village.ownedOases || []).forEach(oasis => {
+            const bonus = resolveOasisBonus(oasis);
+            const resourceType = bonus?.resource;
+            if (resourceType && bonusPercent[resourceType] !== undefined) {
+                bonusPercent[resourceType] += (Number(bonus.percentage) || 0) * oasisBonusMultiplier;
+            }
+        });
 
         for (const resource in hourlyProduction) {
             const totalMultiplier = (1 + (bonusPercent[resource] / 100) + allianceProdBonus) * this.#config.gameSpeed * this.#aiBonusMultiplier;
@@ -178,6 +202,9 @@ export class VillageProcessor {
         const type = buildingState.type === 'empty' ? buildingType : buildingState.type;
         const buildingData = gameData.buildings[type];
         if (!buildingData || !buildingData.levels[targetLevel - 1]) return { success: false, reason: 'INVALID_LEVEL_DATA' };
+        if (buildingData.allowedRaces && !buildingData.allowedRaces.includes(this.#village.race)) {
+            return { success: false, reason: 'RACE_NOT_ALLOWED' };
+        }
     
         const levelData = buildingData.levels[targetLevel - 1];
     

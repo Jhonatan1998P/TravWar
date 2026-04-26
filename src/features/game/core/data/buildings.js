@@ -1,5 +1,31 @@
 // Extraido de GameData.js
 
+function roundToNearest(value, step) {
+    return Math.round(value / step) * step;
+}
+
+function createWaterworksLevels() {
+    const baseCost = { wood: 910, stone: 945, iron: 910, food: 340 };
+    const costFactor = 1.31;
+
+    return Array.from({ length: 20 }, (_, index) => {
+        const level = index + 1;
+        return {
+            level,
+            cost: {
+                wood: roundToNearest(baseCost.wood * Math.pow(costFactor, index), 5),
+                stone: roundToNearest(baseCost.stone * Math.pow(costFactor, index), 5),
+                iron: roundToNearest(baseCost.iron * Math.pow(costFactor, index), 5),
+                food: roundToNearest(baseCost.food * Math.pow(costFactor, index), 5),
+            },
+            population: level === 1 ? 1 : Math.round((5 + level - 1) / 10),
+            culturePoints: Math.round(2 * Math.pow(1.2, level)),
+            buildTime: roundToNearest(3875 * Math.pow(1.16, index) - 1875, 10),
+            attribute: { oasisBonusMultiplierPercent: level * 5 },
+        };
+    });
+}
+
 export const buildings = {
         // --- EDIFICIOS DE RECURSOS (SIN REQUISITOS) ---
         woodcutter: {
@@ -175,6 +201,14 @@ export const buildings = {
                 { level: 4, cost: { wood: 7000, stone: 8630, iron: 5075, food: 9330 }, population: 2, culturePoints: 2, buildTime: 18120, attribute: { productionBonusPercent: 20 } },
                 { level: 5, cost: { wood: 12595, stone: 15535, iron: 9135, food: 16795 }, population: 2, culturePoints: 2, buildTime: 28380, attribute: { productionBonusPercent: 25 } }
             ]
+        },
+        waterworks: {
+            id: 'waterworks',
+            name: 'Acequia',
+            description: 'Edificio exclusivo de los egipcios. Aumenta la bonificacion que otorgan los oasis anexados de cualquier recurso.',
+            requires: { heroMansion: 10 },
+            allowedRaces: ['egyptians'],
+            levels: createWaterworksLevels()
         },
         // --- EDIFICIO PRINCIPAL (SIN REQUISITOS) ---
         mainBuilding: {

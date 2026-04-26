@@ -65,8 +65,8 @@ class GameConfig {
 
     #loadDefaults() {
         const defaults = {
-            gameSpeed: 1,
-            troopSpeed: 1,
+            gameSpeed: 50,
+            troopSpeed: 100,
             tradeCapacityMultiplier: 1,
             playerRace: 'gauls',
             aiCount: 1,

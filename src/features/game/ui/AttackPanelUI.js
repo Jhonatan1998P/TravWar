@@ -41,6 +41,7 @@ class AttackPanelUI {
                             <legend class="text-base font-semibold text-gray-300 mb-2">Tipo de Misión</legend>
                             <div class="flex flex-wrap gap-2"></div>
                         </fieldset>
+                        <div id="attack-panel-oasis-conquest" class="border-t border-primary-border pt-4 mt-4 hidden"></div>
                         <div id="attack-panel-catapult-targets" class="border-t border-primary-border pt-4 mt-4 hidden"></div>
                     </main>
                     <footer class="p-4 border-t border-primary-border">
@@ -83,6 +84,13 @@ class AttackPanelUI {
             if(e.target.matches('input[name="mission-type"]')) {
                 this._handleMissionChange(e.target.value);
             }
+            if (e.target.matches('#oasis-conquest-checkbox') && e.target.checked) {
+                const attackMission = this.#panelElement.querySelector('#mission-attack');
+                if (attackMission) {
+                    attackMission.checked = true;
+                    this._handleMissionChange('attack');
+                }
+            }
         });
     }
 
@@ -109,7 +117,30 @@ class AttackPanelUI {
         this._renderInfo();
         this._renderTroops();
         this._renderMissions();
+        this._renderOasisConquestOption();
         this._renderCatapultTargets();
+    }
+
+    _getHeroMansionOasisSlots() {
+        const level = this.#activeVillage?.buildings.find(building => building.type === 'heroMansion')?.level || 0;
+        if (level >= 20) return 3;
+        if (level >= 15) return 2;
+        if (level >= 10) return 1;
+        return 0;
+    }
+
+    _isTargetOasisInCaptureRange() {
+        if (!this.#activeVillage || !this.#targetTile) return false;
+        return Math.abs(this.#targetTile.x - this.#activeVillage.coords.x) <= 3
+            && Math.abs(this.#targetTile.y - this.#activeVillage.coords.y) <= 3;
+    }
+
+    _getPendingOasisCaptures() {
+        return (this.#gameState.movements || []).filter(movement => {
+            return movement.originVillageId === this.#activeVillage.id
+                && movement.type === 'attack'
+                && movement.payload?.conquerOasis === true;
+        }).length;
     }
 
     _renderInfo() {
@@ -208,6 +239,37 @@ class AttackPanelUI {
         }
     }
 
+    _renderOasisConquestOption() {
+        const container = this.#panelElement.querySelector('#attack-panel-oasis-conquest');
+        const targetData = this.#gameState.mapData.find(t => t.x === this.#targetTile.x && t.y === this.#targetTile.y);
+        if (targetData?.type !== 'oasis') {
+            container.classList.add('hidden');
+            container.innerHTML = '';
+            return;
+        }
+
+        const slots = this._getHeroMansionOasisSlots();
+        const usedSlots = (this.#activeVillage.oases?.length || 0) + this._getPendingOasisCaptures();
+        const inRange = this._isTargetOasisInCaptureRange();
+        const isOwnOasis = targetData.villageId === this.#activeVillage.id;
+        const canConquer = slots > usedSlots && inRange && !isOwnOasis;
+
+        let hint = `Slots de oasis: ${usedSlots}/${slots}. Requiere Mansión del Héroe nivel 10, 15 o 20 y rango 7x7.`;
+        if (isOwnOasis) hint = 'Este oasis ya pertenece a esta aldea.';
+        else if (!inRange) hint = 'Este oasis está fuera del rango 7x7 de la aldea activa.';
+        else if (slots <= usedSlots) hint = 'No tienes slots de oasis disponibles en esta aldea.';
+
+        container.innerHTML = `
+            <label class="flex items-start gap-3 rounded-xl border border-primary-border bg-gray-900/50 p-3 ${canConquer ? 'cursor-pointer' : 'opacity-60'}">
+                <input id="oasis-conquest-checkbox" type="checkbox" class="mt-1 h-5 w-5 accent-war-gold" ${canConquer ? '' : 'disabled'}>
+                <span>
+                    <span class="block font-semibold text-war-gold">Conquistar oasis</span>
+                    <span class="block text-xs text-gray-400 mt-1">${hint}</span>
+                </span>
+            </label>`;
+        container.classList.remove('hidden');
+    }
+
     _renderCatapultTargets() {
         const container = this.#panelElement.querySelector('#attack-panel-catapult-targets');
         const mainBuildingLevel = this.#activeVillage.buildings.find(b => b.type === 'mainBuilding')?.level || 0;
@@ -266,6 +328,11 @@ class AttackPanelUI {
     }
 
     _handleMissionChange(missionType) {
+        if (missionType !== 'attack') {
+            const conquestCheckbox = this.#panelElement.querySelector('#oasis-conquest-checkbox');
+            if (conquestCheckbox) conquestCheckbox.checked = false;
+        }
+
         const troopRows = this.#panelElement.querySelectorAll('.troop-row');
         const settlerInput = this.#panelElement.querySelector('input[data-unit-type="settler"]');
         const settlementConfig = gameData.config.settlement;
@@ -353,6 +420,12 @@ class AttackPanelUI {
             return;
         }
         const missionType = missionTypeInput.value;
+        const conquerOasis = this.#panelElement.querySelector('#oasis-conquest-checkbox')?.checked === true;
+
+        if (conquerOasis && missionType !== 'attack') {
+            toastUI.show('La conquista de oasis debe enviarse como Ataque.', 'warning');
+            return;
+        }
 
         if (missionType === 'settle') {
             const settlementConfig = gameData.config.settlement;
@@ -387,7 +460,8 @@ class AttackPanelUI {
             targetCoords: this.#targetTile,
             troops: troops,
             missionType: missionType,
-            catapultTargets: []
+            catapultTargets: [],
+            conquerOasis,
         };
 
         if (missionType === 'attack') {

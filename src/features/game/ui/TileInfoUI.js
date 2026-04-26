@@ -463,6 +463,8 @@ class TileInfoUI {
                             <span class="font-semibold">Bono:</span>
                             <span class="flex items-center gap-1">${ICONS[bonusResourceIconKey]} +${oasisData.bonus.percentage}%</span>
                          </div>` : '';
+        const ownerVillage = data.villageId ? this.#gameState.villages.find(village => village.id === data.villageId) : null;
+        const ownerHTML = ownerVillage ? `<div class="mt-2 text-sm text-green-300">Anexado a: <span class="font-semibold">${ownerVillage.name}</span></div>` : '';
 
         let beastsHTML = '<h4 class="font-semibold text-md text-red-400 mt-4 mb-2">Bestias</h4><ul class="space-y-2">';
         const currentBeasts = data.state?.beasts || {};
@@ -486,6 +488,7 @@ class TileInfoUI {
 
         const main = `<h3 class="font-semibold text-lg text-yellow-300 mb-2">${oasisData.name}</h3>
                       ${bonusHTML}
+                      ${ownerHTML}
                       ${Object.keys(currentBeasts).some(k => currentBeasts[k] > 0) ? beastsHTML : ''}`;
         
         const activeVillage = this.#gameState.villages.find(v => v.id === this.#gameState.activeVillageId);

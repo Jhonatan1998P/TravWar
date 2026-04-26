@@ -11,6 +11,7 @@ import { compareMovementsByArrival } from './movementOrdering.js';
 const HOSTILE_MISSION_TYPES = new Set(['attack', 'raid', 'espionage']);
 const FARM_LIST_MISSION_TYPES = new Set(['raid', 'attack', 'espionage']);
 const RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
+const OASIS_CAPTURE_RANGE = 3;
 let movementIdSequence = 0;
 
 function createMovementId(prefix, startTime, villageId) {
@@ -70,6 +71,31 @@ function normalizeTargetCoords(targetCoords) {
 
 function findMapTileByCoords(gameState, targetCoords) {
     return gameState.mapData.find(tile => tile.x === targetCoords.x && tile.y === targetCoords.y) || null;
+}
+
+function getHeroMansionOasisSlots(village) {
+    const level = village?.buildings?.find(building => building.type === 'heroMansion')?.level || 0;
+    if (level >= 20) return 3;
+    if (level >= 15) return 2;
+    if (level >= 10) return 1;
+    return 0;
+}
+
+function isOasisInCaptureRange(village, targetCoords) {
+    return Math.abs(targetCoords.x - village.coords.x) <= OASIS_CAPTURE_RANGE
+        && Math.abs(targetCoords.y - village.coords.y) <= OASIS_CAPTURE_RANGE;
+}
+
+function getVillageOasisCount(village) {
+    return Array.isArray(village?.oases) ? village.oases.length : 0;
+}
+
+function getPendingOasisCaptureCount(gameState, villageId) {
+    return (gameState.movements || []).filter(movement => {
+        return movement.originVillageId === villageId
+            && movement.type === 'attack'
+            && movement.payload?.conquerOasis === true;
+    }).length;
 }
 
 function resolveFarmEntryTarget({ gameState, ownerId, targetCoords }) {
@@ -232,7 +258,7 @@ function addFarmListEntry({ payload, gameState, gameData }) {
 }
 
 export function handleSendMovementCommand({ payload, gameState, gameConfig, gameData, aiControllers }) {
-    const { originVillageId, targetCoords, troops, missionType, catapultTargets } = payload;
+    const { originVillageId, targetCoords, troops, missionType, catapultTargets, conquerOasis } = payload;
     const village = gameState.villages.find(candidate => candidate.id === originVillageId);
     if (!village) return { success: false, reason: 'VILLAGE_NOT_FOUND' };
 
@@ -283,6 +309,23 @@ export function handleSendMovementCommand({ payload, gameState, gameConfig, game
             if (!unitData || unitData.type !== 'scout') {
                 return { success: false, reason: 'INVALID_TROOPS_FOR_ESPIONAGE' };
             }
+        }
+    }
+
+    if (conquerOasis) {
+        if (missionType !== 'attack') return { success: false, reason: 'OASIS_CONQUEST_REQUIRES_ATTACK' };
+        if (targetTile?.type !== 'oasis') return { success: false, reason: 'TARGET_NOT_OASIS' };
+        if (targetTile.villageId === village.id) return { success: false, reason: 'OASIS_ALREADY_OWNED_BY_VILLAGE' };
+        if (!isOasisInCaptureRange(village, targetCoords)) return { success: false, reason: 'OASIS_OUT_OF_RANGE' };
+
+        const oasisSlots = getHeroMansionOasisSlots(village);
+        const usedOasisSlots = getVillageOasisCount(village) + getPendingOasisCaptureCount(gameState, village.id);
+        if (usedOasisSlots >= oasisSlots) {
+            return {
+                success: false,
+                reason: 'NO_OASIS_SLOTS_AVAILABLE',
+                details: { availableSlots: oasisSlots, usedSlots: usedOasisSlots },
+            };
         }
     }
 
@@ -378,6 +421,7 @@ export function handleSendMovementCommand({ payload, gameState, gameConfig, game
         payload: {
             troops,
             catapultTargets: catapultTargets || [],
+            conquerOasis: conquerOasis === true,
         },
         startTime,
         arrivalTime: startTime + travelTimeMs,

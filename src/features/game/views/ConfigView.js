@@ -7,6 +7,16 @@ const STATE_STORAGE_KEY = 'game_state_v2';
 const CONFIG_STORAGE_KEY = 'game_config';
 const ACCESS_PASS_KEY = 'village_access_granted';
 const FORCE_NEW_GAME_SESSION_KEY = 'force_new_game_session';
+const GAME_SPEED_OPTIONS = [50, 100, 200, 500, 1000, 2000, 5000];
+const TROOP_SPEED_OPTIONS = [100, 200, 300, 400, 500, 1000];
+
+const getClosestOptionIndex = (options, value) => {
+    const numericValue = Number(value);
+    const safeValue = Number.isFinite(numericValue) ? numericValue : options[0];
+    return options.reduce((closestIndex, option, index) => {
+        return Math.abs(option - safeValue) < Math.abs(options[closestIndex] - safeValue) ? index : closestIndex;
+    }, 0);
+};
 
 class ConfigView {
     #config;
@@ -54,11 +64,11 @@ class ConfigView {
                         <fieldset class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-6 border-t border-primary-border pt-6">
                             <div>
                                 <label for="game-speed" class="flex justify-between text-war-mist font-semibold">Velocidad de Juego <span id="game-speed-value" class="font-mono text-war-gold">1x</span></label>
-                                <input id="game-speed" type="range" min="10" max="5000" value="1" step="10" class="w-full h-2 bg-btn-secondary-bg rounded-lg appearance-none cursor-pointer accent-war-gold input-range">
+                                <input id="game-speed" type="range" min="0" max="6" value="0" step="1" class="w-full h-2 bg-btn-secondary-bg rounded-lg appearance-none cursor-pointer accent-war-gold input-range">
                             </div>
                             <div>
                                 <label for="troop-speed" class="flex justify-between text-war-mist font-semibold">Velocidad de Tropas <span id="troop-speed-value" class="font-mono text-war-gold">1x</span></label>
-                                <input id="troop-speed" type="range" min="1" max="500" value="1" step="1" class="w-full h-2 bg-btn-secondary-bg rounded-lg appearance-none cursor-pointer accent-war-gold input-range">
+                                <input id="troop-speed" type="range" min="0" max="5" value="0" step="1" class="w-full h-2 bg-btn-secondary-bg rounded-lg appearance-none cursor-pointer accent-war-gold input-range">
                             </div>
                         </fieldset>
 
@@ -194,7 +204,13 @@ class ConfigView {
         for (const key in settings) {
             const inputId = key.replace(/([A-Z])/g, '-$1').toLowerCase();
             if (this.#inputs[inputId]) {
-                this.#inputs[inputId].value = settings[key];
+                if (inputId === 'game-speed') {
+                    this.#inputs[inputId].value = getClosestOptionIndex(GAME_SPEED_OPTIONS, settings[key]);
+                } else if (inputId === 'troop-speed') {
+                    this.#inputs[inputId].value = getClosestOptionIndex(TROOP_SPEED_OPTIONS, settings[key]);
+                } else {
+                    this.#inputs[inputId].value = settings[key];
+                }
             }
         }
         this._updateAllValueDisplays();
@@ -281,9 +297,18 @@ class ConfigView {
     }
 
     _updateAllValueDisplays() {
-        if(this.#valueDisplays['game-speed']) this.#valueDisplays['game-speed'].textContent = `${this.#inputs['game-speed'].value}x`;
-        if(this.#valueDisplays['troop-speed']) this.#valueDisplays['troop-speed'].textContent = `${this.#inputs['troop-speed'].value}x`;
+        if(this.#valueDisplays['game-speed']) this.#valueDisplays['game-speed'].textContent = `${GAME_SPEED_OPTIONS[this.#inputs['game-speed'].value]}x`;
+        if(this.#valueDisplays['troop-speed']) this.#valueDisplays['troop-speed'].textContent = `${TROOP_SPEED_OPTIONS[this.#inputs['troop-speed'].value]}x`;
         if(this.#valueDisplays['ai-count']) this.#valueDisplays['ai-count'].textContent = this.#inputs['ai-count'].value;
+
+        Object.values(this.#inputs).forEach(input => {
+            if (!input || input.type !== 'range') return;
+            const min = Number(input.min) || 0;
+            const max = Number(input.max) || 100;
+            const value = Number(input.value) || min;
+            const progress = max === min ? 0 : ((value - min) / (max - min)) * 100;
+            input.style.setProperty('--range-progress', `${Math.max(0, Math.min(100, progress))}%`);
+        });
     }
 
     _handleFormSubmit(event) {
@@ -310,8 +335,8 @@ class ConfigView {
         const aiRaces = Array.from(aiRaceSelectors).map(select => select.value);
 
         const newSettings = {
-            gameSpeed: parseFloat(this.#inputs['game-speed'].value),
-            troopSpeed: parseFloat(this.#inputs['troop-speed'].value),
+            gameSpeed: GAME_SPEED_OPTIONS[this.#inputs['game-speed'].value],
+            troopSpeed: TROOP_SPEED_OPTIONS[this.#inputs['troop-speed'].value],
             tradeCapacityMultiplier: this.#config.getSettings().tradeCapacityMultiplier || 1,
             playerRace: this.#inputs['player-race'].value,
             aiCount: parseInt(this.#inputs['ai-count'].value, 10),
