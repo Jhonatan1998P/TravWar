@@ -5,6 +5,18 @@ const TEMPLATES = {
     '4-5-3-6': { Wood: 4, Clay: 5, Iron: 3, Wheat: 6 },
     '3-4-5-6': { Wood: 3, Clay: 4, Iron: 5, Wheat: 6 },
     '5-4-3-6': { Wood: 5, Clay: 4, Iron: 3, Wheat: 6 },
+    '3-4-4-7': { Wood: 3, Clay: 4, Iron: 4, Wheat: 7 },
+    '4-3-4-7': { Wood: 4, Clay: 3, Iron: 4, Wheat: 7 },
+    '4-4-3-7': { Wood: 4, Clay: 4, Iron: 3, Wheat: 7 },
+    '5-5-3-5': { Wood: 5, Clay: 5, Iron: 3, Wheat: 5 },
+    '5-3-5-5': { Wood: 5, Clay: 3, Iron: 5, Wheat: 5 },
+    '3-5-5-5': { Wood: 3, Clay: 5, Iron: 5, Wheat: 5 },
+    '3-3-5-7': { Wood: 3, Clay: 3, Iron: 5, Wheat: 7 },
+    '3-5-3-7': { Wood: 3, Clay: 5, Iron: 3, Wheat: 7 },
+    '5-3-3-7': { Wood: 5, Clay: 3, Iron: 3, Wheat: 7 },
+    '2-4-4-8': { Wood: 2, Clay: 4, Iron: 4, Wheat: 8 },
+    '4-2-4-8': { Wood: 4, Clay: 2, Iron: 4, Wheat: 8 },
+    '4-4-2-8': { Wood: 4, Clay: 4, Iron: 2, Wheat: 8 },
     '3-3-3-9': { Wood: 3, Clay: 3, Iron: 3, Wheat: 9 },
     '1-1-1-15': { Wood: 1, Clay: 1, Iron: 1, Wheat: 15 }
 };

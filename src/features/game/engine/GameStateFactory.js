@@ -1,6 +1,8 @@
 // RUTA: js/engine/GameStateFactory.js
 import { gameData } from '../core/GameData.js';
-import { generateLayout, generateVillageCenterLayout, TEMPLATES } from '../core/LayoutManager.js';
+import { generateLayout, generateVillageCenterLayout } from '../core/LayoutManager.js';
+import { DEFAULT_MAP_SIZE, generateMapData, normalizeMapSize } from '../core/map/mapGenerator.js';
+import { analyzeMapDistribution } from '../core/map/mapValidator.js';
 import {
     FARM_LIST_LIMITS,
     getOasisSpeedMultiplier,
@@ -9,10 +11,8 @@ import {
 } from '../core/data/constants.js';
 import { scaleCapacityByGameSpeed } from '../core/capacityScaling.js';
 
-const MAP_SIZE = 25;
 const MIN_VILLAGE_DISTANCE = 5;
 const PLAYER_SPAWN_RADIUS = 5;
-const OASIS_DENSITY = 0.10;
 const STARTING_RESOURCES_BASE_CAPACITY_RATIO = 0.9;
 
 function getInitialOasisBeastAmount(spawnMin, gameSpeed) {
@@ -210,7 +210,10 @@ export class GameStateFactory {
     }
     
     create(sessionId) {
-        const { mapData, random } = this.#generateMapData(this.#config.worldSeed);
+        const { mapData, random, mapSize } = generateMapData({
+            seed: this.#config.worldSeed,
+            mapSize: this.#getMapSize(),
+        });
         const allVillages = [];
         const players = [];
         
@@ -227,7 +230,7 @@ export class GameStateFactory {
             this.#config.playerRace,
             'player',
             { x: playerX, y: playerY },
-            '4-4-4-6',
+            playerValleyType || '4-4-4-6',
             { startResourcesFromBaseCapacityRatio: STARTING_RESOURCES_BASE_CAPACITY_RATIO },
         ));
         
@@ -239,7 +242,7 @@ export class GameStateFactory {
             const ownerId = `ai_${i}`;
             players.push({ id: ownerId, race: aiRace, isUnderProtection: true });
 
-            const { x: aiX, y: aiY, tileIndex: aiTileIndex } = this.#findValidSpawnPoint(mapData, spatialIndex, random);
+            const { x: aiX, y: aiY, tileIndex: aiTileIndex, valleyType: aiValleyType } = this.#findValidSpawnPoint(mapData, spatialIndex, random);
             const aiVillageId = `v_ai_${i}_${Date.now()}`;
 
             allVillages.push(this.createVillageObject(
@@ -248,7 +251,7 @@ export class GameStateFactory {
                 aiRace,
                 ownerId,
                 { x: aiX, y: aiY },
-                '4-4-4-6',
+                aiValleyType || '4-4-4-6',
                 { startResourcesFromBaseCapacityRatio: STARTING_RESOURCES_BASE_CAPACITY_RATIO },
             ));
             mapData[aiTileIndex] = { x: aiX, y: aiY, type: 'village', villageId: aiVillageId, ownerId: ownerId, race: aiRace };
@@ -272,7 +275,7 @@ export class GameStateFactory {
 
         const newGameState = {
             startedAt: Date.now(),
-            sessionId: sessionId, worldSeed: this.#config.worldSeed, villages: allVillages, players, activeVillageId: playerVillageId, mapData,
+            sessionId: sessionId, worldSeed: this.#config.worldSeed, mapSize, mapStats: analyzeMapDistribution(mapData), villages: allVillages, players, activeVillageId: playerVillageId, mapData,
             movements: [], reports: [], unreadCounts: {}, diplomacy: { relations: {} },
             alliance: { id: null, name: null, bonuses: { productionBonusPercent: 0, constructionTimeBonusPercent: 0 } }, aiState: {},
             farmListsByOwnerId: createFarmListsByOwnerId(players),
@@ -346,16 +349,24 @@ export class GameStateFactory {
             savedState.aiProfiles ??= new Map();
         }
         if (!savedState.activeVillageId) savedState.activeVillageId = savedState.villages.find(v => v.ownerId === 'player')?.id;
-        if (!savedState.mapData || savedState.mapData.length < (MAP_SIZE * 2 + 1) * (MAP_SIZE * 2 + 1)) {
-            const { mapData } = this.#generateMapData(savedState.worldSeed || Date.now().toString());
+        savedState.mapSize = normalizeMapSize(savedState.mapSize || this.#getMapSize());
+        const expectedMapTiles = (savedState.mapSize * 2 + 1) ** 2;
+        if (!savedState.mapData || savedState.mapData.length < expectedMapTiles) {
+            const { mapData, mapSize } = generateMapData({
+                seed: savedState.worldSeed || Date.now().toString(),
+                mapSize: savedState.mapSize,
+            });
             savedState.mapData = mapData;
+            savedState.mapSize = mapSize;
             savedState.villages.forEach(v => {
                 const tileIndex = savedState.mapData.findIndex(t => t.x === v.coords.x && t.y === v.coords.y);
                 if (tileIndex !== -1) {
                     savedState.mapData[tileIndex] = { x: v.coords.x, y: v.coords.y, type: 'village', villageId: v.id, ownerId: v.ownerId, race: v.race };
                 }
             });
+            savedState.mapStats = analyzeMapDistribution(savedState.mapData);
         }
+        savedState.mapStats ??= analyzeMapDistribution(savedState.mapData);
         
         savedState.spatialIndex = this.#buildSpatialIndex(savedState.mapData);
 
@@ -395,6 +406,10 @@ export class GameStateFactory {
             index.set(`${tile.x}|${tile.y}`, tile);
         }
         return index;
+    }
+
+    #getMapSize() {
+        return normalizeMapSize(this.#config.mapSize || DEFAULT_MAP_SIZE);
     }
 
     createVillageObject(id, name, race, ownerId, coords, villageType, options = {}) {
@@ -449,86 +464,7 @@ export class GameStateFactory {
         return village;
     }
 
-    #generateMapData(seed) {
-        const mapData = [];
-        const PROBABILITY_15C = 0.005;
-        const PROBABILITY_9C = 0.01;
-
-        function mulberry32(a) {
-            return function() {
-                let t = a += 0x6D2B79F5;
-                t = Math.imul(t ^ t >>> 15, t | 1);
-                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
-                return ((t ^ t >>> 14) >>> 0) / 4294967296;
-            }
-        }
-
-        let seedNum = 0;
-        for (let i = 0; i < seed.length; i++) {
-            seedNum = (seedNum << 5) - seedNum + seed.charCodeAt(i);
-            seedNum |= 0;
-        }
-        const random = mulberry32(seedNum);
-        
-        const standardValleyTypes = Object.keys(TEMPLATES).filter(k => k !== '1-1-1-15' && k !== '3-3-3-9');
-        
-        for (let y = -MAP_SIZE; y <= MAP_SIZE; y++) {
-            for (let x = -MAP_SIZE; x <= MAP_SIZE; x++) {
-                const rand = random();
-                let valleyType;
-                if (rand < PROBABILITY_15C) valleyType = '1-1-1-15';
-                else if (rand < PROBABILITY_15C + PROBABILITY_9C) valleyType = '3-3-3-9';
-                else valleyType = standardValleyTypes[Math.floor(random() * standardValleyTypes.length)];
-                
-                mapData.push({ x, y, type: 'valley', valleyType });
-            }
-        }
-        
-        const specialValleys = mapData.filter(tile => tile.valleyType === '1-1-1-15' || tile.valleyType === '3-3-3-9');
-        const tempIndex = new Map();
-        mapData.forEach((t, i) => tempIndex.set(`${t.x}|${t.y}`, i));
-
-        specialValleys.forEach(valley => {
-            const potentialOasisCoords = [];
-            for (let dy = -2; dy <= 2; dy++) {
-                for (let dx = -2; dx <= 2; dx++) {
-                    if (dx === 0 && dy === 0) continue;
-                    const nx = valley.x + dx;
-                    const ny = valley.y + dy;
-                    if (nx >= -MAP_SIZE && nx <= MAP_SIZE && ny >= -MAP_SIZE && ny <= MAP_SIZE) {
-                        potentialOasisCoords.push({ x: nx, y: ny });
-                    }
-                }
-            }
-
-            for (let i = potentialOasisCoords.length - 1; i > 0; i--) {
-                const j = Math.floor(random() * (i + 1));
-                [potentialOasisCoords[i], potentialOasisCoords[j]] = [potentialOasisCoords[j], potentialOasisCoords[i]];
-            }
-
-            for (let i = 0; i < Math.min(3, potentialOasisCoords.length); i++) {
-                const coord = potentialOasisCoords[i];
-                const tileIndex = tempIndex.get(`${coord.x}|${coord.y}`);
-                if (tileIndex !== undefined) {
-                    mapData[tileIndex] = { x: coord.x, y: coord.y, type: 'oasis', oasisType: random() < 0.5 ? 'wheat_25' : 'wheat_50' };
-                }
-            }
-        });
-
-        const nonWheatOasisTypes = Object.keys(gameData.oasisTypes).filter(k => !k.startsWith('wheat'));
-        mapData.forEach((tile, i) => {
-            if (tile.type === 'valley' && tile.valleyType !== '1-1-1-15' && tile.valleyType !== '3-3-3-9') {
-                if (random() < OASIS_DENSITY) {
-                    const oasisType = nonWheatOasisTypes[Math.floor(random() * nonWheatOasisTypes.length)];
-                    mapData[i] = { x: tile.x, y: tile.y, type: 'oasis', oasisType };
-                }
-            }
-        });
-
-        return { mapData, random };
-    }
-
-    #findValidSpawnPoint(mapData, spatialIndex, random, maxRadius = MAP_SIZE) {
+    #findValidSpawnPoint(mapData, spatialIndex, random, maxRadius = this.#getMapSize()) {
         const candidateSpots = mapData.filter(tile => 
             tile.type === 'valley' && 
             Math.abs(tile.x) <= maxRadius && 

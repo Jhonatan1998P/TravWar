@@ -1,15 +1,32 @@
 import { generateLayout, generateVillageCenterLayout } from '../core/LayoutManager.js';
 import { gameData } from '../core/GameData.js';
 import tooltipUI from './TooltipUI.js';
+import countdownService from './CountdownService.js';
 
 let buildingInfoUILoadPromise = null;
 const MOBILE_TAP_CONFIRM_WINDOW_MS = 1400;
 const SLOT_TAP_MAX_MOVEMENT_PX = 16;
 const SLOT_TAP_MAX_DURATION_MS = 450;
+const DEFAULT_CONSTRUCTION_PROGRESS_COLOR = 'yellow';
+
+export const CONSTRUCTION_PROGRESS_COLORS = Object.freeze({
+    blue: '#38bdf8',
+    green: '#22c55e',
+    red: '#ef4444',
+    yellow: '#facc15',
+});
+
+let constructionProgressColor = DEFAULT_CONSTRUCTION_PROGRESS_COLOR;
 
 let lastMobileTappedSlotId = null;
 let lastMobileTapAt = 0;
 const initializedContainers = new WeakSet();
+
+export function setConstructionProgressColor(color = DEFAULT_CONSTRUCTION_PROGRESS_COLOR) {
+    constructionProgressColor = CONSTRUCTION_PROGRESS_COLORS[color]
+        ? color
+        : DEFAULT_CONSTRUCTION_PROGRESS_COLOR;
+}
 
 function isCoarsePointerDevice() {
     if (typeof window === 'undefined' || !window.matchMedia) return false;
@@ -61,13 +78,22 @@ const layoutCacheByVillageType = new Map();
 const villageCenterLayout = generateVillageCenterLayout();
 const renderStateByContainer = new WeakMap();
 
+function cleanupSlotElement(slotElement) {
+    const countdownKey = slotElement?.dataset?.constructionCountdownKey;
+    if (countdownKey) {
+        countdownService.unsubscribe(countdownKey);
+    }
+    slotElement?.remove();
+}
+
 function getBuildingState(buildings, constructionQueue, id) {
     const queuedJob = constructionQueue.find(j => j.buildingId === id);
     if (queuedJob) {
         return { 
             level: queuedJob.targetLevel - 1, 
             type: queuedJob.buildingType,
-            isUnderConstruction: true
+            isUnderConstruction: true,
+            constructionJob: queuedJob,
         };
     }
     const existingBuilding = buildings.find(b => b.id === id);
@@ -87,6 +113,7 @@ function getLayoutForVillageType(villageType) {
 function getContainerRenderState(container, mode) {
     const previousState = renderStateByContainer.get(container);
     if (!previousState || previousState.mode !== mode) {
+        previousState?.slots?.forEach(cleanupSlotElement);
         const nextState = {
             mode,
             slots: new Map(),
@@ -118,6 +145,10 @@ function createSlotElement(slotId, options = {}) {
         circleSizeClass,
     ].filter(Boolean).join(' ');
 
+    const progressElement = document.createElement('div');
+    progressElement.className = 'construction-progress-ring';
+    circleElement.appendChild(progressElement);
+
     const levelElement = document.createElement('div');
     levelElement.className = 'building-level';
     circleElement.appendChild(levelElement);
@@ -132,6 +163,7 @@ function createSlotElement(slotId, options = {}) {
 
     slotElement.__refs = {
         circleElement,
+        progressElement,
         levelElement,
         labelElement,
     };
@@ -173,6 +205,7 @@ function updateSlotElement(slotElement, nextState) {
         transform,
         isUnderConstruction,
         colorClass,
+        constructionJob,
         level,
         label,
     } = nextState;
@@ -188,6 +221,8 @@ function updateSlotElement(slotElement, nextState) {
     slotElement.classList.toggle('under-construction', Boolean(isUnderConstruction));
     setSlotColorClass(slotElement, colorClass);
 
+    updateConstructionProgress(slotElement, constructionJob);
+
     const levelText = String(level);
     if (refs.levelElement.textContent !== levelText) {
         refs.levelElement.textContent = levelText;
@@ -198,10 +233,62 @@ function updateSlotElement(slotElement, nextState) {
     }
 }
 
+function getConstructionProgress(job, now = Date.now()) {
+    if (!job) return 0;
+
+    const startTime = Number(job.startTime) || now;
+    const endTime = Number(job.endTime) || now;
+    const totalTime = Math.max(1, endTime - startTime);
+    return Math.min(100, Math.max(0, ((now - startTime) / totalTime) * 100));
+}
+
+function updateConstructionProgress(slotElement, job) {
+    const refs = slotElement.__refs;
+    if (!refs?.progressElement) return;
+
+    const previousCountdownKey = slotElement.dataset.constructionCountdownKey;
+    const nextCountdownKey = job?.jobId ? `building-slot:${job.jobId}` : '';
+
+    if (previousCountdownKey && previousCountdownKey !== nextCountdownKey) {
+        countdownService.unsubscribe(previousCountdownKey);
+        delete slotElement.dataset.constructionCountdownKey;
+    }
+
+    if (!job) {
+        refs.progressElement.style.setProperty('--construction-progress', '0');
+        return;
+    }
+
+    const progressColor = CONSTRUCTION_PROGRESS_COLORS[constructionProgressColor]
+        || CONSTRUCTION_PROGRESS_COLORS[DEFAULT_CONSTRUCTION_PROGRESS_COLOR];
+
+    refs.progressElement.style.setProperty('--construction-progress-color', progressColor);
+    refs.progressElement.style.setProperty('--construction-progress', getConstructionProgress(job).toFixed(2));
+
+    if (previousCountdownKey === nextCountdownKey) return;
+
+    slotElement.dataset.constructionCountdownKey = nextCountdownKey;
+    countdownService.subscribe({
+        id: nextCountdownKey,
+        endTime: job.endTime,
+        onTick: () => {
+            if (!slotElement.isConnected) {
+                countdownService.unsubscribe(nextCountdownKey);
+                return;
+            }
+            refs.progressElement.style.setProperty('--construction-progress', getConstructionProgress(job).toFixed(2));
+        },
+        onComplete: () => {
+            if (!slotElement.isConnected) return;
+            refs.progressElement.style.setProperty('--construction-progress', '100');
+        },
+    });
+}
+
 function pruneUnusedSlotElements(containerState, seenSlotIds) {
     for (const [slotId, slotElement] of containerState.slots.entries()) {
         if (seenSlotIds.has(slotId)) continue;
-        slotElement.remove();
+        cleanupSlotElement(slotElement);
         containerState.slots.delete(slotId);
     }
 }
@@ -332,6 +419,7 @@ export function renderBuildingSlots(container, gameState) {
             transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
             isUnderConstruction: Boolean(constructionClass),
             colorClass,
+            constructionJob: state.constructionJob,
             level: state.level,
             label: buildingName,
         });
@@ -377,6 +465,7 @@ export function renderVillageCenterSlots(container, gameState) {
             transform: `translate(-50%, -50%) translate(${x}px, ${y}px)`,
             isUnderConstruction: Boolean(constructionClass),
             colorClass,
+            constructionJob: state.constructionJob,
             level: state.level,
             label: '',
         });
@@ -404,6 +493,7 @@ export function renderVillageCenterSlots(container, gameState) {
         transform: `translate(-50%, -50%) translate(0px, ${wallYOffset}px)`,
         isUnderConstruction: Boolean(wallConstructionClass),
         colorClass: wallColorClass,
+        constructionJob: wallState.constructionJob,
         level: wallState.level,
         label: wallName,
     });

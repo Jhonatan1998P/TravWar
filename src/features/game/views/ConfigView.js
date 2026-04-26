@@ -59,10 +59,6 @@ class ConfigView {
                                 <label for="troop-speed" class="flex justify-between text-white font-medium">Velocidad de Tropas <span id="troop-speed-value" class="font-mono text-cyan-400">1x</span></label>
                                 <input id="troop-speed" type="range" min="1" max="500" value="1" step="1" class="w-full h-2 bg-btn-secondary-bg rounded-lg appearance-none cursor-pointer accent-cyan-400 input-range">
                             </div>
-                            <div>
-                                <label for="trade-capacity-multiplier" class="flex justify-between text-white font-medium">Capacidad de Mercaderes <span id="trade-capacity-value" class="font-mono text-cyan-400">1x</span></label>
-                                <input id="trade-capacity-multiplier" type="range" min="1" max="25" value="1" step="0.5" class="w-full h-2 bg-btn-secondary-bg rounded-lg appearance-none cursor-pointer accent-cyan-400 input-range">
-                            </div>
                         </fieldset>
 
                         <fieldset class="border-t border-primary-border pt-6">
@@ -78,12 +74,23 @@ class ConfigView {
                         </fieldset>
                         
                         <fieldset class="border-t border-primary-border pt-6">
-                            <div class="md:col-span-2">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                            <div>
                                 <label for="world-seed" class="text-white font-medium">Semilla del Mundo (Opcional)</label>
                                 <div class="flex mt-1">
                                     <input id="world-seed" type="text" placeholder="Mapa aleatorio" class="flex-grow bg-btn-secondary-bg border border-primary-border text-white rounded-l-md p-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500 font-mono">
                                     <button id="random-seed-btn" type="button" class="bg-btn-secondary-bg hover:bg-btn-secondary-hover text-white font-bold py-2 px-4 rounded-r-md border border-primary-border">⚄</button>
                                 </div>
+                            </div>
+                            <div>
+                                <label for="map-size" class="text-white font-medium">Tamaño de Mapa</label>
+                                <select id="map-size" class="mt-1 w-full bg-btn-secondary-bg border border-primary-border text-white rounded-md p-2 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+                                    <option value="25">Por defecto (-25 a 25)</option>
+                                    <option value="35">Grande (-35 a 35)</option>
+                                    <option value="50">Extra grande (-50 a 50)</option>
+                                </select>
+                                <p class="mt-1 text-xs text-gray-400">A mayor mapa, más oasis y más tierras raras distribuidas por semilla.</p>
+                            </div>
                             </div>
                         </fieldset>
 
@@ -149,8 +156,8 @@ class ConfigView {
 
     #cacheDOMElements() {
         this.ids = [
-            'game-speed', 'troop-speed', 'trade-capacity-multiplier', 'ai-count', 
-            'player-race', 'world-seed'
+            'game-speed', 'troop-speed', 'ai-count', 
+            'player-race', 'world-seed', 'map-size'
         ];
         this.ids.forEach(id => {
             this.#inputs[id] = document.getElementById(id);
@@ -275,7 +282,6 @@ class ConfigView {
     _updateAllValueDisplays() {
         if(this.#valueDisplays['game-speed']) this.#valueDisplays['game-speed'].textContent = `${this.#inputs['game-speed'].value}x`;
         if(this.#valueDisplays['troop-speed']) this.#valueDisplays['troop-speed'].textContent = `${this.#inputs['troop-speed'].value}x`;
-        if(this.#valueDisplays['trade-capacity-multiplier']) this.#valueDisplays['trade-capacity-value'].textContent = `${this.#inputs['trade-capacity-multiplier'].value}x`;
         if(this.#valueDisplays['ai-count']) this.#valueDisplays['ai-count'].textContent = this.#inputs['ai-count'].value;
     }
 
@@ -305,11 +311,12 @@ class ConfigView {
         const newSettings = {
             gameSpeed: parseFloat(this.#inputs['game-speed'].value),
             troopSpeed: parseFloat(this.#inputs['troop-speed'].value),
-            tradeCapacityMultiplier: parseFloat(this.#inputs['trade-capacity-multiplier'].value),
+            tradeCapacityMultiplier: this.#config.getSettings().tradeCapacityMultiplier || 1,
             playerRace: this.#inputs['player-race'].value,
             aiCount: parseInt(this.#inputs['ai-count'].value, 10),
             aiRaces: aiRaces,
             worldSeed: this.#inputs['world-seed'].value || Date.now().toString(36),
+            mapSize: parseInt(this.#inputs['map-size'].value, 10),
         };
 
         this.#config.updateAndSave(newSettings);

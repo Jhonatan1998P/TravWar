@@ -10,6 +10,7 @@ class GameConfig {
     #aiRaces;
     #maxGameDays;
     #worldSeed;
+    #mapSize;
 
     constructor() {
         this.#load();
@@ -71,7 +72,8 @@ class GameConfig {
             aiCount: 1,
             aiRaces: ['germans', 'gauls', 'huns'],
             maxGameDays: 30,
-            worldSeed: 'LOVE'
+            worldSeed: 'LOVE',
+            mapSize: 25,
         };
         this.#applySettings(defaults);
     }
@@ -85,6 +87,7 @@ class GameConfig {
         this.#aiRaces = settings.aiRaces;
         this.#maxGameDays = settings.maxGameDays;
         this.#worldSeed = settings.worldSeed;
+        this.#mapSize = Math.max(15, Math.min(50, Math.floor(Number(settings.mapSize) || 25)));
     }
 
     getSettings() {
@@ -97,6 +100,7 @@ class GameConfig {
             aiRaces: this.#aiRaces,
             maxGameDays: this.#maxGameDays,
             worldSeed: this.#worldSeed,
+            mapSize: this.#mapSize,
         };
     }
     

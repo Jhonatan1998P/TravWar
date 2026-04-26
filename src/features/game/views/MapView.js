@@ -6,8 +6,7 @@ import { perfCollector } from '@shared/lib/perf.js';
 import { selectMapViewSignature } from '../ui/renderSelectors.js';
 
 const TILE_SIZE = 40;
-const MAP_SIZE = 25;
-const FULL_MAP_GRID_SIZE = MAP_SIZE * 2 + 1;
+const DEFAULT_MAP_SIZE = 25;
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 2.5;
 const CHUNK_SIZE = 10;
@@ -59,6 +58,7 @@ class MapView {
     #assets = {};
     #assetsLoaded = false;
     #showWastelandIcons = true;
+    #mapSize = DEFAULT_MAP_SIZE;
 
     #chunkCache = new Map();
     #dirtyChunkKeys = new Set();
@@ -164,6 +164,7 @@ class MapView {
         this.#scale = 1.0;
         this.#translateX = 0;
         this.#translateY = 0;
+        this.#mapSize = DEFAULT_MAP_SIZE;
     }
 
     async _loadAssets() {
@@ -331,6 +332,7 @@ class MapView {
 
         const isInitialLoad = !this.#gameState;
         this.#gameState = state;
+        this.#mapSize = this._resolveMapSize(state);
 
         if (isInitialLoad || !this.#mapDataLookup) {
             this._buildMapLookup();
@@ -357,8 +359,9 @@ class MapView {
     }
 
     _clampTransform(x, y, scale) {
-        const mapPixelWidth = FULL_MAP_GRID_SIZE * TILE_SIZE * scale;
-        const mapPixelHeight = FULL_MAP_GRID_SIZE * TILE_SIZE * scale;
+        const fullMapGridSize = this.#mapSize * 2 + 1;
+        const mapPixelWidth = fullMapGridSize * TILE_SIZE * scale;
+        const mapPixelHeight = fullMapGridSize * TILE_SIZE * scale;
         const viewportWidth = this.#viewport.clientWidth;
         const viewportHeight = this.#viewport.clientHeight;
 
@@ -388,8 +391,8 @@ class MapView {
         const viewportHeight = this.#viewport.clientHeight;
         if (viewportWidth === 0 || viewportHeight === 0) return;
 
-        const targetPixelX = (x + MAP_SIZE) * TILE_SIZE * this.#scale + (TILE_SIZE * this.#scale / 2);
-        const targetPixelY = (y + MAP_SIZE) * TILE_SIZE * this.#scale + (TILE_SIZE * this.#scale / 2);
+        const targetPixelX = (x + this.#mapSize) * TILE_SIZE * this.#scale + (TILE_SIZE * this.#scale / 2);
+        const targetPixelY = (y + this.#mapSize) * TILE_SIZE * this.#scale + (TILE_SIZE * this.#scale / 2);
 
         this.#translateX = viewportWidth / 2 - targetPixelX;
         this.#translateY = viewportHeight / 2 - targetPixelY;
@@ -449,10 +452,10 @@ class MapView {
         const gridX = Math.floor(worldX / TILE_SIZE);
         const gridY = Math.floor(worldY / TILE_SIZE);
 
-        const mapX = gridX - MAP_SIZE;
-        const mapY = gridY - MAP_SIZE;
+        const mapX = gridX - this.#mapSize;
+        const mapY = gridY - this.#mapSize;
         
-        if (mapX >= -MAP_SIZE && mapX <= MAP_SIZE && mapY >= -MAP_SIZE && mapY <= MAP_SIZE) {
+        if (mapX >= -this.#mapSize && mapX <= this.#mapSize && mapY >= -this.#mapSize && mapY <= this.#mapSize) {
             return { x: mapX, y: mapY };
         }
         
@@ -477,9 +480,19 @@ class MapView {
     }
 
     _getChunkKeyForTile(mapX, mapY) {
-        const chunkX = Math.floor((mapX + MAP_SIZE) / CHUNK_SIZE);
-        const chunkY = Math.floor((mapY + MAP_SIZE) / CHUNK_SIZE);
+        const chunkX = Math.floor((mapX + this.#mapSize) / CHUNK_SIZE);
+        const chunkY = Math.floor((mapY + this.#mapSize) / CHUNK_SIZE);
         return `${chunkX}|${chunkY}`;
+    }
+
+    _resolveMapSize(state) {
+        const configuredSize = Math.floor(Number(state?.mapSize));
+        if (Number.isFinite(configuredSize) && configuredSize > 0) return configuredSize;
+
+        const maxCoordinate = (state?.mapData || []).reduce((maxValue, tile) => {
+            return Math.max(maxValue, Math.abs(Number(tile.x) || 0), Math.abs(Number(tile.y) || 0));
+        }, DEFAULT_MAP_SIZE);
+        return maxCoordinate || DEFAULT_MAP_SIZE;
     }
 
     _renderChunk(chunkX, chunkY, useLowDetail) {
@@ -500,8 +513,8 @@ class MapView {
 
         for (let gridY = startGridY; gridY < endGridY; gridY++) {
             for (let gridX = startGridX; gridX < endGridX; gridX++) {
-                const mapX = gridX - MAP_SIZE;
-                const mapY = gridY - MAP_SIZE;
+                const mapX = gridX - this.#mapSize;
+                const mapY = gridY - this.#mapSize;
                 const tileData = this.#mapDataLookup.get(`${mapX}|${mapY}`);
                 
                 const tilePixelX = (gridX - startGridX) * TILE_SIZE;
@@ -552,8 +565,8 @@ class MapView {
         const centerY = (viewportHeight / 2 - this.#translateY) / this.#scale;
         const centerGridX = Math.floor(centerX / TILE_SIZE);
         const centerGridY = Math.floor(centerY / TILE_SIZE);
-        const centerMapX = centerGridX - MAP_SIZE;
-        const centerMapY = centerGridY - MAP_SIZE;
+        const centerMapX = centerGridX - this.#mapSize;
+        const centerMapY = centerGridY - this.#mapSize;
         this.#coordsDisplay.textContent = `(${centerMapX}|${centerMapY})`;
 
         const startChunkX = Math.floor(-this.#translateX / this.#scale / CHUNK_PIXEL_SIZE);
@@ -696,6 +709,34 @@ class MapView {
                 ctx.drawImage(iconToDraw, iconX, iconY, iconSize, iconSize);
             }
         }
+
+        if (tileData?.type === 'oasis') {
+            const bonusPercentage = gameData.oasisTypes[tileData.oasisType]?.bonus?.percentage;
+            if (bonusPercentage) {
+                this._drawOasisBonusLabel(ctx, px, py, bonusPercentage);
+            }
+        }
+    }
+
+    _drawOasisBonusLabel(ctx, px, py, bonusPercentage) {
+        const label = `+${bonusPercentage}%`;
+        const labelHeight = 11;
+        const labelPaddingX = 3;
+        ctx.save();
+        ctx.font = 'bold 8px sans-serif';
+        const labelWidth = Math.ceil(ctx.measureText(label).width) + labelPaddingX * 2;
+        const labelX = px + TILE_SIZE - labelWidth - 2;
+        const labelY = py + 2;
+
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(17, 24, 39, 0.78)';
+        ctx.strokeStyle = 'rgba(250, 204, 21, 0.72)';
+        ctx.lineWidth = 1;
+        ctx.fillRect(labelX, labelY, labelWidth, labelHeight);
+        ctx.strokeRect(labelX + 0.5, labelY + 0.5, labelWidth - 1, labelHeight - 1);
+        ctx.fillStyle = '#fde68a';
+        ctx.fillText(label, labelX + labelPaddingX, labelY + labelHeight / 2);
+        ctx.restore();
     }
 }
 
