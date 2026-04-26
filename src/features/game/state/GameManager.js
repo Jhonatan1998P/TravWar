@@ -261,6 +261,10 @@ class GameManager {
             case 'npc_resource_exchange:result':
                 document.dispatchEvent(new CustomEvent('npc_resource_exchange:result', { detail: payload }));
                 break;
+
+            case 'release_oasis:result':
+                document.dispatchEvent(new CustomEvent('release_oasis:result', { detail: payload }));
+                break;
         }
     }
 

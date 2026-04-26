@@ -293,13 +293,13 @@ class FarmListsView {
     _buildEntryEditorModalHtml(ownerId, ownerRace, troopCatalog) {
         const context = this.#entryEditorContext;
         if (!context) {
-            return '<div id="farm-view-editor-panel" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-[70] panel-hidden"></div>';
+            return '<div id="farm-view-editor-panel" class="fixed inset-0 h-[var(--app-viewport-height)] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-[70] panel-hidden"></div>';
         }
 
         const resolved = this._resolveEditorEntry(ownerId);
         if (!resolved) {
             this.#entryEditorContext = null;
-            return '<div id="farm-view-editor-panel" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-[70] panel-hidden"></div>';
+            return '<div id="farm-view-editor-panel" class="fixed inset-0 h-[var(--app-viewport-height)] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-[70] panel-hidden"></div>';
         }
 
         const { list, entry } = resolved;
@@ -325,13 +325,13 @@ class FarmListsView {
         }).join('');
 
         return `
-            <div id="farm-view-editor-panel" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-[70]">
-                <div class="bg-gray-800 border-2 border-gray-700/50 rounded-lg shadow-xl w-full max-w-2xl my-2 sm:my-4 text-white flex flex-col max-h-[calc(100dvh-1rem)]">
+            <div id="farm-view-editor-panel" class="fixed inset-0 h-[var(--app-viewport-height)] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-[70]">
+                <div class="bg-gray-800 border-2 border-gray-700/50 rounded-lg shadow-xl w-full max-w-2xl my-2 sm:my-4 text-white flex flex-col max-h-[calc(var(--app-viewport-height)-1rem)]">
                     <header class="flex justify-between items-center p-4 border-b border-gray-700">
                         <h2 class="text-xl font-bold text-amber-300">Editar Lista de Vacas</h2>
                         <button data-action="farm-view-close-editor" class="text-gray-400 text-3xl leading-none hover:text-white">x</button>
                     </header>
-                    <main class="p-4 overflow-y-auto min-h-0 max-h-[calc(100dvh-12rem)]">
+                    <main class="p-4 overflow-y-auto min-h-0 max-h-[calc(var(--app-viewport-height)-12rem)]">
                         <div class="space-y-4">
                             <div class="rounded-lg border border-gray-700 bg-gray-900/30 p-3">
                                 <p class="text-sm text-gray-300">Objetivo: <span class="font-semibold text-amber-300">${this._resolveTargetLabel(entry)}</span></p>

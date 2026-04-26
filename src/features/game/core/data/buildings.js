@@ -554,7 +554,15 @@ export const buildings = {
                 { level: 8, cost: { wood: 15390, stone: 9805, iron: 13175, food: 18340 }, population: 4, culturePoints: 17, buildTime: 29460, attribute: {} },
                 { level: 9, cost: { wood: 21545, stone: 13725, iron: 18445, food: 25680 }, population: 4, culturePoints: 21, buildTime: 34770, attribute: {} },
                 { level: 10, cost: { wood: 30165, stone: 19215, iron: 25825, food: 35950 }, population: 4, culturePoints: 25, buildTime: 40930, attribute: { oasisSlots: 1 } },
+                { level: 11, cost: { wood: 37855, stone: 24105, iron: 32395, food: 45105 }, population: 4, culturePoints: 27, buildTime: 46843, attribute: { oasisSlots: 1 } },
+                { level: 12, cost: { wood: 47510, stone: 30240, iron: 40635, food: 56595 }, population: 4, culturePoints: 30, buildTime: 53609, attribute: { oasisSlots: 1 } },
+                { level: 13, cost: { wood: 59620, stone: 37935, iron: 50970, food: 71015 }, population: 4, culturePoints: 33, buildTime: 61354, attribute: { oasisSlots: 1 } },
+                { level: 14, cost: { wood: 74825, stone: 47590, iron: 63935, food: 89105 }, population: 4, culturePoints: 36, buildTime: 70217, attribute: { oasisSlots: 1 } },
                 { level: 15, cost: { wood: 93900, stone: 59700, iron: 80200, food: 111800 }, population: 4, culturePoints: 40, buildTime: 80360, attribute: { oasisSlots: 2 } },
+                { level: 16, cost: { wood: 117810, stone: 74900, iron: 100610, food: 140255 }, population: 4, culturePoints: 44, buildTime: 90679, attribute: { oasisSlots: 2 } },
+                { level: 17, cost: { wood: 147805, stone: 93975, iron: 126220, food: 175955 }, population: 4, culturePoints: 49, buildTime: 102323, attribute: { oasisSlots: 2 } },
+                { level: 18, cost: { wood: 185440, stone: 117905, iron: 158345, food: 220735 }, population: 4, culturePoints: 54, buildTime: 115463, attribute: { oasisSlots: 2 } },
+                { level: 19, cost: { wood: 232660, stone: 147930, iron: 198645, food: 276920 }, population: 4, culturePoints: 59, buildTime: 130289, attribute: { oasisSlots: 2 } },
                 { level: 20, cost: { wood: 291900, stone: 185600, iron: 249200, food: 347400 }, population: 4, culturePoints: 65, buildTime: 147020, attribute: { oasisSlots: 3 } }
             ]
         },

@@ -102,6 +102,11 @@ class BuildingInfoUI {
                 return;
             }
 
+            if (action === 'release-oasis') {
+                this._handleReleaseOasisClick(button);
+                return;
+            }
+
             if (action === 'npc-max-resource') {
                 this._handleNpcMaxClick(button.dataset.res);
                 return;
@@ -155,17 +160,18 @@ class BuildingInfoUI {
         });
 
         document.addEventListener('npc_resource_exchange:result', e => this._handleNpcExchangeResult(e.detail));
+        document.addEventListener('release_oasis:result', e => this._handleReleaseOasisResult(e.detail));
     }
 
     _createPanelHTML() {
         const panelHTML = `
-            <div id="building-info-panel" class="fixed inset-0 h-[100dvh] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
-                <div class="bg-glass-bg border border-primary-border rounded-[2rem] shadow-2xl w-full max-w-md my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(100dvh-1rem)] backdrop-blur-2xl">
+            <div id="building-info-panel" class="fixed inset-0 h-[var(--app-viewport-height)] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
+                <div class="bg-glass-bg border border-primary-border rounded-[2rem] shadow-2xl w-full max-w-md my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(var(--app-viewport-height)-1rem)] backdrop-blur-2xl">
                     <header id="panel-header" class="flex justify-between items-center p-4 border-b border-primary-border">
                         <h2 id="panel-title" class="text-xl font-display font-bold text-war-gold"></h2>
                         <button data-action="close" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar">×</button>
                     </header>
-                    <main id="panel-main" class="flex flex-col p-4 overflow-y-auto min-h-0 max-h-[calc(100dvh-12rem)]"></main>
+                    <main id="panel-main" class="flex flex-col p-4 overflow-y-auto min-h-0 max-h-[calc(var(--app-viewport-height)-12rem)]"></main>
                     <footer id="panel-footer" class="p-4 border-t border-primary-border space-y-2">
                         <button id="upgrade-button" data-action="upgrade" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover text-war-mist font-bold py-3 px-4 rounded-xl transition duration-300 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed border border-primary-border">
                         </button>
@@ -175,8 +181,8 @@ class BuildingInfoUI {
                         </button>
                     </footer>
                 </div>
-                <div id="unit-info-modal" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm hidden items-center justify-center p-3 sm:p-4 z-[60]">
-                    <div class="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-primary-border bg-gray-950/95 shadow-2xl text-war-mist">
+                <div id="unit-info-modal" class="fixed inset-0 h-[var(--app-viewport-height)] bg-black/70 backdrop-blur-sm hidden items-center justify-center p-3 sm:p-4 z-[60]">
+                    <div class="w-full max-w-lg max-h-[calc(var(--app-viewport-height)-2rem)] overflow-y-auto rounded-2xl border border-primary-border bg-gray-950/95 shadow-2xl text-war-mist">
                         <header class="flex items-center justify-between gap-3 p-4 border-b border-primary-border sticky top-0 bg-gray-950/95 backdrop-blur-xl">
                             <div class="min-w-0">
                                 <h3 id="unit-info-title" class="text-xl font-display font-bold text-war-gold truncate"></h3>
@@ -209,6 +215,9 @@ class BuildingInfoUI {
             if (this.#viewingType === 'hospital') {
                 const contentContainer = this.#panelElement.querySelector('#building-details-content');
                 if (contentContainer) this._renderHospitalUnits(contentContainer);
+            }
+            if (this.#viewingType === 'heroMansion') {
+                this._updateHeroMansionOases();
             }
             if (this.#viewingType === 'rallyPoint') {
                 this._updateRallyPointFarmListPanel();
@@ -546,6 +555,8 @@ class BuildingInfoUI {
             this._renderAcademyResearch(contentContainer);
         } else if (this.#viewingType === 'hospital') {
             this._renderHospitalUnits(contentContainer);
+        } else if (this.#viewingType === 'heroMansion') {
+            this._renderHeroMansionOases(contentContainer);
         } else if (isMilitaryBuilding) {
             this._renderTroopTraining(contentContainer);
         } else if (this.#viewingType === 'rallyPoint') {
@@ -720,6 +731,96 @@ class BuildingInfoUI {
             ? `No se pudo aplicar el intercambio optimo para ${request.unitName || 'la unidad'}.`
             : 'No se pudo completar el intercambio NPC.';
         toastUI.show(messages[result.reason] || fallbackMessage, 'error');
+    }
+
+    _getHeroMansionOasisSlots(activeVillage) {
+        const level = activeVillage?.buildings.find(building => building.type === 'heroMansion')?.level || 0;
+        if (level >= 20) return 3;
+        if (level >= 15) return 2;
+        if (level >= 10) return 1;
+        return 0;
+    }
+
+    _getPendingOasisCaptureCount(activeVillage) {
+        return (this.#currentGameState?.movements || []).filter(movement => {
+            return movement.originVillageId === activeVillage?.id
+                && movement.type === 'attack'
+                && movement.payload?.conquerOasis === true;
+        }).length;
+    }
+
+    _renderHeroMansionOases(container) {
+        container.innerHTML = `<div class="border-t border-primary-border mt-4 pt-4" id="hero-mansion-oases-panel"></div>`;
+        this._updateHeroMansionOases();
+    }
+
+    _updateHeroMansionOases() {
+        const panel = this.#panelElement.querySelector('#hero-mansion-oases-panel');
+        if (!panel) return;
+
+        const activeVillage = this.#currentGameState?.villages.find(v => v.id === this.#currentGameState.activeVillageId);
+        if (!activeVillage) return;
+
+        const oases = activeVillage.oases || [];
+        const slots = this._getHeroMansionOasisSlots(activeVillage);
+        const pendingCaptures = this._getPendingOasisCaptureCount(activeVillage);
+
+        const rows = oases.map(oasis => {
+            const oasisType = gameData.oasisTypes[oasis.oasisType] || gameData.oasisTypes[this.#currentGameState.mapData.find(tile => tile.x === oasis.x && tile.y === oasis.y)?.oasisType];
+            const bonus = oasisType?.bonus || {};
+            const iconKey = RESOURCE_ICON_MAP[bonus.resource] || 'wheat';
+            return `
+                <div class="flex items-center gap-3 rounded-lg border border-primary-border bg-glass-bg p-3">
+                    <div class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gray-900/60 border border-primary-border/60">${ICONS[iconKey] || ICONS.wheat}</div>
+                    <div class="min-w-0 flex-grow">
+                        <div class="font-semibold text-white truncate">${oasisType?.name || 'Oasis'}</div>
+                        <div class="text-xs text-gray-400">(${oasis.x}|${oasis.y}) · +${bonus.percentage || 0}% ${RESOURCE_LABELS[bonus.resource] || 'recurso'}</div>
+                    </div>
+                    <button data-action="release-oasis" data-x="${oasis.x}" data-y="${oasis.y}" class="shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-lg border border-red-500/35 bg-red-950/50 text-red-100 hover:bg-red-900/70 focus:outline-none focus:ring-2 focus:ring-red-400/60" title="Soltar oasis" aria-label="Soltar oasis (${oasis.x}|${oasis.y})">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>`;
+        }).join('');
+
+        panel.innerHTML = `
+            <div class="flex items-center justify-between gap-3 mb-2">
+                <h3 class="font-bold text-gray-400">Oasis anexados</h3>
+                <span class="text-xs text-gray-400">${oases.length + pendingCaptures}/${slots} slots</span>
+            </div>
+            ${pendingCaptures > 0 ? `<p class="text-xs text-yellow-300 mb-2">${pendingCaptures} conquista(s) de oasis en camino ocupan slot temporalmente.</p>` : ''}
+            <div class="space-y-2">${rows || '<p class="text-center text-gray-500 text-sm py-4">Esta aldea no tiene oasis anexados.</p>'}</div>
+        `;
+    }
+
+    _handleReleaseOasisClick(button) {
+        const activeVillageId = this.#currentGameState?.activeVillageId;
+        const x = Number(button.dataset.x);
+        const y = Number(button.dataset.y);
+        if (!activeVillageId || !Number.isFinite(x) || !Number.isFinite(y)) return;
+
+        button.disabled = true;
+        gameManager.sendCommand('release_oasis', { villageId: activeVillageId, x, y });
+    }
+
+    _handleReleaseOasisResult(payload) {
+        const result = payload?.result;
+        if (!result) return;
+
+        if (result.success) {
+            const oasis = result.oasis || payload.request || {};
+            toastUI.show(`Oasis (${oasis.x}|${oasis.y}) liberado correctamente.`, 'success');
+            this._updateHeroMansionOases();
+            return;
+        }
+
+        const messages = {
+            INVALID_PAYLOAD: 'No se pudo identificar el oasis a soltar.',
+            VILLAGE_NOT_FOUND: 'No se encontro la aldea activa.',
+            OASIS_NOT_OWNED_BY_VILLAGE: 'Ese oasis no pertenece a esta aldea.',
+            OASIS_TILE_NOT_FOUND: 'No se encontro el oasis en el mapa.',
+        };
+        toastUI.show(messages[result.reason] || 'No se pudo soltar el oasis.', 'error');
+        this._updateHeroMansionOases();
     }
 
     _getBenefitText(attribute, currentValue, nextValue, context = {}) {
@@ -1567,6 +1668,11 @@ class BuildingInfoUI {
     }
     
     _updateTroopList() {
+        const focusedInput = document.activeElement;
+        if (focusedInput?.matches?.('#unit-list input[type="number"]')) {
+            return;
+        }
+
         const activeVillage = this.#currentGameState.villages.find(v => v.id === this.#currentGameState.activeVillageId);
         const ownerState = this.#currentGameState.players.find(p => p.id === activeVillage?.ownerId);
         if (!activeVillage || !ownerState) return;
@@ -1577,6 +1683,15 @@ class BuildingInfoUI {
         
         const listContainer = this.#panelElement.querySelector('#unit-list');
         if (!listContainer) return;
+
+        const previousInputValues = {};
+        listContainer.querySelectorAll('[data-unit-id]').forEach(unitCard => {
+            const input = unitCard.querySelector('input[type="number"]');
+            if (input && input.value !== '') {
+                previousInputValues[unitCard.dataset.unitId] = input.value;
+            }
+        });
+        const focusedUnitId = document.activeElement?.closest?.('[data-unit-id]')?.dataset?.unitId || null;
 
         let unitTypeToTrain;
         switch(this.#viewingType) {
@@ -1679,7 +1794,7 @@ class BuildingInfoUI {
                     </div>
 
                     <div class="flex gap-2">
-                        <input type="number" min="0" placeholder="Cant." class="w-24 bg-btn-secondary-bg border-primary-border text-white rounded-md p-1 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500" ${disabledState}>
+                        <input type="number" inputmode="numeric" min="0" placeholder="Cant." class="w-24 bg-btn-secondary-bg border-primary-border text-white rounded-md p-1 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500" ${disabledState}>
                         <button data-action="max-train" data-unit-id="${unit.id}" class="px-3 py-1 text-xs bg-btn-secondary-bg hover:bg-btn-secondary-hover rounded-md border border-primary-border" ${disabledState}>Máx</button>
                         <button data-action="train" data-unit-id="${unit.id}" class="flex-grow bg-btn-primary-bg hover:bg-btn-primary-hover text-white font-bold py-1 px-3 rounded-lg transition duration-300 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed border border-primary-border" ${disabledState}>
                             Entrenar
@@ -1690,6 +1805,20 @@ class BuildingInfoUI {
             `;
         }
         listContainer.innerHTML = unitsToShowHTML;
+
+        for (const [unitId, value] of Object.entries(previousInputValues)) {
+            const input = listContainer.querySelector(`[data-unit-id="${unitId}"] input[type="number"]`);
+            if (input) input.value = value;
+        }
+
+        if (focusedUnitId) {
+            const input = listContainer.querySelector(`[data-unit-id="${focusedUnitId}"] input[type="number"]`);
+            if (input) {
+                input.focus();
+                const cursorPosition = input.value.length;
+                input.setSelectionRange(cursorPosition, cursorPosition);
+            }
+        }
     }
 }
 

@@ -54,9 +54,7 @@ class VillageCenterView {
     }
 
     initializeEventListeners() {
-        uiRenderScheduler.register('village-center-view', this._handleGameStateUpdate, [selectVillageVisualSignature], {
-            suspendWhenPanelVisible: true,
-        });
+        uiRenderScheduler.register('village-center-view', this._handleGameStateUpdate, [selectVillageVisualSignature]);
         document.addEventListener('notify:construction_finished', this._handleConstructionFinished);
         document.addEventListener('notify:recruitment_finished', this._handleRecruitmentFinished);
         document.addEventListener('notify:research_finished', this._handleResearchFinished);

@@ -6,6 +6,7 @@ import { calculateBeastBountyValue } from '../core/OasisEconomy.js';
 import { getScaledCrannyCapacity } from '../core/capacityScaling.js';
 
 let returnMovementIdSequence = 0;
+const OASIS_CAPTURE_RANGE = 7;
 
 function createReturnMovementId(now, originVillageId) {
     returnMovementIdSequence = (returnMovementIdSequence + 1) % 1000000;
@@ -21,8 +22,8 @@ function getHeroMansionOasisSlots(village) {
 }
 
 function isOasisInCaptureRange(village, targetCoords) {
-    return Math.abs(targetCoords.x - village.coords.x) <= 3
-        && Math.abs(targetCoords.y - village.coords.y) <= 3;
+    return Math.abs(targetCoords.x - village.coords.x) <= OASIS_CAPTURE_RANGE
+        && Math.abs(targetCoords.y - village.coords.y) <= OASIS_CAPTURE_RANGE;
 }
 
 function hasLivingBeasts(beasts = {}) {

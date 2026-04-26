@@ -72,10 +72,10 @@ class BattleReportUI {
 
     _createPanelHTML() {
         const panelHTML = `
-            <div id="battle-report-panel" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
-                <div class="bg-gray-800 border-2 border-gray-700/50 rounded-lg shadow-xl w-full max-w-2xl my-2 sm:my-4 text-white flex flex-col max-h-[calc(100dvh-1rem)]">
+            <div id="battle-report-panel" class="fixed inset-0 h-[var(--app-viewport-height)] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
+                <div class="bg-gray-800 border-2 border-gray-700/50 rounded-lg shadow-xl w-full max-w-2xl my-2 sm:my-4 text-white flex flex-col max-h-[calc(var(--app-viewport-height)-1rem)]">
                     <header id="report-header" class="flex justify-between items-center p-4 border-b border-gray-700"></header>
-                    <main id="report-main" class="p-4 overflow-y-auto min-h-0 max-h-[calc(100dvh-12rem)]"></main>
+                    <main id="report-main" class="p-4 overflow-y-auto min-h-0 max-h-[calc(var(--app-viewport-height)-12rem)]"></main>
                     <footer class="p-4 border-t border-gray-700">
                         <button data-action="close" class="w-full bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-lg transition duration-300">Cerrar</button>
                     </footer>

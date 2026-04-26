@@ -8,9 +8,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500&family=Sora:wght@500;600;700&display=swap" rel="stylesheet">
 </head>
-<body class="bg-primary-bg text-stone-100 flex items-center justify-center min-h-[100dvh] font-sans antialiased">
+<body class="bg-primary-bg text-stone-100 flex items-center justify-center min-h-[var(--app-viewport-height)] font-sans antialiased">
 
-    <div id="village-container" class="w-full max-w-md h-[100dvh] bg-glass-bg rounded-none md:rounded-[2rem] shadow-2xl border border-primary-border flex flex-col overflow-hidden backdrop-blur-2xl">
+    <div id="village-container" class="w-full max-w-md h-[var(--app-viewport-height)] bg-glass-bg rounded-none md:rounded-[2rem] shadow-2xl border border-primary-border flex flex-col overflow-hidden backdrop-blur-2xl">
         
         <header id="app-header" class="relative z-30 p-1.5 flex-shrink-0 flex justify-between items-center bg-glass-light-bg backdrop-blur-2xl border-b border-contrast-border md:rounded-t-[2rem] shadow-inner">
             <button id="open-config-menu-btn" type="button" class="icon-medallion w-10 h-10 cursor-pointer" aria-label="Abrir configuracion de partida" title="Configuracion de partida">
@@ -61,7 +61,7 @@
 
     </div>
 
-    <div id="confirm-dialog" class="hidden fixed inset-0 h-[100dvh] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50">
+    <div id="confirm-dialog" class="hidden fixed inset-0 h-[var(--app-viewport-height)] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50">
         <div class="bg-glass-bg border-2 border-primary-border rounded-2xl shadow-2xl p-6 w-full max-w-sm text-center my-2 sm:my-4">
             <h3 class="text-xl font-display font-bold text-war-gold">Sobrescribir Partida</h3>
             <p class="text-gray-300 my-4">Ya existe una partida guardada. ¿Estás seguro de que quieres borrarla y empezar una nueva? Esta acción no se puede deshacer.</p>
@@ -72,7 +72,7 @@
         </div>
     </div>
     
-    <div id="activity-modal" class="panel-hidden fixed inset-0 h-[100dvh] z-40 bg-glass-bg backdrop-blur-md shadow-2xl border-2 border-primary-border flex flex-col md:max-w-md md:h-auto md:inset-auto md:bottom-24 md:left-1/2 md:-translate-x-1/2 md:rounded-2xl">
+    <div id="activity-modal" class="panel-hidden fixed inset-0 h-[var(--app-viewport-height)] z-40 bg-glass-bg backdrop-blur-md shadow-2xl border-2 border-primary-border flex flex-col md:max-w-md md:h-auto md:inset-auto md:bottom-24 md:left-1/2 md:-translate-x-1/2 md:rounded-2xl">
         <header class="flex-shrink-0 p-4 border-b border-primary-border flex items-center justify-between">
             <h2 class="text-xl font-display font-bold text-war-gold">Resumen de Actividad</h2>
             <button id="activity-modal-close-btn" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar">×</button>

@@ -11,7 +11,7 @@ import { compareMovementsByArrival } from './movementOrdering.js';
 const HOSTILE_MISSION_TYPES = new Set(['attack', 'raid', 'espionage']);
 const FARM_LIST_MISSION_TYPES = new Set(['raid', 'attack', 'espionage']);
 const RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
-const OASIS_CAPTURE_RANGE = 3;
+const OASIS_CAPTURE_RANGE = 7;
 let movementIdSequence = 0;
 
 function createMovementId(prefix, startTime, villageId) {
@@ -593,6 +593,36 @@ export function handleNpcResourceExchangeCommand({ payload, gameState }) {
         resources: normalizedResources,
         nextAvailableAt: village.npcExchange.nextAvailableAt,
     };
+}
+
+export function handleReleaseOasisCommand({ payload, gameState }) {
+    const villageId = payload?.villageId;
+    const x = Number(payload?.x);
+    const y = Number(payload?.y);
+    if (!villageId || !Number.isFinite(x) || !Number.isFinite(y)) {
+        return { success: false, reason: 'INVALID_PAYLOAD' };
+    }
+
+    const village = gameState.villages.find(candidate => candidate.id === villageId);
+    if (!village) return { success: false, reason: 'VILLAGE_NOT_FOUND' };
+
+    const oasis = (village.oases || []).find(item => item.x === x && item.y === y);
+    if (!oasis) return { success: false, reason: 'OASIS_NOT_OWNED_BY_VILLAGE' };
+
+    const tile = gameState.mapData.find(candidate => candidate.x === x && candidate.y === y && candidate.type === 'oasis');
+    if (!tile) return { success: false, reason: 'OASIS_TILE_NOT_FOUND' };
+
+    village.oases = (village.oases || []).filter(item => item.x !== x || item.y !== y);
+    if (tile.villageId === villageId) {
+        tile.villageId = null;
+        tile.ownerId = null;
+    }
+    if (tile.state?.villageId === villageId) {
+        tile.state.villageId = null;
+        tile.state.ownerId = null;
+    }
+
+    return { success: true, villageId, oasis: { x, y, oasisType: oasis.oasisType || tile.oasisType } };
 }
 
 export function handleFarmListCreateCommand({ payload, gameState }) {

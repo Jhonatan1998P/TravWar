@@ -99,6 +99,7 @@
     transform: scale(0.95) translateY(20px);
     pointer-events: none;
     transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+    will-change: opacity, transform;
   }
 
   .panel-visible {
@@ -106,6 +107,8 @@
     transform: scale(1) translateY(0);
     pointer-events: auto;
     transition: opacity 0.2s ease-out, transform 0.2s ease-out;
+    contain: layout paint;
+    will-change: opacity, transform;
   }
 
   .report-item.unread {
@@ -216,6 +219,8 @@
 @layer base {
   html {
     font-size: 14px;
+    min-height: var(--app-viewport-height);
+    overscroll-behavior: none;
   }
 
   @screen md {
@@ -238,6 +243,10 @@
     background-repeat: no-repeat;
     background-attachment: fixed;
     background-position: center center;
+    min-height: var(--app-viewport-height);
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
   }
 
   body::before {
@@ -257,6 +266,7 @@
 @layer base {
   :root {
     color-scheme: dark;
+    --app-viewport-height: 100svh;
   }
 
   h1,
@@ -301,6 +311,7 @@
   select,
   textarea {
     @apply min-h-11 bg-btn-secondary-bg border-primary-border text-war-mist rounded-xl;
+    font-size: 16px;
   }
 
   input::placeholder,
@@ -659,4 +670,50 @@
   backdrop-filter: blur(22px) saturate(1.22);
   -webkit-backdrop-filter: blur(22px) saturate(1.22);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.30), inset 0 1px rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 767px), (pointer: coarse) {
+  body {
+    background-attachment: scroll;
+  }
+
+  #village-container,
+  #activity-modal,
+  #confirm-dialog > div,
+  #building-info-panel > div,
+  #tile-info-panel > div,
+  #attack-panel > div,
+  #trade-panel > div,
+  .resource-bar-item,
+  .report-item,
+  .resource-details,
+  .icon-medallion,
+  .nav-button.active {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  #building-info-panel,
+  #tile-info-panel,
+  #attack-panel,
+  #trade-panel,
+  #battle-report-panel,
+  #farm-view-editor-panel,
+  #unit-info-modal,
+  #confirm-dialog,
+  #activity-modal {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  #building-info-panel [class*='bg-gray-'],
+  #tile-info-panel [class*='bg-gray-'],
+  #attack-panel [class*='bg-gray-'],
+  #trade-panel [class*='bg-gray-'],
+  #activity-modal [class*='bg-gray-'],
+  #farm-lists-view-root [class*='bg-gray-'],
+  #reports-container [class*='bg-gray-'] {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
 }

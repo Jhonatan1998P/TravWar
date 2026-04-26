@@ -5,6 +5,8 @@ import toastUI from './ToastUI.js';
 import { markModalOpened, shouldIgnoreModalAction } from './modalInteractionGuard.js';
 import { unitSpriteManager } from './UnitSpriteManager.js';
 
+const OASIS_CAPTURE_RANGE = 7;
+
 class AttackPanelUI {
     #panelElement;
     #mainContainer;
@@ -24,13 +26,13 @@ class AttackPanelUI {
 
     _createPanelHTML() {
         const panelHTML = `
-            <div id="attack-panel" class="fixed inset-0 h-[100dvh] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
-                <div class="bg-glass-bg border border-primary-border rounded-[2rem] shadow-2xl w-full max-w-lg my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(100dvh-1rem)] backdrop-blur-2xl">
+            <div id="attack-panel" class="fixed inset-0 h-[var(--app-viewport-height)] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
+                <div class="bg-glass-bg border border-primary-border rounded-[2rem] shadow-2xl w-full max-w-lg my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(var(--app-viewport-height)-1rem)] backdrop-blur-2xl">
                     <header class="flex justify-between items-center p-4 border-b border-primary-border">
                         <h2 id="attack-panel-title" class="text-xl font-display font-bold text-war-gold">Enviar Tropas</h2>
                         <button data-action="close" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar">×</button>
                     </header>
-                    <main id="attack-panel-main" class="p-4 overflow-y-auto min-h-0 max-h-[calc(100dvh-12rem)]">
+                    <main id="attack-panel-main" class="p-4 overflow-y-auto min-h-0 max-h-[calc(var(--app-viewport-height)-12rem)]">
                         <div id="attack-panel-info" class="grid grid-cols-2 gap-4 mb-4 text-sm"></div>
                         <div id="attack-panel-troops" class="space-y-2 mb-4"></div>
                         <div id="attack-panel-actions" class="flex justify-end gap-2 mb-4">
@@ -131,8 +133,8 @@ class AttackPanelUI {
 
     _isTargetOasisInCaptureRange() {
         if (!this.#activeVillage || !this.#targetTile) return false;
-        return Math.abs(this.#targetTile.x - this.#activeVillage.coords.x) <= 3
-            && Math.abs(this.#targetTile.y - this.#activeVillage.coords.y) <= 3;
+        return Math.abs(this.#targetTile.x - this.#activeVillage.coords.x) <= OASIS_CAPTURE_RANGE
+            && Math.abs(this.#targetTile.y - this.#activeVillage.coords.y) <= OASIS_CAPTURE_RANGE;
     }
 
     _getPendingOasisCaptures() {
@@ -254,9 +256,9 @@ class AttackPanelUI {
         const isOwnOasis = targetData.villageId === this.#activeVillage.id;
         const canConquer = slots > usedSlots && inRange && !isOwnOasis;
 
-        let hint = `Slots de oasis: ${usedSlots}/${slots}. Requiere Mansión del Héroe nivel 10, 15 o 20 y rango 7x7.`;
+        let hint = `Slots de oasis: ${usedSlots}/${slots}. Requiere Mansión del Héroe nivel 10, 15 o 20 y rango de ${OASIS_CAPTURE_RANGE} casillas.`;
         if (isOwnOasis) hint = 'Este oasis ya pertenece a esta aldea.';
-        else if (!inRange) hint = 'Este oasis está fuera del rango 7x7 de la aldea activa.';
+        else if (!inRange) hint = `Este oasis está fuera del rango de ${OASIS_CAPTURE_RANGE} casillas de la aldea activa.`;
         else if (slots <= usedSlots) hint = 'No tienes slots de oasis disponibles en esta aldea.';
 
         container.innerHTML = `

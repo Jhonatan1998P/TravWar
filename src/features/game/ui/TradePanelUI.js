@@ -36,13 +36,13 @@ class TradePanelUI {
 
     _createPanelHTML() {
         const panelHTML = `
-            <div id="trade-panel" class="fixed inset-0 h-[100dvh] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
-                <div class="bg-glass-bg border border-primary-border rounded-[2rem] shadow-2xl w-full max-w-lg my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(100dvh-1rem)] backdrop-blur-2xl">
+            <div id="trade-panel" class="fixed inset-0 h-[var(--app-viewport-height)] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
+                <div class="bg-glass-bg border border-primary-border rounded-[2rem] shadow-2xl w-full max-w-lg my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(var(--app-viewport-height)-1rem)] backdrop-blur-2xl">
                     <header class="flex justify-between items-center p-4 border-b border-primary-border">
                         <h2 id="trade-panel-title" class="text-xl font-display font-bold text-war-gold">Enviar Recursos</h2>
                         <button data-action="close" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar">×</button>
                     </header>
-                    <main id="trade-panel-main" class="p-4 overflow-y-auto min-h-0 max-h-[calc(100dvh-12rem)]">
+                    <main id="trade-panel-main" class="p-4 overflow-y-auto min-h-0 max-h-[calc(var(--app-viewport-height)-12rem)]">
                         <div id="trade-panel-info" class="grid grid-cols-2 gap-4 mb-4 text-sm"></div>
                         <div id="trade-panel-merchants" class="p-3 bg-gray-900/50 rounded-lg flex justify-between items-center mb-4"></div>
                         <div id="trade-panel-inputs" class="space-y-2"></div>

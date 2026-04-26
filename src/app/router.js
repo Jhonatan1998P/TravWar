@@ -26,6 +26,7 @@ class Router {
     #resourceBar; 
     #villageContainer; 
     #navigationRequestId = 0;
+    #prefetchedRoutes = new Set();
 
     constructor() {
         this.#appRoot = document.getElementById('app-root');
@@ -93,6 +94,28 @@ class Router {
         
         this.#isInitialized = true;
         store.setAppReady(true);
+        this.#prefetchRoutesWhenIdle();
+    }
+
+    #prefetchRoutesWhenIdle() {
+        const run = () => {
+            Object.entries(this.#routes).forEach(([path, loadRoute]) => {
+                if (path === '/' || this.#prefetchedRoutes.has(path)) return;
+                this.#prefetchedRoutes.add(path);
+                loadRoute().catch(error => {
+                    this.#prefetchedRoutes.delete(path);
+                    console.warn(`[Router] No se pudo precargar ${path}.`, error);
+                });
+            });
+            void ensureTooltipUILoaded();
+        };
+
+        if ('requestIdleCallback' in window) {
+            window.requestIdleCallback(run, { timeout: 2500 });
+            return;
+        }
+
+        window.setTimeout(run, 600);
     }
 
     navigate(path, replace = false) {

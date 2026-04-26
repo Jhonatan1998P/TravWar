@@ -19,6 +19,7 @@ import {
     handleFarmListSendEntriesCommand as handleFarmListSendEntriesCommandStep,
     handleFarmListUpdateEntryTroopsCommand as handleFarmListUpdateEntryTroopsCommandStep,
     handleNpcResourceExchangeCommand as handleNpcResourceExchangeCommandStep,
+    handleReleaseOasisCommand as handleReleaseOasisCommandStep,
     handleSendMerchantsCommand as handleSendMerchantsCommandStep,
     handleSendMovementCommand as handleSendMovementCommandStep,
 } from './worker/commands.js';
@@ -354,6 +355,11 @@ function processMovements(currentTime) {
             tradeReturn: handleTradeReturnArrival,
         },
     });
+    recalculateAllVillageEconomy();
+}
+
+function recalculateAllVillageEconomy() {
+    villageProcessors.forEach(processor => processor.recalculateEconomy?.());
 }
 
 function handleSettleArrival(movement) {
@@ -555,6 +561,13 @@ function handleNpcResourceExchangeCommand(payload) {
     });
 }
 
+function handleReleaseOasisCommand(payload) {
+    return handleReleaseOasisCommandStep({
+        payload,
+        gameState,
+    });
+}
+
 function handleFarmListCreateCommand(payload) {
     return handleFarmListCreateCommandStep({
         payload,
@@ -652,6 +665,17 @@ function postNpcResourceExchangeResult(request, result) {
         payload: {
             request,
             result: result || { success: false, reason: 'UNKNOWN_NPC_EXCHANGE_RESULT' },
+            at: Date.now(),
+        },
+    });
+}
+
+function postReleaseOasisResult(request, result) {
+    self.postMessage({
+        type: 'release_oasis:result',
+        payload: {
+            request,
+            result: result || { success: false, reason: 'UNKNOWN_RELEASE_OASIS_RESULT' },
             at: Date.now(),
         },
     });
@@ -842,6 +866,10 @@ self.onmessage = function(event) {
             break;
         case 'npc_resource_exchange':
             postNpcResourceExchangeResult(payload, handleNpcResourceExchangeCommand(payload));
+            break;
+        case 'release_oasis':
+            postReleaseOasisResult(payload, handleReleaseOasisCommand(payload));
+            recalculateAllVillageEconomy();
             break;
         case 'farm_list_create':
             postFarmListCommandResult('farm_list_create', payload, handleFarmListCreateCommand(payload));

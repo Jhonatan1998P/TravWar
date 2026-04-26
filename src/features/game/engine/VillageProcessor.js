@@ -153,6 +153,12 @@ export class VillageProcessor {
         return this.#village.id;
     }
 
+    recalculateEconomy() {
+        this.#calculateProduction();
+        this.#calculateStorage();
+        this.#calculatePopulation();
+    }
+
     update(currentTime, lastTick) {
         this.#notifications = [];
         const elapsedSeconds = (currentTime - lastTick) / 1000;
