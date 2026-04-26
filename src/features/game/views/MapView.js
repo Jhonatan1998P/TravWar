@@ -86,17 +86,17 @@ class MapView {
                 <canvas id="details-canvas" class="absolute top-0 left-0"></canvas>
             </div>
             
-            <div id="map-controls-cluster" class="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center justify-center gap-4 z-30">
+            <div id="map-controls-cluster" class="absolute bottom-5 left-1/2 -translate-x-1/2 flex items-center justify-center gap-3 z-30 rounded-2xl border border-primary-border bg-glass-bg/90 px-3 py-2 shadow-2xl backdrop-blur-md">
                 
-                <img id="center-map-btn" src="/icons/compass.png" alt="Centrar Mapa" class="h-8 w-8 cursor-pointer hover:opacity-80 transition-opacity">
+                <img id="center-map-btn" src="/icons/compass.png" alt="Centrar Mapa" class="h-9 w-9 cursor-pointer rounded-xl border border-primary-border bg-btn-secondary-bg p-1.5 hover:opacity-80 transition-opacity">
 
-                <div id="coords-display" class="bg-gray-900/80 backdrop-blur-sm text-white px-3 py-1.5 h-8 flex items-center rounded-full font-mono text-sm pointer-events-none">
+                <div id="coords-display" class="bg-primary-bg/80 backdrop-blur-sm text-war-gold px-3 py-1.5 h-9 flex items-center rounded-full font-mono text-sm pointer-events-none border border-primary-border">
                     (0|0)
                 </div>
 
-                <div class="bg-gray-900/80 backdrop-blur-sm p-2 rounded-full flex items-center gap-2 h-8">
-                    <label for="toggle-wasteland-icon" class="text-xs text-gray-300 cursor-pointer select-none">Iconos</label>
-                    <input type="checkbox" id="toggle-wasteland-icon" class="h-4 w-4 rounded-sm bg-gray-600 border-gray-500 text-blue-500 focus:ring-blue-500/50 cursor-pointer" checked>
+                <div class="bg-primary-bg/80 backdrop-blur-sm p-2 rounded-full flex items-center gap-2 h-9 border border-primary-border">
+                    <label for="toggle-wasteland-icon" class="text-xs text-stone-300 cursor-pointer select-none">Iconos</label>
+                    <input type="checkbox" id="toggle-wasteland-icon" class="h-4 w-4 rounded-sm bg-btn-secondary-bg border-primary-border text-war-gold focus:ring-war-gold/50 cursor-pointer" checked>
                 </div>
             </div>
         `;

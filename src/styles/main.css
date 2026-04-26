@@ -162,11 +162,68 @@
   }
 
   body {
-    background-image: url('/background/fondo.jpg');
+    background-color: #120d0a;
+    background-image:
+      radial-gradient(circle at 15% 10%, rgba(249, 115, 22, 0.22), transparent 26rem),
+      radial-gradient(circle at 88% 78%, rgba(153, 27, 27, 0.24), transparent 24rem),
+      linear-gradient(rgba(18, 13, 10, 0.45), rgba(18, 13, 10, 0.86)),
+      url('/background/fondo.jpg');
     background-size: cover;
     background-repeat: no-repeat;
     background-attachment: fixed;
     background-position: center center;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+    background-size: 34px 34px;
+    mask-image: radial-gradient(circle at center, black, transparent 78%);
+  }
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  h1,
+  h2,
+  h3,
+  legend {
+    @apply font-display tracking-wide;
+  }
+
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-war-gold/70 focus-visible:ring-offset-2 focus-visible:ring-offset-primary-bg;
+  }
+
+  button,
+  [role='button'],
+  a,
+  label[for] {
+    touch-action: manipulation;
+  }
+
+  input,
+  select,
+  textarea {
+    @apply min-h-11 bg-btn-secondary-bg border-primary-border text-war-mist rounded-xl;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    @apply text-stone-500;
   }
 }
 
@@ -267,4 +324,197 @@
   .input-field {
     @apply bg-gray-700 border-gray-600 rounded-md p-1 text-sm;
   }
+}
+
+@layer components {
+  .input-range::-webkit-slider-thumb {
+    @apply bg-war-gold border-2 border-orange-900 shadow-lg;
+  }
+
+  .archetype-btn {
+    @apply rounded-xl border border-primary-border bg-glass-bg focus:ring-war-gold/40;
+  }
+
+  .archetype-btn.active {
+    @apply ring-war-gold ring-offset-primary-bg;
+  }
+
+  .nav-button {
+    @apply min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl border border-transparent text-stone-300 transition-all duration-200 ease-out;
+  }
+
+  .nav-button:hover,
+  .nav-button:focus-visible {
+    @apply bg-btn-secondary-bg/80 text-war-gold border-primary-border;
+  }
+
+  .nav-button.active {
+    @apply bg-gradient-to-br from-war-gold to-war-ember text-primary-bg border-war-gold shadow-[0_0_18px_rgba(249,115,22,0.35)];
+  }
+
+  .pagination-button {
+    @apply rounded-xl border border-primary-border text-stone-300;
+  }
+
+  .pagination-button.active {
+    @apply bg-war-gold text-primary-bg;
+  }
+
+  .report-item.unread {
+    @apply border-war-gold;
+  }
+
+  .building-slot.slot-pressed .building-circle {
+    box-shadow: 0 0 18px rgba(249, 115, 22, 0.85), inset 0 0 9px rgba(255, 244, 214, 0.3);
+  }
+
+  .building-circle {
+    box-shadow: 0 0 10px rgba(245, 196, 81, 0.42), inset 0 0 7px rgba(255, 244, 214, 0.2);
+  }
+
+  .building-circle:hover {
+    box-shadow: 0 0 18px rgba(249, 115, 22, 0.72), inset 0 0 8px rgba(255, 244, 214, 0.3);
+  }
+
+  .building-level {
+    @apply bg-war-gold text-primary-bg border-war-mist;
+  }
+
+  .tab-button {
+    @apply min-h-11 rounded-xl text-stone-300 hover:bg-btn-secondary-bg/80 hover:text-war-gold;
+  }
+
+  .tab-button.active {
+    @apply bg-war-gold text-primary-bg shadow-[0_0_14px_rgba(245,196,81,0.25)];
+  }
+
+  .construction-progress-ring {
+    --construction-progress-color: #f5c451;
+  }
+
+  #map-viewport::after {
+    box-shadow: inset 0 0 140px 28px rgb(18 13 10 / 0.88), inset 0 0 36px rgb(245 196 81 / 0.12);
+  }
+
+  .h1-fluid {
+    @apply font-display text-war-mist tracking-wide;
+  }
+
+  #tooltip-element,
+  #building-tooltip {
+    @apply rounded-xl border border-primary-border bg-primary-bg/90 text-war-mist;
+  }
+
+  .condition-group {
+    @apply rounded-xl border-primary-border bg-primary-bg/35;
+  }
+
+  .condition-rule {
+    @apply rounded-xl bg-btn-secondary-bg/70;
+  }
+
+  .group-type-label {
+    @apply rounded-full border-primary-border bg-war-leather text-war-gold;
+  }
+
+  .btn-control {
+    @apply bg-orange-500/20 text-orange-200 hover:bg-orange-500/40;
+  }
+
+  .btn-add-group {
+    @apply bg-amber-500/20 text-amber-200 hover:bg-amber-500/40;
+  }
+
+  .btn-start {
+    @apply bg-btn-primary-bg text-war-mist hover:bg-btn-primary-hover;
+  }
+
+  .condition-root > .condition-rule {
+    @apply border-primary-border;
+  }
+
+  .input-field {
+    @apply rounded-xl border-primary-border bg-btn-secondary-bg p-2;
+  }
+
+  .panel-visible > div,
+  #confirm-dialog > div {
+    background-image: linear-gradient(145deg, rgba(63, 43, 31, 0.94), rgba(18, 13, 10, 0.94));
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), inset 0 1px rgba(255, 244, 214, 0.08);
+  }
+
+  #toast-container {
+    @apply fixed top-4 left-1/2 z-[70] flex w-[calc(100%-1rem)] max-w-md -translate-x-1/2 flex-col gap-2 pointer-events-none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+#building-info-panel [class*='bg-gray-'],
+#tile-info-panel [class*='bg-gray-'],
+#attack-panel [class*='bg-gray-'],
+#trade-panel [class*='bg-gray-'],
+#activity-modal [class*='bg-gray-'],
+#farm-lists-view-root [class*='bg-gray-'],
+#reports-container [class*='bg-gray-'] {
+  background-color: rgba(43, 27, 20, 0.72) !important;
+}
+
+#building-info-panel [class*='border-gray-'],
+#tile-info-panel [class*='border-gray-'],
+#attack-panel [class*='border-gray-'],
+#trade-panel [class*='border-gray-'],
+#activity-modal [class*='border-gray-'],
+#farm-lists-view-root [class*='border-gray-'],
+#reports-container [class*='border-gray-'] {
+  border-color: rgba(138, 90, 43, 0.75) !important;
+}
+
+#building-info-panel button,
+#tile-info-panel button,
+#attack-panel button,
+#trade-panel button,
+#activity-modal button,
+#farm-lists-view-root button {
+  min-height: 44px;
+  border-radius: 0.75rem;
+}
+
+#building-info-panel input,
+#tile-info-panel input,
+#attack-panel input,
+#trade-panel input,
+#farm-lists-view-root input,
+#farm-lists-view-root select,
+#farm-lists-view-root textarea {
+  min-height: 44px;
+  border-color: rgba(138, 90, 43, 0.85) !important;
+  background-color: rgba(18, 13, 10, 0.82) !important;
+  color: #f8e7c5 !important;
+}
+
+#building-info-panel h2,
+#tile-info-panel h2,
+#attack-panel h2,
+#trade-panel h2,
+#activity-modal h2,
+#farm-lists-view-root h1,
+#farm-lists-view-root h2,
+#farm-lists-view-root h3 {
+  color: #f5c451 !important;
+}
+
+.troop-row,
+.resource-bar-item,
+.report-item {
+  box-shadow: inset 0 1px rgba(255, 244, 214, 0.06), 0 10px 24px rgba(0, 0, 0, 0.18);
 }

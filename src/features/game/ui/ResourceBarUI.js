@@ -28,7 +28,7 @@ function initialize(container, resources) {
         if (!uiMap) continue;
 
         const wrapper = document.createElement('div');
-        wrapper.className = 'relative p-1.5 bg-glass-bg rounded-lg flex flex-col gap-1 resource-bar-item cursor-pointer border border-primary-border';
+        wrapper.className = 'relative min-h-12 p-1.5 bg-glass-bg rounded-xl flex flex-col gap-1 resource-bar-item cursor-pointer border border-primary-border shadow-inner hover:border-war-gold transition-colors';
         
         const colorClass = `bg-resource-${uiMap.colorKey}`;
         
@@ -41,7 +41,7 @@ function initialize(container, resources) {
                 <div class="${colorClass} h-1.5 rounded-full" data-prop="progress"></div>
             </div>
             
-            <div class="resource-details hidden absolute top-full left-0 mt-1 p-2 bg-glass-bg rounded-lg shadow-lg w-32 z-20 border border-primary-border">
+            <div class="resource-details hidden absolute top-full left-0 mt-1 p-2 bg-glass-bg rounded-xl shadow-2xl w-32 z-20 border border-primary-border backdrop-blur-md">
                  <div class="flex justify-between items-center text-gray-400 font-mono text-xs">
                     <span>Prod:</span>
                     <span class="font-semibold text-white" data-prop="production"></span>

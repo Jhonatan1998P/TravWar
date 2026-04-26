@@ -2,29 +2,29 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Project Genesis</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Genesis | Guerra de Tribus</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
-<body class="bg-primary-bg text-gray-200 flex items-center justify-center min-h-[100dvh] font-sans">
+<body class="bg-primary-bg text-stone-100 flex items-center justify-center min-h-[100dvh] font-sans antialiased">
 
-    <div id="village-container" class="w-full max-w-md h-[100dvh] bg-glass-bg rounded-none md:rounded-3xl shadow-2xl border-2 border-primary-border flex flex-col">
+    <div id="village-container" class="w-full max-w-md h-[100dvh] bg-glass-bg rounded-none md:rounded-3xl shadow-2xl border-2 border-primary-border flex flex-col overflow-hidden">
         
         <header id="app-header" class="relative z-30 p-3 flex-shrink-0 flex justify-between items-center bg-glass-light-bg backdrop-blur-md border-b border-contrast-border md:rounded-t-2xl shadow-inner">
-            <div class="w-10 h-10 rounded-full bg-indigo-600 flex items-center justify-center cursor-pointer ring-2 ring-indigo-400">
-                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 1.253v2.404c0 .351.286.635.636.635h6.228a.636.636 0 00.636-.635V1.253c-2.454.51-4.66 1.487-6.5 2.848-1.84-1.36-4.046-2.338-6.5-2.848z" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 22.747v-2.404c0-.351-.286-.635-.636-.635H5.136a.636.636 0 00-.636.635v2.404c2.454-.51 4.66 1.487 6.5-2.848 1.84 1.361 4.046 2.338 6.5 2.848z" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 3.656C7.583 3.656 4.146 7.093 4.146 11.51c0 4.418 3.437 7.854 7.854 7.854s7.854-3.436 7.854-7.854C19.854 7.093 16.417 3.656 12 3.656z" /></svg>
+            <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-war-blood via-btn-primary-bg to-war-gold flex items-center justify-center cursor-pointer ring-2 ring-war-gold/60 shadow-[0_0_24px_rgba(249,115,22,0.28)]">
+                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-war-mist" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 1.253v2.404c0 .351.286.635.636.635h6.228a.636.636 0 00.636-.635V1.253c-2.454.51-4.66 1.487-6.5 2.848-1.84-1.36-4.046-2.338-6.5-2.848z" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 22.747v-2.404c0-.351-.286-.635-.636-.635H5.136a.636.636 0 00-.636.635v2.404c2.454-.51 4.66 1.487 6.5-2.848 1.84 1.361 4.046 2.338 6.5 2.848z" /><path stroke-linecap="round" stroke-linejoin="round" d="M12 3.656C7.583 3.656 4.146 7.093 4.146 11.51c0 4.418 3.437 7.854 7.854 7.854s7.854-3.436 7.854-7.854C19.854 7.093 16.417 3.656 12 3.656z" /></svg>
             </div>
             <div id="village-selector" class="relative">
-                <div class="flex items-center gap-2 font-semibold text-lg text-white rounded-lg px-3 py-1 bg-glass-bg border border-primary-border cursor-pointer hover:bg-glass-bg/80 transition-colors">
+                <div class="flex min-h-11 items-center gap-2 font-display font-bold text-base text-war-mist rounded-xl px-3 py-2 bg-glass-bg border border-primary-border cursor-pointer hover:bg-btn-secondary-hover transition-colors shadow-inner">
                     <span id="village-name-display">Cargando...</span>
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-war-gold" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
                 </div>
-                <ul id="village-dropdown" class="hidden absolute top-full mt-2 w-64 bg-glass-bg border border-primary-border rounded-lg shadow-lg z-50 py-1">
+                <ul id="village-dropdown" class="hidden absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 max-w-[88vw] bg-glass-bg border border-primary-border rounded-xl shadow-2xl z-50 py-1 backdrop-blur-md">
                 </ul>
             </div>
-            <div class="w-10 h-10 rounded-full bg-gray-700 ring-2 ring-gray-600 flex items-center justify-center font-bold text-xl text-white cursor-pointer">
+            <div class="w-11 h-11 rounded-2xl bg-war-leather ring-2 ring-primary-border flex items-center justify-center font-bold text-xl text-war-mist cursor-pointer shadow-inner">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-6-3a2 2 0 11-4 0 2 2 0 014 0zm-2 4a5 5 0 00-4.546 2.916A5.986 5.986 0 0010 16a5.986 5.986 0 004.546-2.084A5 5 0 0010 11z" clip-rule="evenodd" /></svg>
             </div>
         </header>
@@ -37,23 +37,23 @@
 
         <footer id="app-footer" class="p-2 flex-shrink-0 flex flex-col gap-2 bg-glass-light-bg backdrop-blur-md border-t border-contrast-border md:rounded-b-2xl shadow-inner">
              <div class="flex justify-between items-center px-2">
-                <div class="flex flex-col items-center p-1 rounded-lg bg-glass-bg border border-primary-border w-20 cursor-pointer">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <div class="flex min-h-12 flex-col items-center p-1 rounded-xl bg-glass-bg border border-primary-border w-24 cursor-pointer shadow-inner">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-war-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.653-.125-1.273-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.653.125-1.273.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
                     <span id="population-display" class="text-sm font-mono">0</span>
                 </div>
-                <div id="activity-overview-btn" class="flex flex-col items-center p-1 rounded-lg bg-glass-bg border border-primary-border w-20 cursor-pointer">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-green-400"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
+                <div id="activity-overview-btn" class="flex min-h-12 flex-col items-center p-1 rounded-xl bg-glass-bg border border-primary-border w-24 cursor-pointer shadow-inner hover:border-war-gold transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-6 h-6 text-orange-300"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 10h16M4 14h16M4 18h16" /></svg>
                     <span class="text-sm font-bold">Actividad</span>
                 </div>
             </div>
-             <nav id="main-nav" class="flex justify-around items-center bg-glass-bg rounded-xl p-1 border border-primary-border">
-                <button id="download-ai-log-btn" class="nav-button p-2 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></button>
-                <a href="/reports" data-route="/reports" class="nav-button p-2 rounded-lg relative"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C6.095 4.01 5.25 4.973 5.25 6.108V18.75c0 1.243.801 2.25 1.75 2.25H15a2.25 2.25 0 002.25-2.25v-2.392c-.816-.388-1.58-1.025-2.25-1.845z" /></svg><div id="unread-reports-badge" class="hidden absolute top-0 right-0 w-4 h-4 rounded-full bg-red-500 text-white text-xs flex items-center justify-center ring-2 ring-gray-800"></div></a>
-                <a href="/village" data-route="/village" class="nav-button p-2 rounded-full"><svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 018.25 20.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6A2.25 2.25 0 0115.75 3.75h2.25A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25A2.25 2.25 0 0113.5 8.25V6zM13.5 15.75A2.25 2.25 0 0115.75 13.5h2.25a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg></a>
-                <a href="/village-center" data-route="/village-center" class="nav-button p-2 rounded-full"><svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h7.5" /></svg></a>
-                <a href="/map" data-route="/map" class="nav-button p-2 rounded-lg"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.37-1.716-.995l-4.124 2.062a2.25 2.25 0 00-1.716.995v11.592c0 .836.88 1.37 1.716.995l4.124-2.062a2.25 2.25 0 001.716-.995V8.25l-4.875 2.437a2.25 2.25 0 01-1.716-.995V6.75c0-.836-.88-1.37-1.716-.995L5.64 7.73a2.25 2.25 0 00-1.716.995v11.592c0 .836.88 1.37 1.716.995l4.124-2.062a2.25 2.25 0 001.716-.995V9.75c0-.836-.88-1.37-1.716-.995L10.5 6.27a2.25 2.25 0 00-1.716-.995L5.64 7.73z" /></svg></a>
+             <nav id="main-nav" class="flex justify-around items-center bg-glass-bg rounded-2xl p-1.5 border border-primary-border shadow-inner">
+                <button id="download-ai-log-btn" class="nav-button" aria-label="Pantalla completa"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" /></svg></button>
+                <a href="/reports" data-route="/reports" class="nav-button relative" aria-label="Informes"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C6.095 4.01 5.25 4.973 5.25 6.108V18.75c0 1.243.801 2.25 1.75 2.25H15a2.25 2.25 0 002.25-2.25v-2.392c-.816-.388-1.58-1.025-2.25-1.845z" /></svg><div id="unread-reports-badge" class="hidden absolute top-0 right-0 w-4 h-4 rounded-full bg-war-blood text-white text-xs flex items-center justify-center ring-2 ring-war-ash"></div></a>
+                <a href="/village" data-route="/village" class="nav-button" aria-label="Campos"><svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 8.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 018.25 20.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6A2.25 2.25 0 0115.75 3.75h2.25A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25A2.25 2.25 0 0113.5 8.25V6zM13.5 15.75A2.25 2.25 0 0115.75 13.5h2.25a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" /></svg></a>
+                <a href="/village-center" data-route="/village-center" class="nav-button" aria-label="Aldea"><svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h7.5" /></svg></a>
+                <a href="/map" data-route="/map" class="nav-button" aria-label="Mapa"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498l4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.37-1.716-.995l-4.124 2.062a2.25 2.25 0 00-1.716.995v11.592c0 .836.88 1.37 1.716.995l4.124-2.062a2.25 2.25 0 001.716-.995V8.25l-4.875 2.437a2.25 2.25 0 01-1.716-.995V6.75c0-.836-.88-1.37-1.716-.995L5.64 7.73a2.25 2.25 0 00-1.716.995v11.592c0 .836.88 1.37 1.716.995l4.124-2.062a2.25 2.25 0 001.716-.995V9.75c0-.836-.88-1.37-1.716-.995L10.5 6.27a2.25 2.25 0 00-1.716-.995L5.64 7.73z" /></svg></a>
             </nav>
         </footer>
         
@@ -61,21 +61,21 @@
 
     </div>
 
-    <div id="confirm-dialog" class="hidden fixed inset-0 h-[100dvh] bg-primary-bg/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50">
-        <div class="bg-glass-bg border-2 border-primary-border rounded-lg shadow-xl p-6 w-full max-w-sm text-center my-2 sm:my-4">
-            <h3 class="text-lg font-bold text-yellow-300">Sobrescribir Partida</h3>
+    <div id="confirm-dialog" class="hidden fixed inset-0 h-[100dvh] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50">
+        <div class="bg-glass-bg border-2 border-primary-border rounded-2xl shadow-2xl p-6 w-full max-w-sm text-center my-2 sm:my-4">
+            <h3 class="text-xl font-display font-bold text-war-gold">Sobrescribir Partida</h3>
             <p class="text-gray-300 my-4">Ya existe una partida guardada. ¿Estás seguro de que quieres borrarla y empezar una nueva? Esta acción no se puede deshacer.</p>
             <div class="flex justify-center gap-4">
-                <button id="confirm-cancel" class="px-6 py-2 rounded-md bg-btn-secondary-bg hover:bg-btn-secondary-hover text-white font-semibold border border-primary-border">Cancelar</button>
-                <button id="confirm-overwrite" class="px-6 py-2 rounded-md bg-red-600 hover:bg-red-500 text-white font-semibold border border-primary-border">Sí, empezar de cero</button>
+                <button id="confirm-cancel" class="px-6 py-3 rounded-xl bg-btn-secondary-bg hover:bg-btn-secondary-hover text-white font-semibold border border-primary-border">Cancelar</button>
+                <button id="confirm-overwrite" class="px-6 py-3 rounded-xl bg-war-blood hover:bg-red-700 text-white font-semibold border border-red-400/50">Sí, empezar de cero</button>
             </div>
         </div>
     </div>
     
     <div id="activity-modal" class="panel-hidden fixed inset-0 h-[100dvh] z-40 bg-glass-bg backdrop-blur-md shadow-2xl border-2 border-primary-border flex flex-col md:max-w-md md:h-auto md:inset-auto md:bottom-24 md:left-1/2 md:-translate-x-1/2 md:rounded-2xl">
         <header class="flex-shrink-0 p-4 border-b border-primary-border flex items-center justify-between">
-            <h2 class="text-xl font-bold text-white">Resumen de Actividad</h2>
-            <button id="activity-modal-close-btn" class="text-gray-400 text-3xl leading-none hover:text-white">×</button>
+            <h2 class="text-xl font-display font-bold text-war-gold">Resumen de Actividad</h2>
+            <button id="activity-modal-close-btn" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar">×</button>
         </header>
         
         <nav class="flex-shrink-0 p-2 border-b border-primary-border/50 flex gap-1 overflow-x-auto whitespace-nowrap">
@@ -87,16 +87,16 @@
 
         <main class="flex-grow overflow-y-auto p-4">
             <div id="tab-panel-activity" class="tab-panel">
-                <h3 class="text-lg font-semibold text-yellow-400 mb-3">Construcción</h3>
+                <h3 class="text-lg font-display font-semibold text-war-gold mb-3">Construcción</h3>
                 <div id="construction-queue-container"></div>
 
                 <div id="research-queue-wrapper">
-                    <h3 class="text-lg font-semibold text-yellow-400 mt-4 mb-3">Investigación</h3>
+                    <h3 class="text-lg font-display font-semibold text-war-gold mt-4 mb-3">Investigación</h3>
                     <div id="research-queue-container"></div>
                 </div>
 
                 <div id="smithy-queue-wrapper">
-                    <h3 class="text-lg font-semibold text-yellow-400 mt-4 mb-3">Mejoras de Herrería</h3>
+                    <h3 class="text-lg font-display font-semibold text-war-gold mt-4 mb-3">Mejoras de Herrería</h3>
                     <div id="smithy-queue-container"></div>
                 </div>
             </div>

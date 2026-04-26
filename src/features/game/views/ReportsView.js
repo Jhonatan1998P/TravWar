@@ -30,7 +30,11 @@ class ReportsView {
 
     get html() {
         return `
-            <main class="flex-grow p-2 flex flex-col overflow-y-auto">
+            <main class="flex-grow p-3 flex flex-col overflow-y-auto bg-gradient-to-b from-war-leather/30 to-transparent">
+                <header class="mb-3 rounded-2xl border border-primary-border bg-glass-light-bg p-4 shadow-inner">
+                    <p class="text-xs uppercase tracking-[0.28em] text-war-gold/80">Consejo de guerra</p>
+                    <h1 class="mt-1 text-2xl font-display font-bold text-war-mist">Informes</h1>
+                </header>
                 <div id="reports-container" class="flex-grow">
                 </div>
                 <div id="reports-pagination-container" class="flex-shrink-0 p-2 flex justify-center items-center gap-2">

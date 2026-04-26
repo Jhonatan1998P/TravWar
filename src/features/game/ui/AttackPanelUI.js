@@ -24,27 +24,27 @@ class AttackPanelUI {
 
     _createPanelHTML() {
         const panelHTML = `
-            <div id="attack-panel" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
-                <div class="bg-gray-800 border-2 border-gray-700/50 rounded-lg shadow-xl w-full max-w-lg my-2 sm:my-4 text-white flex flex-col max-h-[calc(100dvh-1rem)]">
-                    <header class="flex justify-between items-center p-4 border-b border-gray-700">
-                        <h2 id="attack-panel-title" class="text-xl font-bold text-yellow-300">Enviar Tropas</h2>
-                        <button data-action="close" class="text-gray-400 text-3xl leading-none hover:text-white">×</button>
+            <div id="attack-panel" class="fixed inset-0 h-[100dvh] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
+                <div class="bg-glass-bg border-2 border-primary-border rounded-2xl shadow-2xl w-full max-w-lg my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(100dvh-1rem)]">
+                    <header class="flex justify-between items-center p-4 border-b border-primary-border">
+                        <h2 id="attack-panel-title" class="text-xl font-display font-bold text-war-gold">Enviar Tropas</h2>
+                        <button data-action="close" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar">×</button>
                     </header>
                     <main id="attack-panel-main" class="p-4 overflow-y-auto min-h-0 max-h-[calc(100dvh-12rem)]">
                         <div id="attack-panel-info" class="grid grid-cols-2 gap-4 mb-4 text-sm"></div>
                         <div id="attack-panel-troops" class="space-y-2 mb-4"></div>
                         <div id="attack-panel-actions" class="flex justify-end gap-2 mb-4">
-                            <button data-action="reset" class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded-md">Reiniciar</button>
-                            <button data-action="fill-all" class="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 rounded-md">Todas</button>
+                            <button data-action="reset" class="min-h-11 px-3 py-1 text-xs bg-btn-secondary-bg hover:bg-btn-secondary-hover rounded-xl border border-primary-border">Reiniciar</button>
+                            <button data-action="fill-all" class="min-h-11 px-3 py-1 text-xs bg-btn-primary-bg hover:bg-btn-primary-hover rounded-xl border border-primary-border">Todas</button>
                         </div>
-                        <fieldset id="attack-panel-missions" class="border-t border-gray-700 pt-4">
+                        <fieldset id="attack-panel-missions" class="border-t border-primary-border pt-4">
                             <legend class="text-base font-semibold text-gray-300 mb-2">Tipo de Misión</legend>
                             <div class="flex flex-wrap gap-2"></div>
                         </fieldset>
-                        <div id="attack-panel-catapult-targets" class="border-t border-gray-700 pt-4 mt-4 hidden"></div>
+                        <div id="attack-panel-catapult-targets" class="border-t border-primary-border pt-4 mt-4 hidden"></div>
                     </main>
-                    <footer class="p-4 border-t border-gray-700">
-                        <button data-action="send" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-4 rounded-lg transition duration-300 disabled:bg-gray-600 disabled:cursor-not-allowed">
+                    <footer class="p-4 border-t border-primary-border">
+                        <button data-action="send" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover text-war-mist font-bold py-3 px-4 rounded-xl transition duration-300 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed border border-primary-border">
                             Enviar
                         </button>
                     </footer>

@@ -49,7 +49,7 @@ class FarmListsView {
 
     get html() {
         return `
-            <main id="farm-lists-view-root" class="flex-grow overflow-y-auto p-3 md:p-4">
+            <main id="farm-lists-view-root" class="flex-grow overflow-y-auto p-3 md:p-4 bg-gradient-to-b from-war-leather/30 to-transparent">
             </main>
         `;
     }

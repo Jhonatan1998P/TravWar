@@ -70,7 +70,7 @@ class ReportListUI {
         this.#list.className = 'space-y-2';
 
         this.#emptyState = document.createElement('div');
-        this.#emptyState.className = 'text-center text-gray-500 text-sm py-8';
+        this.#emptyState.className = 'text-center text-stone-400 text-sm py-8 rounded-2xl border border-dashed border-primary-border bg-glass-bg/60';
         this.#emptyState.textContent = 'No tienes informes.';
 
         this.#container.append(this.#list, this.#emptyState);
@@ -247,7 +247,7 @@ class ReportListUI {
 
     #createReportNode() {
         const item = document.createElement('div');
-        item.className = 'report-item bg-gray-700/50 hover:bg-gray-700 rounded-lg shadow-md flex items-center gap-4 transition-colors cursor-pointer';
+        item.className = 'report-item bg-glass-bg hover:bg-btn-secondary-bg/80 rounded-2xl shadow-md flex items-center gap-4 transition-colors cursor-pointer border border-primary-border overflow-hidden';
 
         const icon = document.createElement('div');
         icon.className = 'pl-3';
@@ -264,7 +264,7 @@ class ReportListUI {
         content.append(title, date);
 
         const deleteButton = document.createElement('button');
-        deleteButton.className = 'flex-shrink-0 p-3 text-gray-500 hover:text-red-400 transition-colors';
+        deleteButton.className = 'flex-shrink-0 min-h-11 min-w-11 p-3 text-gray-500 hover:text-red-400 transition-colors';
         deleteButton.title = 'Borrar informe';
         deleteButton.dataset.action = 'delete-report';
         deleteButton.innerHTML = ICONS.delete;

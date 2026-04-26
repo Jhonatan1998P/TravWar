@@ -19,7 +19,7 @@ class ToastUI {
     }
 
     _setupContainer() {
-        this.#container.className = 'fixed bottom-20 left-4 z-[1] flex flex-col items-start gap-3';
+        this.#container.className = 'fixed bottom-24 left-4 z-[70] flex max-w-[calc(100vw-2rem)] flex-col items-start gap-3 pointer-events-none';
     }
     
     setPosition(newPosition) {
@@ -44,15 +44,15 @@ class ToastUI {
         
         toastElement.className = `
             flex items-center gap-3 w-auto max-w-xs
-            bg-gray-800/80 backdrop-blur-sm text-white 
-            p-3 rounded-lg shadow-lg border border-gray-700/50
+            bg-glass-bg backdrop-blur-md text-war-mist 
+            p-3 rounded-2xl shadow-2xl border border-primary-border
             transform transition-all duration-300 ease-out
             opacity-0 translate-y-10
         `;
         
         toastElement.innerHTML = `
             <div class="flex-shrink-0">${ICONS[type] || ICONS.info}</div>
-            <p class="text-sm font-semibold text-gray-200">${message}</p>
+            <p class="text-sm font-semibold text-stone-100">${message}</p>
         `;
 
         requestAnimationFrame(() => {

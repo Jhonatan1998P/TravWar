@@ -24,8 +24,8 @@ class VillageView {
 
     get html() {
         return `
-            <div class="absolute inset-x-0 top-0 flex items-center justify-center min-h-full py-4" id="mainViewContainer">
-                <div id="mainView" class="relative w-[380px] h-[380px]">
+            <div class="absolute inset-x-0 top-0 flex items-center justify-center min-h-full py-4 px-2" id="mainViewContainer">
+                <div id="mainView" class="relative w-[92vw] h-[92vw] max-w-[380px] max-h-[380px] rounded-full bg-[radial-gradient(circle,rgba(245,196,81,0.10),rgba(18,13,10,0.12)_58%,transparent_72%)] shadow-[inset_0_0_42px_rgba(245,196,81,0.08)]">
                 </div>
             </div>
         `;

@@ -121,15 +121,15 @@ class BuildingInfoUI {
 
     _createPanelHTML() {
         const panelHTML = `
-            <div id="building-info-panel" class="fixed inset-0 h-[100dvh] bg-primary-bg/60 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
-                <div class="bg-glass-bg border-2 border-primary-border rounded-lg shadow-xl w-full max-w-md my-2 sm:my-4 text-white flex flex-col max-h-[calc(100dvh-1rem)]">
+            <div id="building-info-panel" class="fixed inset-0 h-[100dvh] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
+                <div class="bg-glass-bg border-2 border-primary-border rounded-2xl shadow-2xl w-full max-w-md my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(100dvh-1rem)]">
                     <header id="panel-header" class="flex justify-between items-center p-4 border-b border-primary-border">
-                        <h2 id="panel-title" class="text-xl font-bold text-yellow-300"></h2>
-                        <button data-action="close" class="text-gray-400 text-3xl leading-none hover:text-white">×</button>
+                        <h2 id="panel-title" class="text-xl font-display font-bold text-war-gold"></h2>
+                        <button data-action="close" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar">×</button>
                     </header>
                     <main id="panel-main" class="flex flex-col p-4 overflow-y-auto min-h-0 max-h-[calc(100dvh-12rem)]"></main>
                     <footer id="panel-footer" class="p-4 border-t border-primary-border">
-                        <button id="upgrade-button" data-action="upgrade" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed border border-primary-border">
+                        <button id="upgrade-button" data-action="upgrade" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover text-war-mist font-bold py-3 px-4 rounded-xl transition duration-300 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed border border-primary-border">
                         </button>
                     </footer>
                 </div>

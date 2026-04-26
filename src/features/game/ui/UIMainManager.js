@@ -179,7 +179,7 @@ class UIMainManager {
             if (!DEV_MODE_AI_VIEW && village.ownerId !== 'player') return;
 
             const li = document.createElement('li');
-            li.className = `px-4 py-2 hover:bg-glass-bg/80 cursor-pointer z-500 text-sm flex justify-between items-center ${village.id === activeVillageId ? 'font-bold text-yellow-300' : 'text-white'}`;
+            li.className = `px-4 py-3 min-h-11 hover:bg-btn-secondary-bg/80 cursor-pointer z-500 text-sm flex justify-between items-center border-b border-primary-border/30 last:border-b-0 ${village.id === activeVillageId ? 'font-bold text-war-gold' : 'text-war-mist'}`;
             li.dataset.villageId = village.id;
 
             const nameSpan = document.createElement('span');
@@ -189,7 +189,7 @@ class UIMainManager {
             if (village.ownerId !== 'player') {
                 const aiLabel = document.createElement('span');
                 aiLabel.textContent = `[${village.ownerId}]`;
-                aiLabel.className = 'text-xs text-cyan-400 ml-2 z-500';
+                aiLabel.className = 'text-xs text-orange-300 ml-2 z-500';
                 li.appendChild(aiLabel);
             }
 
@@ -224,7 +224,7 @@ class UIMainManager {
         const input = document.createElement('input');
         input.type = 'text';
         input.value = village.name;
-        input.className = 'bg-btn-secondary-bg text-white w-full text-sm p-1 rounded border border-primary-border';
+        input.className = 'bg-btn-secondary-bg text-war-mist w-full text-sm p-2 rounded-xl border border-primary-border';
         input.onclick = (e) => e.stopPropagation();
 
         listItem.appendChild(input);
