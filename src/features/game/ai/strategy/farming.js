@@ -9,7 +9,7 @@ const DEFAULT_TRAVEL_COST_PER_MINUTE = 15;
 const OASIS_RAID_BATCH_MAX_TARGETS = 15;
 const OASIS_RAID_MISSION_TYPES = new Set(['attack', 'raid']);
 const OASIS_RETURN_SOURCE_TILE_TYPE = 'oasis';
-const OASIS_RAID_MIN_ATTACK_RATIO = 1.02;
+const OASIS_RAID_MIN_ATTACK_RATIO = 3;
 const OASIS_RAID_MIN_GROSS_RETURN_RATIO = 1.10;
 
 function getOasisRequiredGrossReward(lossValue) {
