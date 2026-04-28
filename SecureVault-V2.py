@@ -1980,7 +1980,8 @@ class Monitor:
         self.datos       = datos
         self.tunel       = tunel
         self.ultima_url  = ""
-        self._reintentos = 0
+        self._last_retry = 0
+        self._internet_previo = True
         self._fallback_enviado = False
         self._fallback_next = 0
         self._url_notificada = ""
@@ -2010,15 +2011,30 @@ class Monitor:
             time.sleep(90)
 
     def _ciclo(self):
-        if not hay_internet():
+        internet_ahora = hay_internet()
+
+        # Detectar restauración de internet tras corte
+        if internet_ahora and not self._internet_previo:
+            self.datos.log(
+                "TUNEL",
+                "Internet restaurado — reconectando túnel...")
+            self._url_notificada = ""
+            self._url_fallida    = ""
+            self._url_retry_next = 0
+            self._fallback_enviado = False
+            self._fallback_next    = 0
+            self._last_retry = 0
+        self._internet_previo = internet_ahora
+
+        if not internet_ahora:
             return
+
         url = self.tunel.url_publica \
               if self.tunel else ""
         cfg = self.datos.get_email()
         if url:
             if url != self.ultima_url:
-                self.ultima_url  = url
-                self._reintentos = 0
+                self.ultima_url = url
             if cfg.get("envio") and cfg.get("password"):
                 self._intentar_email_url(url, cfg)
             self._fallback_enviado = False
@@ -2033,22 +2049,19 @@ class Monitor:
                         self._fallback_enviado = True
                     else:
                         self._fallback_next = ahora + 300
-        # Reiniciar túnel caído (con límite)
+        # Reiniciar túnel caído — reintentos infinitos cada 3 minutos
         if (self.tunel
                 and not self.tunel.activo
                 and not self.tunel._iniciando
-                and hay_internet()):
-            if self._reintentos < 5:
-                self._reintentos += 1
+                and internet_ahora):
+            ahora = time.time()
+            if ahora - self._last_retry >= 180:
+                self._last_retry = ahora
                 self.datos.log(
                     "TUNEL",
-                    f"Reiniciando "
-                    f"({self._reintentos}/5)...")
+                    "Reconectando túnel (reintento automático)...")
                 self.tunel.reiniciar(
                     self._cb_url)
-            else:
-                time.sleep(300)
-                self._reintentos = 0
 
     def _cb_url(self, url):
         self.notificar_url_tunel(url)

@@ -1,4 +1,4 @@
-modules = ["nodejs-20"]
+modules = ["nodejs-20", "python-3.11"]
 run = "npm run dev"
 [nix]
 channel = "stable-25_05"
@@ -9,3 +9,26 @@ expertMode = true
 [[ports]]
 localPort = 5173
 externalPort = 80
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Verificar sintaxis"
+
+[[workflows.workflow]]
+name = "Verificar sintaxis"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python3 -c \"import ast, sys; ast.parse(open('SecureVault-V2.py').read()); print('SecureVault-V2.py — sin errores de sintaxis'); print('NOTA: Esta aplicación es exclusiva de Windows (tkinter + winreg + cloudflared). No puede ejecutarse en Linux/Replit.'); sys.exit(0)\""
+
+[workflows.workflow.metadata]
+outputType = "console"
