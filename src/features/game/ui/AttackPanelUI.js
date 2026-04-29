@@ -357,28 +357,55 @@ class AttackPanelUI {
         const resNames = { wood: 'Madera', stone: 'Barro', iron: 'Hierro', food: 'Cereal' };
         const resIcons = { wood: '🪵', stone: '🧱', iron: '⛏️', food: '🌾' };
 
+        const foundedCount = this.#activeVillage.settlementsFounded || 0;
+        const maxSlots = 3;
+        const usedSlots = foundedCount;
+        const slotAvailable = usedSlots < maxSlots;
+        const slotLabel = slotAvailable
+            ? `Slot ${usedSlots + 1} de ${maxSlots}`
+            : `Sin slots disponibles (${maxSlots}/${maxSlots} usados)`;
+
+        const popRequirements = [150, 300, 600];
+        const requiredPop = slotAvailable ? (popRequirements[usedSlots] || null) : null;
+        const currentPop = this.#activeVillage.population?.current || 0;
+        const hasEnoughPop = requiredPop !== null ? currentPop >= requiredPop : false;
+
         let costHTML = '';
         for (const res in settlementCost) {
-            const current = this.#activeVillage.resources[res].current;
+            const current = Math.floor(this.#activeVillage.resources[res].current);
             const enough = current >= settlementCost[res];
             costHTML += `
             <div class="flex items-center justify-between gap-2 ${enough ? '' : 'text-red-400'}">
                 <span class="text-sm">${resIcons[res]} ${resNames[res]}</span>
-                <span class="font-mono text-sm">${formatNumber(settlementCost[res])}</span>
+                <span class="font-mono text-sm">${formatNumber(current)} / ${formatNumber(settlementCost[res])}</span>
             </div>`;
         }
+
+        const slotHTML = `
+            <div class="flex items-center justify-between ${slotAvailable ? '' : 'text-red-400'}">
+                <span class="text-sm">📌 Slot de fundación</span>
+                <span class="font-mono text-sm">${slotLabel}</span>
+            </div>`;
+
+        const popHTML = requiredPop !== null ? `
+            <div class="flex items-center justify-between ${hasEnoughPop ? '' : 'text-red-400'}">
+                <span class="text-sm">👥 Población requerida</span>
+                <span class="font-mono text-sm">${formatNumber(currentPop)} / ${formatNumber(requiredPop)}</span>
+            </div>` : '';
 
         container.innerHTML = `
         <div class="space-y-3">
             <h3 class="text-base font-semibold text-war-gold">Requisitos de Fundación</h3>
             <div class="bg-gray-900/50 rounded-lg p-3 space-y-2">
+                ${slotHTML}
+                ${popHTML}
                 <div class="flex items-center justify-between ${hasEnoughSettlers ? '' : 'text-red-400'}">
                     <span class="text-sm">🏛️ Colonos requeridos</span>
-                    <span class="font-mono text-sm">${settlersRequired} <span class="text-gray-500">(${settlersAvailable} disp.)</span></span>
+                    <span class="font-mono text-sm">${settlersAvailable} / ${settlersRequired}</span>
                 </div>
             </div>
             <div class="bg-gray-900/50 rounded-lg p-3 space-y-2">
-                <div class="text-sm font-semibold text-gray-300 mb-1">Costo de recursos</div>
+                <div class="text-sm font-semibold text-gray-300 mb-1">Costo de recursos (disponible / necesario)</div>
                 ${costHTML}
             </div>
         </div>`;

@@ -111,34 +111,8 @@ class TileInfoUI {
         const action = button.dataset.action;
 
         if (action === 'found-village') {
-            const originVillageId = button.dataset.origin;
-            const targetX = button.dataset.x;
-            const targetY = button.dataset.y;
-            const activeVillage = this.#gameState.villages.find(v => v.id === this.#gameState.activeVillageId);
-            const perspectiveRace = this.#gameState.players.find(p => p.id === activeVillage?.ownerId)?.race;
-
-            if (!perspectiveRace) {
-                toastUI.show('Error: No se pudo determinar la raza de la aldea activa.', 'error');
-                return;
-            }
-
-            const settlerUnit = gameData.units[perspectiveRace].troops.find(t => t.type === 'settler');
-
-            if (!originVillageId || !targetX || !targetY || !settlerUnit) {
-                toastUI.show('Error interno al intentar fundar.', 'error');
-                return;
-            }
-
-            gameManager.sendCommand('send_movement', {
-                originVillageId: originVillageId,
-                targetCoords: { x: parseInt(targetX, 10), y: parseInt(targetY, 10) },
-                troops: { [settlerUnit.id]: 3 },
-                missionType: 'settle'
-            });
-
-            toastUI.show('¡Colonos en camino!', 'success');
+            attackPanelUI.show(this.#currentTile, this.#gameState);
             this.hide();
-            
         } else if (action === 'send-troops') {
             attackPanelUI.show(this.#currentTile, this.#gameState);
             this.hide();
