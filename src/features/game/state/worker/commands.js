@@ -4,7 +4,7 @@ import {
     isUnderBeginnerProtectionByPopulation,
     resolveDefaultFarmTroops,
 } from '../../core/data/constants.js';
-import { getScaledMerchantCapacityPerUnit } from '../../core/capacityScaling.js';
+import { getScaledMerchantCapacityPerUnit, scaleCapacityByGameSpeed } from '../../core/capacityScaling.js';
 import { createNpcExchangeState, getRandomNpcExchangeCooldownMs } from '../../core/npcExchange.js';
 import { compareMovementsByArrival } from './movementOrdering.js';
 
@@ -13,6 +13,20 @@ const FARM_LIST_MISSION_TYPES = new Set(['raid', 'attack', 'espionage']);
 const RESOURCE_KEYS = ['wood', 'stone', 'iron', 'food'];
 const OASIS_CAPTURE_RANGE = 7;
 let movementIdSequence = 0;
+
+function getSettlementCost(gameConfig, gameData) {
+    const ratio = gameData.config.settlement.startResourcesBaseCapacityRatio;
+    const baseWarehouse = gameData.config.initialStorage.warehouse;
+    const baseGranary = gameData.config.initialStorage.granary;
+    const scaledWarehouse = scaleCapacityByGameSpeed(baseWarehouse, gameConfig.gameSpeed);
+    const scaledGranary = scaleCapacityByGameSpeed(baseGranary, gameConfig.gameSpeed);
+    return {
+        wood: Math.floor(scaledWarehouse * ratio),
+        stone: Math.floor(scaledWarehouse * ratio),
+        iron: Math.floor(scaledWarehouse * ratio),
+        food: Math.floor(scaledGranary * ratio),
+    };
+}
 
 function createMovementId(prefix, startTime, villageId) {
     movementIdSequence = (movementIdSequence + 1) % 1000000;
@@ -365,7 +379,7 @@ export function handleSendMovementCommand({ payload, gameState, gameConfig, game
             };
         }
 
-        const settlementCost = gameData.config.settlement.cost;
+        const settlementCost = getSettlementCost(gameConfig, gameData);
         const isAI = village.ownerId.startsWith('ai_') && village.budget;
         const availableRes = isAI ? village.budget.econ : village.resources;
         const currentRes = isAI
@@ -461,17 +475,33 @@ export function handleSendMerchantsCommand({ payload, gameState, gameConfig, gam
         merchantData.stats.capacity,
     );
     const totalCapacity = merchantCount * merchantCapacityPerUnit;
-    const totalSent = Object.values(resources).reduce((sum, value) => sum + value, 0);
+  const totalSent = Object.values(resources).reduce((sum, value) => sum + value, 0);
 
-    if (totalSent > totalCapacity) {
-        return {
-            success: false,
-            reason: 'MERCHANT_CAPACITY_EXCEEDED',
-            details: { sent: totalSent, capacity: totalCapacity },
-        };
-    }
+  if (totalSent === 0) {
+    return { success: false, reason: 'NO_RESOURCES_TO_SEND' };
+  }
 
-    const isAI = village.ownerId.startsWith('ai_') && village.budget;
+  if (totalSent > totalCapacity) {
+    return {
+      success: false,
+      reason: 'MERCHANT_CAPACITY_EXCEEDED',
+      details: { sent: totalSent, capacity: totalCapacity },
+    };
+  }
+
+  const merchantsNeeded = Math.ceil(totalSent / Math.max(merchantCapacityPerUnit, 1));
+  const busyMerchants = village.merchantsBusy || 0;
+  const availableMerchants = merchantCount - busyMerchants;
+
+  if (merchantsNeeded > availableMerchants) {
+    return {
+      success: false,
+      reason: 'NOT_ENOUGH_MERCHANTS',
+      details: { needed: merchantsNeeded, available: availableMerchants, busy: busyMerchants, total: merchantCount },
+    };
+  }
+
+  const isAI = village.ownerId.startsWith('ai_') && village.budget;
     const availableRes = isAI ? village.budget.econ : village.resources;
     const currentRes = isAI
         ? availableRes
@@ -505,19 +535,22 @@ export function handleSendMerchantsCommand({ payload, gameState, gameConfig, gam
     const travelTimeMs = ((distance / (merchantData.stats.speed * gameConfig.troopSpeed)) * 3600) * 1000;
     const startTime = Date.now();
 
-    gameState.movements.push({
-        id: createMovementId('mov-trade', startTime, village.id),
-        type: 'trade',
-        ownerId: village.ownerId,
-        originVillageId: village.id,
-        targetCoords,
-        payload: {
-            resources,
-            merchants: Math.ceil(totalSent / Math.max(merchantCapacityPerUnit, 1)),
-        },
-        startTime,
-        arrivalTime: startTime + travelTimeMs,
-    });
+  const merchantsUsed = Math.ceil(totalSent / Math.max(merchantCapacityPerUnit, 1));
+  village.merchantsBusy = (village.merchantsBusy || 0) + merchantsUsed;
+
+  gameState.movements.push({
+    id: createMovementId('mov-trade', startTime, village.id),
+    type: 'trade',
+    ownerId: village.ownerId,
+    originVillageId: village.id,
+    targetCoords,
+    payload: {
+      resources,
+      merchants: merchantsUsed,
+    },
+    startTime,
+    arrivalTime: startTime + travelTimeMs,
+  });
 
     gameState.movements.sort(compareMovementsByArrival);
     return { success: true };

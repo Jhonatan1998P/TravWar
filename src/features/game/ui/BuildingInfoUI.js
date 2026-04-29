@@ -566,11 +566,37 @@ class BuildingInfoUI {
         }
     }
 
-    _renderNpcExchangePanel(container) {
-        const activeVillage = this.#currentGameState.villages.find(v => v.id === this.#currentGameState.activeVillageId);
-        if (!activeVillage) return;
+_renderNpcExchangePanel(container) {
+  const activeVillage = this.#currentGameState.villages.find(v => v.id === this.#currentGameState.activeVillageId);
+  if (!activeVillage) return;
 
-        const resourcesHTML = RESOURCE_KEYS.map(resourceKey => {
+  const marketplace = activeVillage.buildings.find(b => b.type === 'marketplace');
+  const merchantUnit = gameData.units[activeVillage.race]?.troops.find(t => t.type === 'merchant');
+  const merchantCapacityPerUnit = getScaledMerchantCapacityPerUnit(
+    activeVillage.race,
+    this.#gameConfig?.gameSpeed || 1,
+    merchantUnit?.stats.capacity || 0,
+  );
+  const totalMerchants = marketplace ? gameData.buildings.marketplace.levels[marketplace.level - 1].attribute.merchantCapacity : 0;
+  const busyMerchants = activeVillage.merchantsBusy || 0;
+  const availableMerchants = Math.max(0, totalMerchants - busyMerchants);
+
+  const merchantIcon = `<img src="/icons/merchant.png" alt="Mercader" class="h-5 w-5 inline-block">`;
+  const merchantsHTML = `
+  <div class="flex items-center justify-between gap-3 p-3 rounded-lg bg-gray-900/50 border border-primary-border/50 mb-3">
+    <div class="flex items-center gap-2">
+      ${merchantIcon}
+      <span class="font-semibold text-sm">Mercaderes</span>
+    </div>
+    <div class="text-right">
+      <span class="font-mono font-bold text-lg ${availableMerchants === 0 ? 'text-yellow-400' : 'text-white'}">${availableMerchants}</span>
+      <span class="text-gray-400">/ ${totalMerchants}</span>
+      ${busyMerchants > 0 ? `<div class="text-xs text-yellow-400">${busyMerchants} en camino</div>` : ''}
+      <div class="text-xs text-gray-400">Cap: ${formatNumber(merchantCapacityPerUnit)}/u</div>
+    </div>
+  </div>`;
+
+  const resourcesHTML = RESOURCE_KEYS.map(resourceKey => {
             const resource = activeVillage.resources[resourceKey];
             const iconKey = RESOURCE_ICON_MAP[resourceKey];
             const current = Math.floor(resource?.current || 0);
@@ -588,12 +614,16 @@ class BuildingInfoUI {
                 </div>`;
         }).join('');
 
-        container.innerHTML = `
-            <section id="npc-exchange-panel" class="border-t border-primary-border mt-4 pt-4 space-y-3">
-                <div>
-                    <h3 class="text-lg font-bold text-war-gold">NPC de intercambio</h3>
-                    <p class="text-xs text-gray-400 mt-1">Redistribuye todos tus recursos actuales entre madera, barro, hierro y cereal. El próximo uso se desbloquea aleatoriamente cada 15-30 minutos, incluso si estás offline.</p>
-                </div>
+  container.innerHTML = `
+  <section id="npc-exchange-panel" class="border-t border-primary-border mt-4 pt-4 space-y-3">
+    <div>
+      <h3 class="text-lg font-bold text-war-gold">Mercado</h3>
+    </div>
+    ${merchantsHTML}
+    <div>
+      <h4 class="text-md font-bold text-war-gold">NPC de intercambio</h4>
+      <p class="text-xs text-gray-400 mt-1">Redistribuye todos tus recursos actuales entre madera, barro, hierro y cereal. El próximo uso se desbloquea aleatoriamente cada 15-30 minutos, incluso si estás offline.</p>
+    </div>
                 <div id="npc-exchange-status" class="text-sm p-3 rounded-lg bg-gray-900/50 border border-primary-border/50"></div>
                 <div class="space-y-2">${resourcesHTML}</div>
                 <div class="flex justify-between text-sm bg-gray-900/45 rounded-lg p-3 border border-primary-border/50">

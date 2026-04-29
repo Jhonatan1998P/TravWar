@@ -332,8 +332,9 @@ export class GameStateFactory {
             village.demolitionUnlocked ??= (village.buildings?.find(b => b.type === 'mainBuilding')?.level || 0) >= 10;
             village.npcExchange ??= createNpcExchangeState();
             village.unitsInVillage ??= {};
-            village.reinforcements ??= [];
-            village.oases ??= [];
+    village.reinforcements ??= [];
+    village.oases ??= [];
+    village.merchantsBusy ??= 0;
             village.population ??= { current: 0, foodConsumption: 0 };
             village.villageType ??= '4-4-4-6';
             village.race ??= savedState.players.find(p => p.id === village.ownerId)?.race;
@@ -468,7 +469,7 @@ export class GameStateFactory {
             },
             population: { current: 2, foodConsumption: 2 }, unitsInVillage: {}, reinforcements: [], recruitmentQueue: [], oases: [],
             constructionQueue: [], maxConstructionSlots: race === 'romans' ? 3 : 2, demolitionUnlocked: false,
-            research: { completed: [], queue: [] }, smithy: { upgrades: {}, queue: [] }, npcExchange: createNpcExchangeState()
+            research: { completed: [], queue: [] }, smithy: { upgrades: {}, queue: [] }, npcExchange: createNpcExchangeState(), merchantsBusy: 0
         };
 
         // Inicializar estructura de presupuesto para IA.

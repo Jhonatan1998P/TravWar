@@ -265,6 +265,9 @@ class GameManager {
             case 'release_oasis:result':
                 document.dispatchEvent(new CustomEvent('release_oasis:result', { detail: payload }));
                 break;
+            case 'send_movement:result':
+                document.dispatchEvent(new CustomEvent('send_movement:result', { detail: payload }));
+                break;
         }
     }
 

@@ -126,12 +126,12 @@ export const units = {
                   research: { requires: { palace: 10 }, cost: { wood: 0, stone: 0, iron: 0, food: 0 }, time: 0 }
               },
               {
-                  id: 'merchant_roman',
-                  name: 'Mercader',
-                  type: 'merchant',
-                  role: 'trade',
-                  upkeep: 2,
-                  stats: { speed: 16, capacity: 1500 },
+id: 'merchant_roman',
+  name: 'Mercader',
+  type: 'merchant',
+  role: 'trade',
+  upkeep: 2,
+  stats: { speed: 24, capacity: 1500 },
               }
           ]
       },
@@ -260,12 +260,12 @@ export const units = {
                   research: { requires: { palace: 10 }, cost: { wood: 0, stone: 0, iron: 0, food: 0 }, time: 0 }
               },
               {
-                  id: 'merchant_german',
-                  name: 'Mercader',
-                  type: 'merchant',
-                  role: 'trade',
-                  upkeep: 3,
-                  stats: { speed: 12, capacity: 1000 },
+id: 'merchant_german',
+  name: 'Mercader',
+  type: 'merchant',
+  role: 'trade',
+  upkeep: 3,
+  stats: { speed: 24, capacity: 1000 },
               }
           ]
       },
@@ -528,12 +528,12 @@ export const units = {
                   research: { requires: { palace: 10 }, cost: { wood: 0, stone: 0, iron: 0, food: 0 }, time: 0 }
               },
               {
-                  id: 'merchant_huns',
-                  name: 'Mercader',
-                  type: 'merchant',
-                  role: 'trade',
-                  upkeep: 2,
-                  stats: { speed: 20, capacity: 800 },
+id: 'merchant_huns',
+  name: 'Mercader',
+  type: 'merchant',
+  role: 'trade',
+  upkeep: 2,
+  stats: { speed: 24, capacity: 800 },
               }
           ]
       },
@@ -662,12 +662,12 @@ export const units = {
                   research: { requires: { palace: 10 }, cost: { wood: 0, stone: 0, iron: 0, food: 0 }, time: 0 }
               },
               {
-                  id: 'merchant_egyptian',
-                  name: 'Mercader',
-                  type: 'merchant',
-                  role: 'trade',
-                  upkeep: 2,
-                  stats: { speed: 16, capacity: 3000 },
+id: 'merchant_egyptian',
+  name: 'Mercader',
+  type: 'merchant',
+  role: 'trade',
+  upkeep: 2,
+  stats: { speed: 24, capacity: 3000 },
               }
           ]
       },

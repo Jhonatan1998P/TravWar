@@ -1,9 +1,11 @@
 import gameManager from '@game/state/GameManager.js';
+import GameConfig from '@game/state/GameConfig.js';
 import { gameData, NON_TARGETABLE_BUILDINGS } from '../core/GameData.js';
 import { formatNumber } from '@shared/lib/formatters.js';
 import toastUI from './ToastUI.js';
 import { markModalOpened, shouldIgnoreModalAction } from './modalInteractionGuard.js';
 import { unitSpriteManager } from './UnitSpriteManager.js';
+import { scaleCapacityByGameSpeed } from '../core/capacityScaling.js';
 
 const OASIS_CAPTURE_RANGE = 7;
 
@@ -15,6 +17,7 @@ class AttackPanelUI {
     #activeVillage = null;
     #troopInputs = new Map();
     #lastOpenedAt = 0;
+    #movementResultHandler = null;
 
     constructor() {
         this.#mainContainer = document.getElementById('village-container');
@@ -22,6 +25,8 @@ class AttackPanelUI {
         this._createPanelHTML();
         this.#panelElement = document.getElementById('attack-panel');
         this._initializeEventListeners();
+        this.#movementResultHandler = this._handleMovementResult.bind(this);
+        document.addEventListener('send_movement:result', this.#movementResultHandler);
     }
 
     _createPanelHTML() {
@@ -43,8 +48,9 @@ class AttackPanelUI {
                             <legend class="text-base font-semibold text-gray-300 mb-2">Tipo de Misión</legend>
                             <div class="flex flex-wrap gap-2"></div>
                         </fieldset>
-                        <div id="attack-panel-oasis-conquest" class="border-t border-primary-border pt-4 mt-4 hidden"></div>
-                        <div id="attack-panel-catapult-targets" class="border-t border-primary-border pt-4 mt-4 hidden"></div>
+<div id="attack-panel-oasis-conquest" class="border-t border-primary-border pt-4 mt-4 hidden"></div>
+            <div id="attack-panel-settlement-info" class="border-t border-primary-border pt-4 mt-4 hidden"></div>
+            <div id="attack-panel-catapult-targets" class="border-t border-primary-border pt-4 mt-4 hidden"></div>
                     </main>
                     <footer class="p-4 border-t border-primary-border">
                         <button data-action="send" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover text-war-mist font-bold py-3 px-4 rounded-xl transition duration-300 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed border border-primary-border">
@@ -305,6 +311,110 @@ class AttackPanelUI {
         }
         container.innerHTML = contentHTML;
     }
+
+    _getComputedSettlementCost() {
+        const settlementConfig = gameData.config.settlement;
+        if (!settlementConfig) return null;
+        const gameConfig = new GameConfig().getSettings();
+        const ratio = settlementConfig.startResourcesBaseCapacityRatio;
+        const scaledWarehouse = scaleCapacityByGameSpeed(gameData.config.initialStorage.warehouse, gameConfig.gameSpeed);
+        const scaledGranary = scaleCapacityByGameSpeed(gameData.config.initialStorage.granary, gameConfig.gameSpeed);
+        return {
+            wood: Math.floor(scaledWarehouse * ratio),
+            stone: Math.floor(scaledWarehouse * ratio),
+            iron: Math.floor(scaledWarehouse * ratio),
+            food: Math.floor(scaledGranary * ratio),
+        };
+    }
+
+    _renderSettlementInfo() {
+        const container = this.#panelElement.querySelector('#attack-panel-settlement-info');
+        const settlementConfig = gameData.config.settlement;
+        if (!settlementConfig || !this.#activeVillage) {
+            container.classList.add('hidden');
+            container.innerHTML = '';
+            return;
+        }
+
+        const playerRace = this.#gameState.players.find(p => p.id === this.#activeVillage.ownerId)?.race;
+        if (!playerRace) {
+            container.classList.add('hidden');
+            container.innerHTML = '';
+            return;
+        }
+
+        const settlerData = gameData.units[playerRace].troops.find(t => t.type === 'settler');
+        const settlersAvailable = this.#activeVillage.unitsInVillage[settlerData?.id] || 0;
+        const settlersRequired = settlementConfig.settlersRequired;
+        const settlementCost = this._getComputedSettlementCost();
+        if (!settlementCost) {
+            container.classList.add('hidden');
+            container.innerHTML = '';
+            return;
+        }
+
+        const hasEnoughSettlers = settlersAvailable >= settlersRequired;
+        const resNames = { wood: 'Madera', stone: 'Barro', iron: 'Hierro', food: 'Cereal' };
+        const resIcons = { wood: '🪵', stone: '🧱', iron: '⛏️', food: '🌾' };
+
+        let costHTML = '';
+        for (const res in settlementCost) {
+            const current = this.#activeVillage.resources[res].current;
+            const enough = current >= settlementCost[res];
+            costHTML += `
+            <div class="flex items-center justify-between gap-2 ${enough ? '' : 'text-red-400'}">
+                <span class="text-sm">${resIcons[res]} ${resNames[res]}</span>
+                <span class="font-mono text-sm">${formatNumber(settlementCost[res])}</span>
+            </div>`;
+        }
+
+        container.innerHTML = `
+        <div class="space-y-3">
+            <h3 class="text-base font-semibold text-war-gold">Requisitos de Fundación</h3>
+            <div class="bg-gray-900/50 rounded-lg p-3 space-y-2">
+                <div class="flex items-center justify-between ${hasEnoughSettlers ? '' : 'text-red-400'}">
+                    <span class="text-sm">🏛️ Colonos requeridos</span>
+                    <span class="font-mono text-sm">${settlersRequired} <span class="text-gray-500">(${settlersAvailable} disp.)</span></span>
+                </div>
+            </div>
+            <div class="bg-gray-900/50 rounded-lg p-3 space-y-2">
+                <div class="text-sm font-semibold text-gray-300 mb-1">Costo de recursos</div>
+                ${costHTML}
+            </div>
+        </div>`;
+        container.classList.remove('hidden');
+    }
+
+    _updateSettlementInfoVisibility() {
+        const container = this.#panelElement.querySelector('#attack-panel-settlement-info');
+        const missionType = this.#panelElement.querySelector('input[name="mission-type"]:checked')?.value;
+        if (missionType === 'settle') {
+            this._renderSettlementInfo();
+        } else {
+            container.classList.add('hidden');
+            container.innerHTML = '';
+        }
+    }
+
+    _handleMovementResult(event) {
+        const { result, missionType } = event.detail;
+        if (!result) return;
+        if (missionType === 'settle') {
+            if (result.success) {
+                toastUI.show('Colonos enviados a fundar nueva aldea.', 'success');
+            } else {
+                const reasons = {
+                    INSUFFICIENT_SETTLERS: 'No tienes suficientes colonos.',
+                    INSUFFICIENT_POPULATION: 'No tienes suficiente población para fundar.',
+                    INSUFFICIENT_RESOURCES: 'No tienes suficientes recursos para fundar.',
+                    MAX_SETTLEMENTS_REACHED: 'Has alcanzado el máximo de aldeas fundables desde esta aldea.',
+                    VILLAGE_NOT_FOUND: 'Aldea de origen no encontrada.',
+                    NO_VALID_UNITS: 'No hay unidades válidas para el viaje.',
+                };
+                toastUI.show(reasons[result.reason] || `Error al fundar: ${result.reason}`, 'error');
+            }
+        }
+    }
     
     _updateCatapultTargetsVisibility() {
         const container = this.#panelElement.querySelector('#attack-panel-catapult-targets');
@@ -365,6 +475,7 @@ class AttackPanelUI {
             this.#troopInputs.set(settlerInput.dataset.unitId, settlerInput.value);
         }
 
+        this._updateSettlementInfoVisibility();
         this._updateCatapultTargetsVisibility();
     }
 
@@ -429,13 +540,13 @@ class AttackPanelUI {
             return;
         }
 
-        if (missionType === 'settle') {
+if (missionType === 'settle') {
             const settlementConfig = gameData.config.settlement;
             if (!settlementConfig) {
                 toastUI.show('Error de configuración: Faltan datos de fundación.', 'error');
                 return;
             }
-            
+
             const playerRace = this.#gameState.players.find(p => p.id === this.#activeVillage.ownerId)?.race;
             if (!playerRace) return;
 
@@ -448,7 +559,7 @@ class AttackPanelUI {
                 return;
             }
 
-            const settlementCost = settlementConfig.cost;
+            const settlementCost = this._getComputedSettlementCost();
             for (const res in settlementCost) {
                 if (this.#activeVillage.resources[res].current < settlementCost[res]) {
                     toastUI.show(`No tienes suficientes recursos para fundar. (Necesitas ${formatNumber(settlementCost[res])} de ${res})`, 'error');
@@ -474,8 +585,10 @@ class AttackPanelUI {
         }
 
         gameManager.sendCommand('send_movement', payload);
-        
-        toastUI.show('Movimiento de tropas enviado.', 'success');
+
+        if (missionType !== 'settle') {
+            toastUI.show('Movimiento de tropas enviado.', 'success');
+        }
         this.hide();
     }
 }

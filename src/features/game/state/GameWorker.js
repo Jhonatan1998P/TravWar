@@ -518,7 +518,12 @@ function handleTradeArrival(movement) {
     gameState.movements.sort(compareMovementsByArrival);
 }
 
-function handleTradeReturnArrival(movement) {}
+function handleTradeReturnArrival(movement) {
+  const originVillage = gameState.villages.find(v => v.id === movement.originVillageId);
+  if (originVillage && movement.payload?.merchants) {
+    originVillage.merchantsBusy = Math.max(0, (originVillage.merchantsBusy || 0) - movement.payload.merchants);
+  }
+}
 
 function processOasisRegeneration(currentTime) {
     processOasisRegenerationStep({
@@ -677,15 +682,27 @@ function postNpcResourceExchangeResult(request, result) {
 }
 
 function postReleaseOasisResult(request, result) {
-    self.postMessage({
-        type: 'release_oasis:result',
-        payload: {
-            request,
-            result: result || { success: false, reason: 'UNKNOWN_RELEASE_OASIS_RESULT' },
-            at: Date.now(),
-        },
-    });
-}
+        self.postMessage({
+            type: 'release_oasis:result',
+            payload: {
+                request,
+                result: result || { success: false, reason: 'UNKNOWN_RELEASE_OASIS_RESULT' },
+                at: Date.now(),
+            },
+        });
+    }
+
+    function postSendMovementResult(request, result) {
+        self.postMessage({
+            type: 'send_movement:result',
+            payload: {
+                request,
+                result: result || { success: false, reason: 'UNKNOWN_SEND_MOVEMENT_RESULT' },
+                missionType: request?.missionType || null,
+                at: Date.now(),
+            },
+        });
+    }
 
 function handleAICommand(commandType, payload) {
     const villageId = payload.villageId || getActiveVillage()?.id;
@@ -864,9 +881,15 @@ self.onmessage = function(event) {
         case 'rename_village':
             if (processor) processor.rename(payload.newName);
             break;
-        case 'send_movement':
-            handleSendMovementCommand(payload);
-            break;
+case 'send_movement':
+    postSendMovementResult(payload, handleSendMovementCommandStep({
+        payload,
+        gameState,
+        gameConfig,
+        gameData,
+        aiControllers,
+    }));
+    break;
         case 'send_merchants':
             handleSendMerchantsCommand(payload);
             break;

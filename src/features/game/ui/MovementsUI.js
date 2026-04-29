@@ -245,27 +245,35 @@ class MovementsUI {
             return '<div class="flex items-center justify-center py-2 opacity-50"><span class="text-2xl font-bold tracking-widest text-gray-500">???</span></div>';
         }
 
-        let contentHTML = '';
+  let contentHTML = '';
 
-        const resourcesToRender = movement.type === 'trade'
-            ? movement.payload.resources
-            : (movement.type === 'return' && (movement.payload.plunder || movement.payload.bounty))
-                ? mergeLoot(movement.payload.plunder, movement.payload.bounty)
-                : null;
+  if (movement.type === 'trade_return' && movement.payload?.merchants) {
+    contentHTML += `<div class="flex items-center gap-2 text-xs"><img src="/icons/merchant.png" class="w-4 h-4 inline-block" alt="Mercaderes"><span class="text-gray-400">Mercaderes</span><span>${movement.payload.merchants}</span></div>`;
+  }
 
-        if (resourcesToRender) {
-            const resourceMap = { wood: 'Madera', stone: 'Barro', iron: 'Hierro', food: 'Cereal' };
-            const resHTML = Object.entries(resourcesToRender)
-                .filter(([, count]) => count > 0)
-                .map(([resource, count]) => `<div class="flex justify-between text-xs"><span class="text-gray-400">${resourceMap[resource]}</span><span>${formatNumber(count)}</span></div>`)
-                .join('');
+  const resourcesToRender = movement.type === 'trade'
+    ? movement.payload.resources
+    : (movement.type === 'return' && (movement.payload.plunder || movement.payload.bounty))
+    ? mergeLoot(movement.payload.plunder, movement.payload.bounty)
+    : null;
 
-            if (resHTML) {
-                contentHTML += `<div class="mb-2 border-b border-gray-700 pb-1">${resHTML}</div>`;
-            }
-        }
+  if (resourcesToRender) {
+    const resourceMap = { wood: 'Madera', stone: 'Barro', iron: 'Hierro', food: 'Cereal' };
+    const resHTML = Object.entries(resourcesToRender)
+      .filter(([, count]) => count > 0)
+      .map(([resource, count]) => `<div class="flex justify-between text-xs"><span class="text-gray-400">${resourceMap[resource]}</span><span>${formatNumber(count)}</span></div>`)
+      .join('');
 
-        if (movement.payload.troops) {
+    if (resHTML) {
+      contentHTML += `<div class="mb-2 border-b border-gray-700 pb-1">${resHTML}</div>`;
+    }
+  }
+
+  if (movement.type === 'trade' && movement.payload?.merchants) {
+    contentHTML += `<div class="flex items-center gap-2 text-xs"><img src="/icons/merchant.png" class="w-4 h-4 inline-block" alt="Mercaderes"><span class="text-gray-400">Mercaderes</span><span>${movement.payload.merchants}</span></div>`;
+  }
+
+  if (movement.payload.troops) {
             const ownerPlayer = this.#gameState.players.find(player => player.id === movement.ownerId);
             if (!ownerPlayer) {
                 return '<div class="text-xs text-red-500">Error: Datos de jugador no disponibles.</div>';
@@ -292,24 +300,28 @@ class MovementsUI {
         const topRow = document.createElement('div');
         topRow.className = 'flex items-center justify-between mb-2';
 
-        const title = document.createElement('span');
-        title.className = 'font-semibold text-xs uppercase tracking-wide truncate pr-2';
+  const title = document.createElement('span');
+  title.className = 'font-semibold text-xs uppercase tracking-wide truncate pr-2';
 
-        const timer = document.createElement('div');
-        timer.className = 'font-mono text-sm font-bold whitespace-nowrap';
+  const icon = document.createElement('img');
+  icon.className = 'w-4 h-4 shrink-0 hidden';
 
-        topRow.append(title, timer);
+  const timer = document.createElement('div');
+  timer.className = 'font-mono text-sm font-bold whitespace-nowrap';
+
+  topRow.append(icon, title, timer);
 
         const payloadWrapper = document.createElement('div');
         payloadWrapper.className = 'p-2 bg-gray-800/60 rounded-md min-h-[2rem]';
 
         item.append(topRow, payloadWrapper);
 
-        item.__refs = {
-            title,
-            timer,
-            payloadWrapper
-        };
+  item.__refs = {
+    title,
+    icon,
+    timer,
+    payloadWrapper
+  };
 
         return item;
     }
@@ -319,12 +331,26 @@ class MovementsUI {
         const isOwnMovement = movement.ownerId === currentOwnerId;
         const isIncomingHostile = !isOwnMovement && (movement.type === 'attack' || movement.type === 'raid');
 
-        const title = this._getMovementTitle(movement, currentOwnerId);
-        const titleClass = isIncomingHostile ? 'text-red-400' : (isOwnMovement ? 'text-yellow-400' : 'text-blue-300');
-        const timerClass = isIncomingHostile ? 'text-red-400' : 'text-yellow-300';
-        const bgClass = isIncomingHostile ? 'bg-red-900/20 border-red-700/30' : 'bg-gray-900/50 border-gray-700/30';
+  const title = this._getMovementTitle(movement, currentOwnerId);
+  const titleClass = isIncomingHostile ? 'text-red-400' : (isOwnMovement ? 'text-yellow-400' : 'text-blue-300');
+  const timerClass = isIncomingHostile ? 'text-red-400' : 'text-yellow-300';
+  const bgClass = isIncomingHostile ? 'bg-red-900/20 border-red-700/30' : 'bg-gray-900/50 border-gray-700/30';
 
-        node.className = `p-3 rounded-lg shadow-md border ${bgClass}`;
+  const isTradeMovement = movement.type === 'trade' || movement.type === 'trade_return';
+
+  let tradeBgClass = '';
+  if (isTradeMovement) {
+    tradeBgClass = movement.type === 'trade' ? 'bg-amber-900/20 border-amber-600/30' : 'bg-emerald-900/20 border-emerald-600/30';
+  }
+  node.className = `p-3 rounded-lg shadow-md border ${tradeBgClass || bgClass}`;
+
+  if (isTradeMovement) {
+    refs.icon.src = '/icons/merchant.png';
+    refs.icon.alt = 'Mercader';
+    refs.icon.classList.remove('hidden');
+  } else {
+    refs.icon.classList.add('hidden');
+  }
 
         refs.title.className = `font-semibold ${titleClass} text-xs uppercase tracking-wide truncate pr-2`;
         refs.title.title = title;
@@ -349,17 +375,18 @@ class MovementsUI {
                 .map(village => `${village.coords.x}|${village.coords.y}`)
         );
 
-        const movements = state.movements.filter(movement =>
-            movement.ownerId === currentOwnerId
-            || (
-                (movement.type === 'attack'
-                    || movement.type === 'raid'
-                    || movement.type === 'espionage'
-                    || movement.type === 'reinforcement'
-                    || movement.type === 'trade')
-                && currentOwnerVillageCoords.has(`${movement.targetCoords.x}|${movement.targetCoords.y}`)
-            )
-        );
+  const movements = state.movements.filter(movement =>
+    movement.ownerId === currentOwnerId
+    || (
+      (movement.type === 'attack'
+      || movement.type === 'raid'
+      || movement.type === 'espionage'
+      || movement.type === 'reinforcement'
+      || movement.type === 'trade'
+      || movement.type === 'trade_return')
+      && currentOwnerVillageCoords.has(`${movement.targetCoords.x}|${movement.targetCoords.y}`)
+    )
+  );
 
         const incomingAttacks = movements.filter(movement =>
             movement.ownerId !== currentOwnerId && (movement.type === 'attack' || movement.type === 'raid')

@@ -258,14 +258,16 @@ export function selectMovementsSignature(payload) {
     const perspectiveOwnerId = getPerspectiveOwnerId(state);
     const villagesSignature = selectVillageListSignature(payload);
     const ownerFarmListsSignature = farmListsSignature(state.farmListsByOwnerId?.[perspectiveOwnerId]?.lists || []);
-    const movementsSignature = (state.movements || [])
-        .map(movement => {
-            const payloadSignature = objectSignature(movement.payload || {});
-            return `${movement.id}:${movement.type}:${movement.ownerId}:${movement.originVillageId}:${coordsSignature(movement.targetCoords)}:${movement.arrivalTime}:${payloadSignature}`;
-        })
-        .join(';');
+  const movementsSignature = (state.movements || [])
+    .map(movement => {
+      const payloadSignature = objectSignature(movement.payload || {});
+      return `${movement.id}:${movement.type}:${movement.ownerId}:${movement.originVillageId}:${coordsSignature(movement.targetCoords)}:${movement.arrivalTime}:${payloadSignature}`;
+    })
+    .join(';');
 
-    return `${state.activeVillageId || ''}:${perspectiveOwnerId}:${villagesSignature}:${ownerFarmListsSignature}:${movementsSignature}`;
+  const activeVillageMerchantsBusy = getActiveVillage(state)?.merchantsBusy || 0;
+
+  return `${state.activeVillageId || ''}:${perspectiveOwnerId}:${villagesSignature}:${ownerFarmListsSignature}:${movementsSignature}:${activeVillageMerchantsBusy}`;
 }
 
 export function selectMapViewSignature(payload) {
@@ -298,21 +300,23 @@ export function selectBuildingInfoPanelSignature(payload) {
         return `hidden:${activeVillage.id}`;
     }
 
-    return [
-        'visible',
-        activeVillage.id,
-        activeVillage.demolitionUnlocked ? 'demolition-unlocked' : 'demolition-locked',
-        resourceSignature(activeVillage.resources),
-        populationSignature(activeVillage.population),
-        buildingsSignature(activeVillage.buildings || []),
-        constructionQueueSignature(activeVillage.constructionQueue || []),
-        recruitmentQueueSignature(activeVillage.recruitmentQueue || []),
-        researchQueueSignature(activeVillage.research?.queue || []),
-        completedResearchSignature(activeVillage.research?.completed || []),
-        smithyQueueSignature(activeVillage.smithy?.queue || []),
-        objectSignature(activeVillage.smithy?.upgrades || {}),
-        farmListsSignature(state.farmListsByOwnerId?.[activeVillage.ownerId]?.lists || []),
-    ].join(':');
+  return [
+    'visible',
+    activeVillage.id,
+    activeVillage.demolitionUnlocked ? 'demolition-unlocked' : 'demolition-locked',
+    resourceSignature(activeVillage.resources),
+    populationSignature(activeVillage.population),
+    buildingsSignature(activeVillage.buildings || []),
+    constructionQueueSignature(activeVillage.constructionQueue || []),
+    recruitmentQueueSignature(activeVillage.recruitmentQueue || []),
+    researchQueueSignature(activeVillage.research?.queue || []),
+    completedResearchSignature(activeVillage.research?.completed || []),
+    smithyQueueSignature(activeVillage.smithy?.queue || []),
+    objectSignature(activeVillage.smithy?.upgrades || {}),
+    farmListsSignature(state.farmListsByOwnerId?.[activeVillage.ownerId]?.lists || []),
+    activeVillage.merchantsBusy || 0,
+    objectSignature(activeVillage.npcExchange || {}),
+  ].join(':');
 }
 
 export function selectTileInfoPanelSignature(payload) {

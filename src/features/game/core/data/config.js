@@ -41,11 +41,6 @@ export const config = {
         },
         settlement: {
             settlersRequired: 3,
-            cost: {
-                wood: 750,
-                stone: 750,
-                iron: 750,
-                food: 750
-            }
+            startResourcesBaseCapacityRatio: 0.9
         },
     }

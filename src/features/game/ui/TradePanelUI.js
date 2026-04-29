@@ -7,243 +7,294 @@ import toastUI from './ToastUI.js';
 import { markModalOpened, shouldIgnoreModalAction } from './modalInteractionGuard.js';
 
 const ICONS = {
-    wood: `<img src="/icons/wood.webp" alt="Madera" class="h-[25px] w-[25px]">`,
-    clay: `<img src="/icons/clay.webp" alt="Barro" class="h-[25px] w-[25px]">`,
-    iron: `<img src="/icons/iron.webp" alt="Hierro" class="h-[25px] w-[25px]">`,
-    wheat: `<img src="/icons/wheat.webp" alt="Cereal" class="h-[25px] w-[25px]">`,
-    merchant: `<img src="/icons/merchant.png" alt="Mercader" class="h-6 w-6">`
+  wood: `<img src="/icons/wood.webp" alt="Madera" class="h-[25px] w-[25px]">`,
+  clay: `<img src="/icons/clay.webp" alt="Barro" class="h-[25px] w-[25px]">`,
+  iron: `<img src="/icons/iron.webp" alt="Hierro" class="h-[25px] w-[25px]">`,
+  wheat: `<img src="/icons/wheat.webp" alt="Cereal" class="h-[25px] w-[25px]">`,
+  merchant: `<img src="/icons/merchant.png" alt="Mercader" class="h-6 w-6">`
 };
 
 class TradePanelUI {
-    #panelElement;
-    #mainContainer;
-    #targetTile = null;
-    #gameState = null;
-    #activeVillage = null;
-    #gameConfig = null;
-    #merchantCapacity = 0;
-    #availableMerchants = 0;
-    #lastOpenedAt = 0;
+  #panelElement;
+  #mainContainer;
+  #targetTile = null;
+  #gameState = null;
+  #activeVillage = null;
+  #gameConfig = null;
+  #merchantCapacityPerUnit = 0;
+  #totalMerchants = 0;
+  #busyMerchants = 0;
+  #availableMerchants = 0;
+  #availableMerchantCapacity = 0;
+  #lastOpenedAt = 0;
 
-    constructor() {
-        this.#mainContainer = document.getElementById('village-container');
-        this.#gameConfig = new GameConfig().getSettings();
-        if (!this.#mainContainer) return;
-        this._createPanelHTML();
-        this.#panelElement = document.getElementById('trade-panel');
-        this._initializeEventListeners();
-    }
+  constructor() {
+    this.#mainContainer = document.getElementById('village-container');
+    this.#gameConfig = new GameConfig().getSettings();
+    if (!this.#mainContainer) return;
+    this._createPanelHTML();
+    this.#panelElement = document.getElementById('trade-panel');
+    this._initializeEventListeners();
+  }
 
-    _createPanelHTML() {
-        const panelHTML = `
-            <div id="trade-panel" class="fixed inset-0 h-[var(--app-viewport-height)] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
-                <div class="bg-glass-bg border border-primary-border rounded-[2rem] shadow-2xl w-full max-w-lg my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(var(--app-viewport-height)-1rem)] backdrop-blur-2xl">
-                    <header class="flex justify-between items-center p-4 border-b border-primary-border">
-                        <h2 id="trade-panel-title" class="text-xl font-display font-bold text-war-gold">Enviar Recursos</h2>
-                        <button data-action="close" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar">×</button>
-                    </header>
-                    <main id="trade-panel-main" class="p-4 overflow-y-auto min-h-0 max-h-[calc(var(--app-viewport-height)-12rem)]">
-                        <div id="trade-panel-info" class="grid grid-cols-2 gap-4 mb-4 text-sm"></div>
-                        <div id="trade-panel-merchants" class="p-3 bg-gray-900/50 rounded-lg flex justify-between items-center mb-4"></div>
-                        <div id="trade-panel-inputs" class="space-y-2"></div>
-                    </main>
-                    <footer class="p-4 border-t border-primary-border space-y-2">
-                        <div class="flex justify-between text-sm">
-                            <span class="text-gray-400">Total a enviar:</span>
-                            <span id="trade-total-sent" class="font-mono font-semibold">0</span>
-                        </div>
-                        <button data-action="send" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover text-war-mist font-bold py-3 px-4 rounded-xl transition duration-300 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed border border-primary-border">
-                            Enviar
-                        </button>
-                    </footer>
-                </div>
-            </div>`;
-        this.#mainContainer.insertAdjacentHTML('beforeend', panelHTML);
-    }
+  _createPanelHTML() {
+    const panelHTML = `
+    <div id="trade-panel" class="fixed inset-0 h-[var(--app-viewport-height)] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
+      <div class="bg-glass-bg border border-primary-border rounded-[2rem] shadow-2xl w-full max-w-lg my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(var(--app-viewport-height)-1rem)] backdrop-blur-2xl">
+        <header class="flex justify-between items-center p-4 border-b border-primary-border">
+          <h2 id="trade-panel-title" class="text-xl font-display font-bold text-war-gold">Enviar Recursos</h2>
+          <button data-action="close" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar">×</button>
+        </header>
+        <main id="trade-panel-main" class="p-4 overflow-y-auto min-h-0 max-h-[calc(var(--app-viewport-height)-12rem)]">
+          <div id="trade-panel-info" class="grid grid-cols-2 gap-4 mb-4 text-sm"></div>
+          <div id="trade-panel-merchants" class="p-3 bg-gray-900/50 rounded-lg flex justify-between items-center mb-4"></div>
+          <div id="trade-panel-inputs" class="space-y-2"></div>
+        </main>
+        <footer class="p-4 border-t border-primary-border space-y-2">
+          <div class="flex justify-between text-sm">
+            <span class="text-gray-400">Total a enviar:</span>
+            <span id="trade-total-sent" class="font-mono font-semibold">0</span>
+          </div>
+          <div id="trade-merchants-needed" class="flex justify-between text-sm">
+            <span class="text-gray-400">Mercaderes necesarios:</span>
+            <span class="font-mono font-semibold">0</span>
+          </div>
+          <button data-action="send" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover text-war-mist font-bold py-3 px-4 rounded-xl transition duration-300 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed border border-primary-border">
+            Enviar
+          </button>
+        </footer>
+      </div>
+    </div>`;
+    this.#mainContainer.insertAdjacentHTML('beforeend', panelHTML);
+  }
 
-    _initializeEventListeners() {
-        this.#panelElement.addEventListener('click', e => {
-            const action = e.target.closest('[data-action]')?.dataset.action;
-            if (!action) return;
+  _initializeEventListeners() {
+    this.#panelElement.addEventListener('click', e => {
+      const action = e.target.closest('[data-action]')?.dataset.action;
+      if (!action) return;
 
-            if (action !== 'close' && shouldIgnoreModalAction(this.#lastOpenedAt)) return;
+      if (action !== 'close' && shouldIgnoreModalAction(this.#lastOpenedAt)) return;
 
-            switch (action) {
-                case 'close': this.hide(); break;
-                case 'send': this._handleSendClick(); break;
-                case 'max': this._handleMaxClick(e.target.dataset.res); break;
-            }
-        });
-        
-        this.#panelElement.addEventListener('input', e => {
-            if (e.target.matches('input[type="number"]')) {
-                this._handleInputValidation(e.target);
-                this._updateTotalAndButtonState();
-            }
-        });
-    }
+      switch (action) {
+        case 'close': this.hide(); break;
+        case 'send': this._handleSendClick(); break;
+        case 'max': this._handleMaxClick(e.target.dataset.res); break;
+      }
+    });
 
-    show(targetTile, gameState) {
-        this.#targetTile = targetTile;
-        this.#gameState = gameState;
-        this.#gameConfig = new GameConfig().getSettings();
-        this.#activeVillage = this.#gameState.villages.find(v => v.id === this.#gameState.activeVillageId);
-        if (!this.#activeVillage) return;
-        this.#lastOpenedAt = markModalOpened();
-
-        this._render();
-        this.#panelElement.classList.remove('panel-hidden');
-        this.#panelElement.classList.add('panel-visible');
-    }
-
-    hide() {
-        this.#panelElement.classList.remove('panel-visible');
-        this.#panelElement.classList.add('panel-hidden');
-    }
-
-    _render() {
-        this._renderInfo();
-        this._renderInputsAndCapacity();
+    this.#panelElement.addEventListener('input', e => {
+      if (e.target.matches('input[type="number"]')) {
+        this._handleInputValidation(e.target);
         this._updateTotalAndButtonState();
+      }
+    });
+  }
+
+  show(targetTile, gameState) {
+    this.#targetTile = targetTile;
+    this.#gameState = gameState;
+    this.#gameConfig = new GameConfig().getSettings();
+    this.#activeVillage = this.#gameState.villages.find(v => v.id === this.#gameState.activeVillageId);
+    if (!this.#activeVillage) return;
+    this.#lastOpenedAt = markModalOpened();
+
+    this._render();
+    this.#panelElement.classList.remove('panel-hidden');
+    this.#panelElement.classList.add('panel-visible');
+  }
+
+  hide() {
+    this.#panelElement.classList.remove('panel-visible');
+    this.#panelElement.classList.add('panel-hidden');
+  }
+
+  _render() {
+    this._renderInfo();
+    this._renderInputsAndCapacity();
+    this._updateTotalAndButtonState();
+  }
+
+  _renderInfo() {
+    const targetVillage = this.#gameState.villages.find(v => v.coords.x === this.#targetTile.x && v.coords.y === this.#targetTile.y);
+    const infoContainer = this.#panelElement.querySelector('#trade-panel-info');
+    const perspectiveOwnerId = this.#activeVillage.ownerId;
+    const isOwnVillage = targetVillage?.ownerId === perspectiveOwnerId;
+    const ownerLabel = isOwnVillage ? 'Aldea propia' : `IA (${targetVillage?.race || '?'})`;
+
+    infoContainer.innerHTML = `
+      <div class="bg-gray-900/50 p-3 rounded-lg">
+        <div class="text-xs text-gray-400">Origen</div>
+        <div class="font-semibold text-white">${this.#activeVillage.name}</div>
+        <div class="font-mono text-gray-300">(${this.#activeVillage.coords.x}|${this.#activeVillage.coords.y})</div>
+      </div>
+      <div class="bg-gray-900/50 p-3 rounded-lg">
+        <div class="text-xs text-gray-400">Destino</div>
+        <div class="font-semibold text-white">${targetVillage ? targetVillage.name : `Aldea (${this.#targetTile.x}|${this.#targetTile.y})`}</div>
+        <div class="font-mono text-gray-300">(${this.#targetTile.x}|${this.#targetTile.y})</div>
+        <div class="text-xs mt-1 ${isOwnVillage ? 'text-green-400' : 'text-yellow-400'}">${ownerLabel}</div>
+      </div>
+    `;
+  }
+
+  _renderInputsAndCapacity() {
+    const merchantsContainer = this.#panelElement.querySelector('#trade-panel-merchants');
+    const inputsContainer = this.#panelElement.querySelector('#trade-panel-inputs');
+
+    const marketplace = this.#activeVillage.buildings.find(b => b.type === 'marketplace');
+    const merchantUnit = gameData.units[this.#activeVillage.race].troops.find(t => t.type === 'merchant');
+    this.#merchantCapacityPerUnit = getScaledMerchantCapacityPerUnit(
+      this.#activeVillage.race,
+      this.#gameConfig?.gameSpeed || 1,
+      merchantUnit?.stats.capacity || 0,
+    );
+
+    this.#totalMerchants = marketplace ? gameData.buildings.marketplace.levels[marketplace.level - 1].attribute.merchantCapacity : 0;
+    this.#busyMerchants = this.#activeVillage.merchantsBusy || 0;
+    this.#availableMerchants = Math.max(0, this.#totalMerchants - this.#busyMerchants);
+    this.#availableMerchantCapacity = this.#availableMerchants * this.#merchantCapacityPerUnit;
+
+    const totalCapacity = this.#totalMerchants * this.#merchantCapacityPerUnit;
+    const busyClass = this.#busyMerchants > 0 ? 'text-yellow-400' : 'text-white';
+
+    merchantsContainer.innerHTML = `
+      <div class="flex items-center gap-2">
+        ${ICONS.merchant}
+        <span class="font-semibold">
+          <span class="${busyClass}">${this.#availableMerchants}</span>/${this.#totalMerchants} Mercaderes
+        </span>
+        ${this.#busyMerchants > 0 ? `<span class="text-xs text-yellow-400 ml-1">(${this.#busyMerchants} en camino)</span>` : ''}
+      </div>
+      <div class="text-right">
+        <div class="text-xs text-gray-400">Cap. por mercader: <span class="font-mono text-white">${formatNumber(this.#merchantCapacityPerUnit)}</span></div>
+        <div class="text-sm font-mono">Capacidad Disp.: <span class="font-bold text-white">${formatNumber(this.#availableMerchantCapacity)}</span></div>
+      </div>
+    `;
+
+    const resources = ['wood', 'stone', 'iron', 'food'];
+    const iconMap = { wood: ICONS.wood, stone: ICONS.clay, iron: ICONS.iron, food: ICONS.wheat };
+
+    inputsContainer.innerHTML = resources.map(res => {
+      const available = Math.floor(this.#activeVillage.resources[res].current);
+      return `
+      <div class="flex items-center gap-3 p-2 bg-gray-700/50 rounded-lg">
+        <div class="w-8 h-8 flex items-center justify-center">${iconMap[res]}</div>
+        <div class="flex-grow font-semibold capitalize">${res === 'stone' ? 'Barro' : (res === 'food' ? 'Cereal' : res)}</div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-gray-400">(${formatNumber(available)})</span>
+          <input type="number" min="0" max="${available}" data-res="${res}" placeholder="0" class="w-32 bg-gray-900 border border-gray-600 text-white rounded-md p-1 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+          <button data-action="max" data-res="${res}" class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded-md">Máx</button>
+        </div>
+      </div>
+      `;
+    }).join('');
+  }
+
+  _handleInputValidation(input) {
+    const max = parseInt(input.max, 10);
+    let value = parseInt(input.value, 10);
+    if (isNaN(value) || value < 0) {
+      value = 0;
+    }
+    if (value > max) {
+      value = max;
+    }
+    input.value = value > 0 ? value : '';
+  }
+
+  _getTotalSent() {
+    let totalSent = 0;
+    this.#panelElement.querySelectorAll('input[type="number"]').forEach(input => {
+      totalSent += parseInt(input.value, 10) || 0;
+    });
+    return totalSent;
+  }
+
+  _getMerchantsNeeded(totalSent) {
+    if (totalSent <= 0 || this.#merchantCapacityPerUnit <= 0) return 0;
+    return Math.ceil(totalSent / this.#merchantCapacityPerUnit);
+  }
+
+  _updateTotalAndButtonState() {
+    const totalSent = this._getTotalSent();
+    const merchantsNeeded = this._getMerchantsNeeded(totalSent);
+    const exceedsCapacity = totalSent > this.#availableMerchantCapacity;
+    const notEnoughMerchants = merchantsNeeded > this.#availableMerchants;
+
+    const totalDisplay = this.#panelElement.querySelector('#trade-total-sent');
+    const merchantsNeededDisplay = this.#panelElement.querySelector('#trade-merchants-needed span:last-child');
+    const sendButton = this.#panelElement.querySelector('[data-action="send"]');
+
+    totalDisplay.textContent = formatNumber(totalSent);
+    totalDisplay.classList.toggle('text-red-400', exceedsCapacity);
+    totalDisplay.classList.toggle('text-white', !exceedsCapacity);
+
+    if (merchantsNeededDisplay) {
+      merchantsNeededDisplay.textContent = `${merchantsNeeded} / ${this.#availableMerchants}`;
+      merchantsNeededDisplay.classList.toggle('text-red-400', notEnoughMerchants);
+      merchantsNeededDisplay.classList.toggle('text-white', !notEnoughMerchants);
     }
 
-    _renderInfo() {
-        const targetVillage = this.#gameState.villages.find(v => v.coords.x === this.#targetTile.x && v.coords.y === this.#targetTile.y);
-        const infoContainer = this.#panelElement.querySelector('#trade-panel-info');
-        infoContainer.innerHTML = `
-            <div class="bg-gray-900/50 p-3 rounded-lg">
-                <div class="text-xs text-gray-400">Origen</div>
-                <div class="font-semibold text-white">${this.#activeVillage.name}</div>
-                <div class="font-mono text-gray-300">(${this.#activeVillage.coords.x}|${this.#activeVillage.coords.y})</div>
-            </div>
-            <div class="bg-gray-900/50 p-3 rounded-lg">
-                <div class="text-xs text-gray-400">Destino</div>
-                <div class="font-semibold text-white">${targetVillage.name}</div>
-                <div class="font-mono text-gray-300">(${targetVillage.coords.x}|${targetVillage.coords.y})</div>
-            </div>
-        `;
+    sendButton.disabled = totalSent === 0 || exceedsCapacity || notEnoughMerchants || this.#availableMerchants === 0;
+  }
+
+  _handleMaxClick(res) {
+    const inputs = Array.from(this.#panelElement.querySelectorAll('input[type="number"]'));
+    const otherInputs = inputs.filter(i => i.dataset.res !== res);
+    const targetInput = inputs.find(i => i.dataset.res === res);
+
+    let otherTotal = 0;
+    otherInputs.forEach(input => {
+      otherTotal += parseInt(input.value, 10) || 0;
+    });
+
+    const remainingCapacity = this.#availableMerchantCapacity - otherTotal;
+    const availableResource = parseInt(targetInput.max, 10);
+
+    targetInput.value = Math.max(0, Math.min(remainingCapacity, availableResource));
+    this._updateTotalAndButtonState();
+  }
+
+  _handleSendClick() {
+    const payload = {
+      originVillageId: this.#activeVillage.id,
+      targetCoords: this.#targetTile,
+      resources: {}
+    };
+
+    let totalSent = 0;
+    this.#panelElement.querySelectorAll('input[type="number"]').forEach(input => {
+      const count = parseInt(input.value, 10) || 0;
+      if (count > 0) {
+        payload.resources[input.dataset.res] = count;
+        totalSent += count;
+      }
+    });
+
+    if (totalSent === 0) {
+      toastUI.show('Debes enviar al menos 1 recurso.', 'warning');
+      return;
     }
 
-    _renderInputsAndCapacity() {
-        const merchantsContainer = this.#panelElement.querySelector('#trade-panel-merchants');
-        const inputsContainer = this.#panelElement.querySelector('#trade-panel-inputs');
-        
-        const marketplace = this.#activeVillage.buildings.find(b => b.type === 'marketplace');
-        const merchantUnit = gameData.units[this.#activeVillage.race].troops.find(t => t.type === 'merchant');
-        const merchantCapacityPerUnit = getScaledMerchantCapacityPerUnit(
-            this.#activeVillage.race,
-            this.#gameConfig?.gameSpeed || 1,
-            merchantUnit?.stats.capacity || 0,
-        );
-        
-        this.#availableMerchants = marketplace ? gameData.buildings.marketplace.levels[marketplace.level - 1].attribute.merchantCapacity : 0;
-        this.#merchantCapacity = this.#availableMerchants * merchantCapacityPerUnit;
-
-        merchantsContainer.innerHTML = `
-            <div class="flex items-center gap-2">${ICONS.merchant} <span class="font-semibold">${this.#availableMerchants} Mercaderes</span></div>
-            <div class="text-right">
-                <div class="text-xs text-gray-400">Cap. por mercader: <span class="font-mono text-white">${formatNumber(merchantCapacityPerUnit)}</span></div>
-                <div class="text-sm font-mono">Capacidad Total: <span class="font-bold text-white">${formatNumber(this.#merchantCapacity)}</span></div>
-            </div>
-        `;
-
-        const resources = ['wood', 'stone', 'iron', 'food'];
-        const iconMap = { wood: ICONS.wood, stone: ICONS.clay, iron: ICONS.iron, food: ICONS.wheat };
-
-        inputsContainer.innerHTML = resources.map(res => {
-            const available = Math.floor(this.#activeVillage.resources[res].current);
-            return `
-                <div class="flex items-center gap-3 p-2 bg-gray-700/50 rounded-lg">
-                    <div class="w-8 h-8 flex items-center justify-center">${iconMap[res]}</div>
-                    <div class="flex-grow font-semibold capitalize">${res === 'stone' ? 'Barro' : (res === 'food' ? 'Cereal' : res)}</div>
-                    <div class="flex items-center gap-2">
-                        <span class="text-sm text-gray-400">(${formatNumber(available)})</span>
-                        <input type="number" min="0" max="${available}" data-res="${res}" placeholder="0" class="w-32 bg-gray-900 border border-gray-600 text-white rounded-md p-1 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-                        <button data-action="max" data-res="${res}" class="px-3 py-1 text-xs bg-gray-600 hover:bg-gray-500 rounded-md">Máx</button>
-                    </div>
-                </div>
-            `;
-        }).join('');
+    if (totalSent > this.#availableMerchantCapacity) {
+      toastUI.show('La cantidad de recursos excede la capacidad de tus mercaderes disponibles.', 'error');
+      return;
     }
 
-    _handleInputValidation(input) {
-        const max = parseInt(input.max, 10);
-        let value = parseInt(input.value, 10);
-        if (isNaN(value) || value < 0) {
-            value = 0;
-        }
-        if (value > max) {
-            value = max;
-        }
-        input.value = value > 0 ? value : '';
+    const merchantsNeeded = this._getMerchantsNeeded(totalSent);
+    if (merchantsNeeded > this.#availableMerchants) {
+      toastUI.show(`Necesitas ${merchantsNeeded} mercaderes pero solo tienes ${this.#availableMerchants} disponibles.`, 'error');
+      return;
     }
 
-    _updateTotalAndButtonState() {
-        const totalDisplay = this.#panelElement.querySelector('#trade-total-sent');
-        const sendButton = this.#panelElement.querySelector('[data-action="send"]');
-        const inputs = this.#panelElement.querySelectorAll('input[type="number"]');
-        
-        let totalSent = 0;
-        inputs.forEach(input => {
-            totalSent += parseInt(input.value, 10) || 0;
-        });
-
-        totalDisplay.textContent = formatNumber(totalSent);
-        sendButton.disabled = totalSent === 0 || totalSent > this.#merchantCapacity || this.#availableMerchants === 0;
-    }
-    
-    _handleMaxClick(res) {
-        const inputs = Array.from(this.#panelElement.querySelectorAll('input[type="number"]'));
-        const otherInputs = inputs.filter(i => i.dataset.res !== res);
-        const targetInput = inputs.find(i => i.dataset.res === res);
-
-        let otherTotal = 0;
-        otherInputs.forEach(input => {
-            otherTotal += parseInt(input.value, 10) || 0;
-        });
-
-        const remainingCapacity = this.#merchantCapacity - otherTotal;
-        const availableResource = parseInt(targetInput.max, 10);
-
-        targetInput.value = Math.max(0, Math.min(remainingCapacity, availableResource));
-        this._updateTotalAndButtonState();
+    if (this.#availableMerchants === 0) {
+      toastUI.show('No tienes mercaderes disponibles. Espera a que regresen los que estan en camino.', 'error');
+      return;
     }
 
-    _handleSendClick() {
-        const payload = {
-            originVillageId: this.#activeVillage.id,
-            targetCoords: this.#targetTile,
-            resources: {}
-        };
-        
-        let totalSent = 0;
-        this.#panelElement.querySelectorAll('input[type="number"]').forEach(input => {
-            const count = parseInt(input.value, 10) || 0;
-            if (count > 0) {
-                payload.resources[input.dataset.res] = count;
-                totalSent += count;
-            }
-        });
-
-        if (totalSent === 0) {
-            toastUI.show('Debes enviar al menos 1 recurso.', 'warning');
-            return;
-        }
-        
-        if (totalSent > this.#merchantCapacity) {
-            toastUI.show('La cantidad de recursos excede la capacidad de tus mercaderes.', 'error');
-            return;
-        }
-
-        if (this.#availableMerchants === 0) {
-            toastUI.show('No tienes mercaderes disponibles.', 'error');
-            return;
-        }
-
-        gameManager.sendCommand('send_merchants', payload);
-        toastUI.show('Envío de mercaderes en camino.', 'success');
-        this.hide();
-    }
+    gameManager.sendCommand('send_merchants', payload);
+    toastUI.show(`${merchantsNeeded} mercader${merchantsNeeded > 1 ? 'es' : ''} en camino.`, 'success');
+    this.hide();
+  }
 }
 
 const tradePanelUI = new TradePanelUI();

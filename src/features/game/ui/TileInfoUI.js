@@ -530,12 +530,11 @@ class TileInfoUI {
 
         let footer = '';
         const canSendTroops = activeVillage && Object.values(activeVillage.unitsInVillage).some(count => count > 0);
-        const canSendMerchants = Boolean(
-            activeVillage
-            && data.ownerId === perspectiveOwnerId
-            && village.id !== activeVillage.id
-            && activeVillage.buildings.some(b => b.type === 'marketplace' && b.level > 0),
-        );
+  const canSendMerchants = Boolean(
+    activeVillage
+    && village.id !== activeVillage.id
+    && activeVillage.buildings.some(b => b.type === 'marketplace' && b.level > 0),
+  );
         
         const attackIsDisabled = !canSendTroops || (isProtected && data.ownerId !== perspectiveOwnerId);
         const sendTroopsDisabledAttr = attackIsDisabled ? 'disabled' : '';
