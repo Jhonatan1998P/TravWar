@@ -150,6 +150,7 @@ function getPhaseBucketForUnitId(village, phaseKey, unitId) {
         if (unit.type === 'cavalry' && unit.role === 'offensive') return 'offensiveCavalryMs';
         if (unit.role === 'ram') return 'ramMs';
         if (unit.role === 'scout') return 'scoutMs';
+        if (unit.type === 'settler' || unit.type === 'chief') return 'expansionMs';
         return null;
     }
 
@@ -1789,6 +1790,8 @@ function tryPhaseFourPriorityRecruitment({ village, gameState, actionExecutor, p
         createCycleMicroRecruitmentStep('ram'),
         createCycleMicroRecruitmentStep('scout'),
     ];
+    const expansionStep = getExpansionUnitStepIfReady(village, PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.palace);
+    if (expansionStep) baseSteps.push(expansionStep);
     const steps = filterRecruitmentStepsByCycleTargets({
         phaseState,
         difficulty,
@@ -1831,6 +1834,13 @@ function shouldPreferConquestExpansion(village) {
         && offensiveAndSiegeCount >= 250;
 }
 
+function getExpansionUnitStepIfReady(village, minPalaceLevel) {
+    const palaceLevel = getEffectiveBuildingTypeLevel(village, 'palace');
+    if (palaceLevel < minPalaceLevel) return null;
+    const unitType = shouldPreferConquestExpansion(village) ? 'chief' : 'settler';
+    return createCycleMicroRecruitmentStep(unitType);
+}
+
 function tryPhaseFivePriorityRecruitment({ village, gameState, actionExecutor, phaseState, difficulty }) {
     const baseSteps = [
         createCycleMicroRecruitmentStep('offensive_infantry'),
@@ -1839,6 +1849,8 @@ function tryPhaseFivePriorityRecruitment({ village, gameState, actionExecutor, p
         createCycleMicroRecruitmentStep('catapult'),
         createCycleMicroRecruitmentStep('scout'),
     ];
+    const expansionStep = getExpansionUnitStepIfReady(village, PHASE_FOUR_INFRASTRUCTURE_TARGETS.buildingLevels.palace);
+    if (expansionStep) baseSteps.push(expansionStep);
     const steps = filterRecruitmentStepsByCycleTargets({
         phaseState,
         difficulty,

@@ -165,8 +165,8 @@ export const GERMAN_PHASE_PROFILE = Object.freeze({
             phase1Emergency: { offensiveInfantry: 3, total: 3 },
             phase2: { total: 60, offensiveInfantry: 55, scout: 5 },
             phase3: { total: 170, offensiveInfantry: 120, scout: 10, offensiveCavalry: 40 },
-            phase4: { total: 220, offensiveInfantry: 150, scout: 10, offensiveCavalry: 50, ram: 10 },
-            phase5: { total: 370, offensiveInfantry: 250, scout: 10, offensiveCavalry: 80, ram: 20, catapult: 10 },
+            phase4: { total: 220, offensiveInfantry: 150, scout: 10, offensiveCavalry: 50, ram: 10, expansion: 1 },
+            phase5: { total: 370, offensiveInfantry: 250, scout: 10, offensiveCavalry: 80, ram: 20, catapult: 10, expansion: 2 },
         },
     }),
 });
