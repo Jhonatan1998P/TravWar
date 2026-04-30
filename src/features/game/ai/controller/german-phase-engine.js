@@ -148,6 +148,7 @@ function getPhaseBucketForUnitId(village, phaseKey, unitId) {
     if (phaseKey === 'phase4') {
         if (unit.type === 'infantry' && unit.role === 'offensive') return 'offensiveInfantryMs';
         if (unit.type === 'cavalry' && unit.role === 'offensive') return 'offensiveCavalryMs';
+        if (unit.role === 'ram') return 'ramMs';
         if (unit.role === 'scout') return 'scoutMs';
         return null;
     }
@@ -1328,7 +1329,7 @@ function tryThreatEmergencyRecruitment({ village, gameState, actionExecutor, dif
 
     const emergencyStep = {
         type: 'units',
-        unitType: 'defensive_infantry',
+        unitType: 'offensive_infantry',
         countMode: 'cycle_batch',
         cycleCount: cycles,
         allowBudgetBorrow: true,
@@ -1362,6 +1363,7 @@ function tryPhaseOnePriorityConstruction({ village, gameState, actionExecutor, p
         { type: 'building', buildingType: 'barracks', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.barracks },
         { type: 'building', buildingType: 'academy', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.academy },
         { type: 'building', buildingType: 'smithy', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.smithy },
+        { type: 'building', buildingType: 'rallyPoint', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.rallyPoint },
         { type: 'building', buildingType: 'warehouse', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.warehouse },
         { type: 'building', buildingType: 'granary', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.granary },
         { type: 'building', buildingType: 'grainMill', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.grainMill },
@@ -1419,6 +1421,7 @@ function tryPhaseTwoPriorityConstruction({ village, gameState, actionExecutor, p
         { type: 'building', buildingType: 'academy', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.academy },
         { type: 'building', buildingType: 'smithy', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.smithy },
         { type: 'building', buildingType: 'stable', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.stable },
+        { type: 'building', buildingType: 'grainMill', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.grainMill },
         { type: 'building', buildingType: 'warehouse', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.warehouse },
         { type: 'building', buildingType: 'granary', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.granary },
         { type: 'building', buildingType: 'cityWall', level: PHASE_TWO_EXIT_CONDITIONS.buildingLevels.cityWall },
@@ -1449,6 +1452,8 @@ function tryPhaseThreePriorityConstruction({ village, gameState, actionExecutor,
         { type: 'building', buildingType: 'academy', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.academy },
         { type: 'building', buildingType: 'smithy', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.smithy },
         { type: 'building', buildingType: 'stable', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.stable },
+        { type: 'building', buildingType: 'workshop', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.workshop },
+        { type: 'building', buildingType: 'rallyPoint', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.rallyPoint },
         { type: 'building', buildingType: 'warehouse', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.warehouse },
         { type: 'building', buildingType: 'granary', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.granary },
         { type: 'building', buildingType: 'grainMill', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.grainMill },
@@ -1565,10 +1570,12 @@ function tryPhaseOneEmergencyRecruitment({ village, gameState, actionExecutor, g
         return { success: false, reason: 'NO_DEFENSE_URGENCY' };
     }
 
-    const emergencyCycles = getCycleTargetForPhase(difficulty, 'phase1Emergency').defensiveInfantry || 3;
+    const emergencyCycles = getCycleTargetForPhase(difficulty, 'phase1Emergency').offensiveInfantry
+        || getCycleTargetForPhase(difficulty, 'phase1Emergency').defensiveInfantry
+        || 3;
     const emergencyStep = {
         type: 'units',
-        unitType: 'defensive_infantry',
+        unitType: 'offensive_infantry',
         countMode: 'cycle_batch',
         cycleCount: emergencyCycles,
         allowBudgetBorrow: true,
@@ -1778,8 +1785,9 @@ function tryPhaseThreeFallbackRecruitment({ village, gameState, actionExecutor, 
 function tryPhaseFourPriorityRecruitment({ village, gameState, actionExecutor, phaseState, difficulty }) {
     const baseSteps = [
         createCycleMicroRecruitmentStep('offensive_infantry'),
-        createCycleMicroRecruitmentStep('scout'),
         createCycleMicroRecruitmentStep('offensive_cavalry'),
+        createCycleMicroRecruitmentStep('ram'),
+        createCycleMicroRecruitmentStep('scout'),
     ];
     const steps = filterRecruitmentStepsByCycleTargets({
         phaseState,
@@ -1826,8 +1834,10 @@ function shouldPreferConquestExpansion(village) {
 function tryPhaseFivePriorityRecruitment({ village, gameState, actionExecutor, phaseState, difficulty }) {
     const baseSteps = [
         createCycleMicroRecruitmentStep('offensive_infantry'),
-        createCycleMicroRecruitmentStep('scout'),
         createCycleMicroRecruitmentStep('offensive_cavalry'),
+        createCycleMicroRecruitmentStep('ram'),
+        createCycleMicroRecruitmentStep('catapult'),
+        createCycleMicroRecruitmentStep('scout'),
     ];
     const steps = filterRecruitmentStepsByCycleTargets({
         phaseState,
@@ -2199,6 +2209,11 @@ const GERMAN_LEGACY_PHASE_ID_MAP = Object.freeze({
     german_phase_5_pending: GERMAN_PHASE_IDS.phase5,
     german_phase_done: GERMAN_PHASE_IDS.phaseDone,
     german_phase_template_done: GERMAN_PHASE_IDS.phaseDone,
+    german_phase_1_economic_bootstrap: GERMAN_PHASE_IDS.phase1,
+    german_phase_2_basic_military_unlock: GERMAN_PHASE_IDS.phase2,
+    german_phase_3_sustained_mixed_production: GERMAN_PHASE_IDS.phase3,
+    german_phase_4_military_pressure_tech: GERMAN_PHASE_IDS.phase4,
+    german_phase_5_siege_expansion: GERMAN_PHASE_IDS.phase5,
 });
 
 const GERMAN_CYCLE_BUCKET_ALIAS = Object.freeze({

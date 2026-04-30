@@ -35,11 +35,11 @@ const RACE_SIMULATION_PROFILES = Object.freeze({
         worldSeedPrefix: 'GERMAN_PHASE_SIM',
         phaseDoneId: GERMAN_PHASE_IDS.phaseDone,
         phaseNameById: Object.freeze({
-            [GERMAN_PHASE_IDS.phase1]: 'Fase 1 - Arranque economico',
-            [GERMAN_PHASE_IDS.phase2]: 'Fase 2 - Desbloqueo militar basico',
-            [GERMAN_PHASE_IDS.phase3]: 'Fase 3 - Produccion mixta sostenida',
-            [GERMAN_PHASE_IDS.phase4]: 'Fase 4 - Presion militar y tecnologia',
-            [GERMAN_PHASE_IDS.phase5]: 'Fase 5 - Asedio y expansion',
+            [GERMAN_PHASE_IDS.phase1]: 'Fase 1 - Inicio ofensivo',
+            [GERMAN_PHASE_IDS.phase2]: 'Fase 2 - Presion ofensiva y saqueos',
+            [GERMAN_PHASE_IDS.phase3]: 'Fase 3 - Caballeria ofensiva',
+            [GERMAN_PHASE_IDS.phase4]: 'Fase 4 - Martillo en formacion (arietes)',
+            [GERMAN_PHASE_IDS.phase5]: 'Fase 5 - Martillo supremo y expansion',
             [GERMAN_PHASE_IDS.phaseDone]: 'Plantilla completada',
         }),
         trackedUnitIds: Object.freeze([
