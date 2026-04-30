@@ -723,6 +723,33 @@ export function processPhaseActiveSubGoal({
             }
         }
 
+        if (neededResources && typeof buildResolverStep === 'function') {
+            const storageResolver = buildResolverStep(village, {
+                reason: 'INSUFFICIENT_RESOURCES',
+                step: subGoal.blockedStep,
+                details: subGoal.latestDetails,
+            });
+            if (storageResolver) {
+                const prevKind = subGoal.kind;
+                subGoal.kind = subGoalKind.buildPrerequisite;
+                subGoal.reason = 'STORAGE_CAPACITY_BOTTLENECK';
+                subGoal.resolverStep = storageResolver;
+                subGoal.nextAttemptAt = now;
+                if (now - (subGoal.lastLogAt || 0) >= config.logThrottleMs) {
+                    subGoal.lastLogAt = now;
+                    log(
+                        'warn',
+                        village,
+                        'Macro SubGoal',
+                        `Subgoal ${prevKind} detecta cuello de botella permanente de almacenamiento para ${getStepSignature(subGoal.blockedStep)}. Activando subida de almacen: ${getStepSignature(storageResolver)}.`,
+                        { needed: neededResources },
+                        'economic',
+                    );
+                }
+                return { handled: true };
+            }
+        }
+
         if (waitResourcesMode === 'retry_after_interval') {
             if (now < subGoal.nextAttemptAt) {
                 return { handled: true };
@@ -825,11 +852,34 @@ export function processPhaseActiveSubGoal({
     }
 
     if (result.reason === 'INSUFFICIENT_RESOURCES') {
-        subGoal.kind = subGoalKind.waitResources;
-        subGoal.reason = 'INSUFFICIENT_RESOURCES';
-        subGoal.blockedStep = cloneStep(resolverStep);
-        subGoal.resolverStep = null;
-        subGoal.latestDetails = result.details || null;
+        const storageResolver = typeof buildResolverStep === 'function'
+            ? buildResolverStep(village, { ...result, step: resolverStep })
+            : null;
+        if (storageResolver) {
+            subGoal.kind = subGoalKind.buildPrerequisite;
+            subGoal.reason = 'STORAGE_CAPACITY_BOTTLENECK';
+            subGoal.resolverStep = storageResolver;
+            subGoal.blockedStep = cloneStep(resolverStep);
+            subGoal.latestDetails = result.details || null;
+            subGoal.nextAttemptAt = now;
+            if (now - (subGoal.lastLogAt || 0) >= config.logThrottleMs) {
+                subGoal.lastLogAt = now;
+                log(
+                    'warn',
+                    village,
+                    'Macro SubGoal',
+                    `Subgoal resolver bloqueado por capacidad de almacenamiento en ${getStepSignature(resolverStep)}. Escalando a subida de almacen: ${getStepSignature(storageResolver)}.`,
+                    result.details || null,
+                    'economic',
+                );
+            }
+        } else {
+            subGoal.kind = subGoalKind.waitResources;
+            subGoal.reason = 'INSUFFICIENT_RESOURCES';
+            subGoal.blockedStep = cloneStep(resolverStep);
+            subGoal.resolverStep = null;
+            subGoal.latestDetails = result.details || null;
+        }
         return { handled: true };
     }
 
