@@ -159,13 +159,14 @@ export class VillageProcessor {
         this.#calculatePopulation();
     }
 
-    update(currentTime, lastTick) {
+    update(currentTime, lastTick, maxProductionSeconds) {
         this.#notifications = [];
         const elapsedSeconds = (currentTime - lastTick) / 1000;
 
         let needsRecalculation = this.#processQueues(currentTime);
         this.#processRecruitmentNotificationBatch(currentTime);
-        this.#updateResources(elapsedSeconds);
+        const productionSeconds = maxProductionSeconds != null ? Math.min(elapsedSeconds, maxProductionSeconds) : elapsedSeconds;
+        this.#updateResources(productionSeconds);
 
         if (needsRecalculation) {
             this.#calculateProduction();

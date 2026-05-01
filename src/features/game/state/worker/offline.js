@@ -8,6 +8,8 @@ export function simulateOfflineProgress({
     endTime,
 }) {
     let currentTime = startTime;
+    const MAX_PRODUCTION_MS = 2 * 60 * 60 * 1000;
+    let accumulatedProductionMs = 0;
 
     const allVillageJobs = gameState.villages.flatMap(village => [
         ...village.constructionQueue.map(job => ({ ...job, eventType: 'construction' })),
@@ -39,9 +41,13 @@ export function simulateOfflineProgress({
         const jobEndTime = job.endTime || job.arrivalTime;
         if (jobEndTime > endTime) break;
 
-        const elapsedSeconds = (jobEndTime - currentTime) / 1000;
-        if (elapsedSeconds > 0) {
-            villageProcessors.forEach(processor => processor.update(jobEndTime, currentTime));
+        const elapsedMs = jobEndTime - currentTime;
+        if (elapsedMs > 0) {
+            const remaining = Math.max(0, MAX_PRODUCTION_MS - accumulatedProductionMs);
+            const productionCapMs = Math.min(elapsedMs, remaining);
+            accumulatedProductionMs += productionCapMs;
+            const productionCapSeconds = productionCapMs / 1000;
+            villageProcessors.forEach(processor => processor.update(jobEndTime, currentTime, productionCapSeconds));
         }
 
         if (job.eventType === 'oasis_regen') {
@@ -53,9 +59,13 @@ export function simulateOfflineProgress({
         currentTime = jobEndTime;
     }
 
-    const remainingElapsedSeconds = (endTime - currentTime) / 1000;
-    if (remainingElapsedSeconds > 0) {
-        villageProcessors.forEach(processor => processor.update(endTime, currentTime));
+    const remainingMs = endTime - currentTime;
+    if (remainingMs > 0) {
+        const remaining = Math.max(0, MAX_PRODUCTION_MS - accumulatedProductionMs);
+        const productionCapMs = Math.min(remainingMs, remaining);
+        accumulatedProductionMs += productionCapMs;
+        const productionCapSeconds = productionCapMs / 1000;
+        villageProcessors.forEach(processor => processor.update(endTime, currentTime, productionCapSeconds));
         processOasisRegeneration(endTime);
     }
 }
