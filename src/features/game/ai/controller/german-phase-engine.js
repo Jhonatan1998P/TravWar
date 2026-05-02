@@ -418,7 +418,7 @@ function gateResourceFieldStepsByAverage(village, targetLevel, steps) {
     return normalizedSteps;
 }
 
-function evaluatePhaseOneExit(village, phaseState, difficulty) {
+function evaluatePhaseOneExit(village, phaseState, difficulty, actionExecutor) {
     const infraGate = evaluatePhaseInfrastructureTargets({
         village,
         getAverageResourceFieldLevel: candidateVillage => getResourceFieldStats(candidateVillage).average,
@@ -426,7 +426,11 @@ function evaluatePhaseOneExit(village, phaseState, difficulty) {
         targets: PHASE_ONE_EXIT_CONDITIONS,
     });
     const cycleGate = evaluateCycleTargets(phaseState, difficulty, 'phase1');
-    const researchReady = isPhaseResearchRequirementMet(village, 'offensive_infantry');
+    const researchUnitId = resolveResearchUnitId(village, actionExecutor, 'offensive_infantry');
+    const researchReady = researchUnitId
+        ? (!isResearchRequiredForUnitId(researchUnitId, village.race || 'germans')
+            || (village.research?.completed || []).includes(researchUnitId))
+        : false;
 
     return {
         ready: infraGate.ready && cycleGate.ready && researchReady,
@@ -466,7 +470,7 @@ function hasPhaseFourStoragePressure(village) {
     });
 }
 
-function evaluatePhaseFourExit(village, phaseState, difficulty) {
+function evaluatePhaseFourExit(village, phaseState, difficulty, actionExecutor) {
     const infraGate = evaluatePhaseInfrastructureTargets({
         village,
         getAverageResourceFieldLevel: candidateVillage => getResourceFieldStats(candidateVillage).average,
@@ -474,7 +478,11 @@ function evaluatePhaseFourExit(village, phaseState, difficulty) {
         targets: PHASE_FOUR_INFRASTRUCTURE_TARGETS,
     });
     const cycleGate = evaluateCycleTargets(phaseState, difficulty, 'phase4');
-    const researchReady = isPhaseResearchRequirementMet(village, 'ram');
+    const researchUnitId = resolveResearchUnitId(village, actionExecutor, 'ram');
+    const researchReady = researchUnitId
+        ? (!isResearchRequiredForUnitId(researchUnitId, village.race || 'germans')
+            || (village.research?.completed || []).includes(researchUnitId))
+        : false;
     const infantryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 12);
     const cavalryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_cavalry', 10);
     const upgradesReady = infantryUpgradeReady && cavalryUpgradeReady;
@@ -533,7 +541,7 @@ function getArmyBaseProgress(village, difficulty) {
     };
 }
 
-function evaluatePhaseThreeExit(village, phaseState, difficulty) {
+function evaluatePhaseThreeExit(village, phaseState, difficulty, actionExecutor) {
     const infraGate = evaluatePhaseInfrastructureTargets({
         village,
         getAverageResourceFieldLevel: candidateVillage => getResourceFieldStats(candidateVillage).average,
@@ -541,7 +549,11 @@ function evaluatePhaseThreeExit(village, phaseState, difficulty) {
         targets: PHASE_THREE_INFRASTRUCTURE_TARGETS,
     });
     const cycleGate = evaluateCycleTargets(phaseState, difficulty, 'phase3');
-    const researchReady = isPhaseResearchRequirementMet(village, 'offensive_cavalry');
+    const researchUnitId = resolveResearchUnitId(village, actionExecutor, 'offensive_cavalry');
+    const researchReady = researchUnitId
+        ? (!isResearchRequiredForUnitId(researchUnitId, village.race || 'germans')
+            || (village.research?.completed || []).includes(researchUnitId))
+        : false;
     const infantryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 10);
     const cavalryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_cavalry', 6);
     const upgradesReady = infantryUpgradeReady && cavalryUpgradeReady;
@@ -642,7 +654,7 @@ function getPhaseFiveExpansionProgress(village, phaseState, difficulty) {
     };
 }
 
-function evaluatePhaseFiveExit(village, phaseState, difficulty) {
+function evaluatePhaseFiveExit(village, phaseState, difficulty, actionExecutor) {
     const infraGate = evaluatePhaseInfrastructureTargets({
         village,
         getAverageResourceFieldLevel: candidateVillage => getResourceFieldStats(candidateVillage).average,
@@ -650,7 +662,11 @@ function evaluatePhaseFiveExit(village, phaseState, difficulty) {
         targets: PHASE_FIVE_INFRASTRUCTURE_TARGETS,
     });
     const cycleGate = evaluateCycleTargets(phaseState, difficulty, 'phase5');
-    const researchReady = isPhaseResearchRequirementMet(village, 'catapult');
+    const researchUnitId = resolveResearchUnitId(village, actionExecutor, 'catapult');
+    const researchReady = researchUnitId
+        ? (!isResearchRequiredForUnitId(researchUnitId, village.race || 'germans')
+            || (village.research?.completed || []).includes(researchUnitId))
+        : false;
     const infantryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_infantry', 15);
     const cavalryUpgradeReady = isPhaseUpgradeRequirementMet(village, 'offensive_cavalry', 12);
     const upgradesReady = infantryUpgradeReady && cavalryUpgradeReady;
@@ -2536,10 +2552,27 @@ export function runGermanEconomicPhaseCycle({
             log,
         });
 
-        const exit = evaluatePhaseOneExit(village, phaseState, difficulty);
+        const exit = evaluatePhaseOneExit(village, phaseState, difficulty, actionExecutor);
         if (exit.ready) {
             phaseState.phase1CompletedAt = now;
             transitionToPhaseTwo(phaseState, now, log, village);
+        } else if (now - (phaseState.lastIdleLogAt || 0) >= PHASE_ONE_PRIORITY.minIdleLogIntervalMs) {
+            const buildingBreaks = Object.entries(PHASE_ONE_EXIT_CONDITIONS.buildingLevels || {})
+                .filter(([_, lvl]) => (lvl || 0) > 0)
+                .map(([type, lvl]) => {
+                    const current = exit.details?.[type] ?? 0;
+                    return current < lvl ? `${type}:${current}/${lvl}` : null;
+                })
+                .filter(Boolean)
+                .join(', ');
+            log(
+                'info',
+                village,
+                'Macro Fase 1 Diagnostico',
+                `Exit NO lista. Research:${exit.researchReady ? 'OK' : 'PEND'} Ciclos:${exit.cycles?.total ?? 0}/${exit.cycleTargets?.total ?? 0} Campos:${exit.details?.resourceFieldsLevel ?? '?'} ${buildingBreaks ? 'Faltan:' + buildingBreaks : ''}`,
+                { details: exit.details, cycles: exit.cycles, targets: exit.cycleTargets, researchReady: exit.researchReady },
+                'economic',
+            );
         }
     }
 
@@ -2840,7 +2873,7 @@ export function runGermanEconomicPhaseCycle({
             return { handled: true, phaseState };
         }
 
-        const phase3Exit = evaluatePhaseThreeExit(village, phaseState, difficulty);
+        const phase3Exit = evaluatePhaseThreeExit(village, phaseState, difficulty, actionExecutor);
         if (phase3Exit.ready) {
             transitionToPhaseFour(phaseState, now, phase3Exit, log, village);
         }
@@ -2990,7 +3023,7 @@ export function runGermanEconomicPhaseCycle({
             return { handled: true, phaseState };
         }
 
-        const phase4Exit = evaluatePhaseFourExit(village, phaseState, difficulty);
+        const phase4Exit = evaluatePhaseFourExit(village, phaseState, difficulty, actionExecutor);
         if (phase4Exit.ready) {
             transitionToPhaseFive(phaseState, now, phase4Exit, log, village);
         }
@@ -3143,7 +3176,7 @@ export function runGermanEconomicPhaseCycle({
         return { handled: true, phaseState };
     }
 
-    const phase5Exit = evaluatePhaseFiveExit(village, phaseState, difficulty);
+    const phase5Exit = evaluatePhaseFiveExit(village, phaseState, difficulty, actionExecutor);
     if (phase5Exit.ready) {
         transitionToDone(phaseState, now, phase5Exit, log, village);
         return { handled: true, phaseState };
