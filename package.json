@@ -3,10 +3,10 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "vite --host 0.0.0.0 --port 5173 || node ./node_modules/vite/bin/vite.js --host 0.0.0.0 --port 5173",
-    "start": "vite --host 0.0.0.0 --port 5173 || node ./node_modules/vite/bin/vite.js --host 0.0.0.0 --port 5173",
-    "build": "vite build || node ./node_modules/vite/bin/vite.js build",
-    "preview": "vite preview || node ./node_modules/vite/bin/vite.js preview",
+    "dev": "vite --host 0.0.0.0 --port ${PORT:-5173}",
+    "start": "vite --host 0.0.0.0 --port ${PORT:-5173}",
+    "build": "vite build",
+    "preview": "vite preview",
     "perf:budget": "node scripts/perf/perf-budget.mjs",
     "build:check": "npm run build && npm run perf:budget"
   },

@@ -165,32 +165,36 @@ class BuildingInfoUI {
 
     _createPanelHTML() {
         const panelHTML = `
-            <div id="building-info-panel" class="fixed inset-0 h-[100dvh] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-200 ease-out panel-hidden">
-                <div class="bg-glass-bg border border-primary-border rounded-[2rem] shadow-2xl w-full max-w-md my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(100dvh-1rem)] backdrop-blur-2xl">
-                    <header id="panel-header" class="flex justify-between items-center p-4 border-b border-primary-border">
-                        <h2 id="panel-title" class="text-xl font-display font-bold text-war-gold"></h2>
-                        <button data-action="close" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar">×</button>
-                    </header>
-                    <main id="panel-main" class="flex flex-col p-4 overflow-y-auto min-h-0 max-h-[calc(100dvh-12rem)]"></main>
-                    <footer id="panel-footer" class="p-4 border-t border-primary-border space-y-2">
-                        <button id="upgrade-button" data-action="upgrade" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover text-war-mist font-bold py-3 px-4 rounded-xl transition duration-300 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed border border-primary-border">
+            <div id="building-info-panel" class="fixed inset-0 h-[100dvh] bg-primary-bg/80 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-50 transition-all duration-300 ease-out panel-hidden">
+                <div class="bg-glass-bg border border-primary-border rounded-2xl shadow-2xl shadow-black/40 w-full max-w-md my-2 sm:my-4 text-war-mist flex flex-col max-h-[calc(100dvh-1rem)] backdrop-blur-2xl">
+                    <header id="panel-header" class="flex justify-between items-center p-4 sm:p-5 border-b border-primary-border/60">
+                        <h2 id="panel-title" class="text-xl sm:text-2xl font-display font-bold text-war-gold truncate mr-2"></h2>
+                        <button data-action="close" class="shrink-0 flex items-center justify-center h-10 w-10 rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-colors duration-200" aria-label="Cerrar">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                         </button>
-                        <button id="demolish-button" data-action="demolish" class="w-full bg-red-950/70 hover:bg-red-900/80 text-red-100 font-bold py-3 px-4 rounded-xl transition duration-300 disabled:bg-btn-secondary-bg disabled:text-gray-500 disabled:cursor-not-allowed border border-red-500/35 flex items-center justify-center gap-2">
+                    </header>
+                    <main id="panel-main" class="flex flex-col p-4 sm:p-5 overflow-y-auto min-h-0 max-h-[calc(100dvh-14rem)]"></main>
+                    <footer id="panel-footer" class="p-4 sm:p-5 border-t border-primary-border/60 flex flex-col gap-3">
+                        <button id="upgrade-button" data-action="upgrade" class="w-full bg-btn-primary-bg hover:bg-btn-primary-hover active:scale-[0.98] text-war-mist font-bold py-3 px-4 rounded-xl transition-all duration-200 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed disabled:active:scale-100 border border-primary-border shadow-lg shadow-black/20">
+                        </button>
+                        <button id="demolish-button" data-action="demolish" class="w-full bg-red-950/70 hover:bg-red-900/80 active:scale-[0.98] text-red-100 font-bold py-3 px-4 rounded-xl transition-all duration-200 disabled:bg-btn-secondary-bg disabled:text-gray-500 disabled:cursor-not-allowed disabled:active:scale-100 border border-red-500/35 flex items-center justify-center gap-2">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 20h16M7 20l1.5-9h7L17 20M9 11V8a3 3 0 016 0v3M6 6l12 12" /></svg>
                             <span>Demoler un nivel</span>
                         </button>
                     </footer>
                 </div>
-                <div id="unit-info-modal" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm hidden flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-[60]">
-                    <div class="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-primary-border bg-gray-950/95 shadow-2xl text-war-mist">
-                        <header class="flex items-center justify-between gap-3 p-4 border-b border-primary-border sticky top-0 bg-gray-950/95 backdrop-blur-xl">
+                <div id="unit-info-modal" class="fixed inset-0 h-[100dvh] bg-black/70 backdrop-blur-sm hidden flex items-start sm:items-center justify-center overflow-y-auto p-2 sm:p-4 z-[60] transition-all duration-200">
+                    <div class="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-primary-border bg-gray-950/95 shadow-2xl shadow-black/40 text-war-mist">
+                        <header class="flex items-center justify-between gap-3 p-4 sm:p-5 border-b border-primary-border/60 sticky top-0 bg-gray-950/95 backdrop-blur-xl">
                             <div class="min-w-0">
                                 <h3 id="unit-info-title" class="text-xl font-display font-bold text-war-gold truncate"></h3>
                                 <p id="unit-info-subtitle" class="text-xs text-gray-400 mt-1"></p>
                             </div>
-                            <button data-action="close-unit-info" class="min-h-11 min-w-11 text-gray-400 text-3xl leading-none hover:text-white" aria-label="Cerrar informacion de unidad">×</button>
+                            <button data-action="close-unit-info" class="shrink-0 flex items-center justify-center h-10 w-10 rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-colors duration-200" aria-label="Cerrar informacion de unidad">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                            </button>
                         </header>
-                        <div id="unit-info-content" class="p-4 space-y-4"></div>
+                        <div id="unit-info-content" class="p-4 sm:p-5 space-y-4"></div>
                     </div>
                 </div>
             </div>`;
@@ -321,11 +325,11 @@ class BuildingInfoUI {
         const activeVillage = this.#currentGameState.villages.find(v => v.id === this.#currentGameState.activeVillageId);
         if (!activeVillage) return '';
 
-        let html = '<div class="mt-2 border-t border-primary-border pt-2 text-xs space-y-1">';
+        let html = '<div class="mt-2 pt-2 border-t border-primary-border/40 text-xs space-y-1">';
         html += `<span class="text-gray-400 font-semibold">Requisitos:</span>`;
 
         if (buildingData.allowedRaces && !buildingData.allowedRaces.includes(activeVillage.race)) {
-            html += `<p class="text-red-400">Solo disponible para Egipcios</p>`;
+            html += `<p class="text-red-400 flex items-center gap-1"><span class="shrink-0">✗</span> Solo disponible para Egipcios</p>`;
         }
 
         if (!buildingData.requires) {
@@ -349,7 +353,7 @@ class BuildingInfoUI {
             const colorClass = isMet ? 'text-green-400' : 'text-red-400';
             const buildingName = gameData.buildings[reqBuildingType].name;
 
-            html += `<p class="${colorClass}">${buildingName} (Nivel ${requiredLevel})</p>`;
+            html += `<p class="${colorClass} flex items-center gap-1.5"><span class="shrink-0">${isMet ? '✓' : '✗'}</span> ${buildingName} (Nivel ${requiredLevel})</p>`;
         }
         html += '</div>';
         return html;
@@ -363,7 +367,7 @@ class BuildingInfoUI {
         const requirements = unitData?.research?.requires;
         if (!requirements) return '';
     
-        let html = '<div class="mt-2 border-t border-primary-border pt-2 text-xs space-y-1">';
+        let html = '<div class="mt-3 pt-3 border-t border-primary-border/40 text-xs space-y-1.5">';
         html += `<span class="text-gray-400 font-semibold">Requisitos de Investigación:</span>`;
         
         for (const reqBuildingType in requirements) {
@@ -374,7 +378,10 @@ class BuildingInfoUI {
             const colorClass = isMet ? 'text-green-400' : 'text-red-400';
             const buildingName = gameData.buildings[reqBuildingType].name;
             
-            html += `<p class="${colorClass}">${buildingName} (Nivel ${requiredLevel})</p>`;
+            html += `<p class="${colorClass} flex items-center gap-1.5">
+                <span class="shrink-0">${isMet ? '✓' : '✗'}</span>
+                ${buildingName} (Nivel ${requiredLevel})
+            </p>`;
         }
         html += '</div>';
         return html;
@@ -435,14 +442,14 @@ class BuildingInfoUI {
         this.#panelElement.querySelector('#panel-footer').classList.add('hidden');
         
         mainPanel.innerHTML = `
-            <div id="build-tabs" class="flex border-b border-primary-border/50 mb-1">
-                <button data-tab="infrastructure" class="tab-button active px-4 py-2 text-sm font-semibold transition-colors">Infraestructura</button>
-                <button data-tab="military" class="tab-button px-4 py-2 text-sm font-semibold transition-colors">Militar</button>
-                <button data-tab="economy" class="tab-button px-4 py-2 text-sm font-semibold transition-colors">Economía</button>
+            <div id="build-tabs" class="flex border-b border-primary-border/50 gap-1 mb-3">
+                <button data-tab="infrastructure" class="tab-button active flex-1">Infraestructura</button>
+                <button data-tab="military" class="tab-button flex-1">Militar</button>
+                <button data-tab="economy" class="tab-button flex-1">Economía</button>
             </div>
-            <div class="flex items-center justify-end my-2">
-                <label for="show-all-toggle" class="text-xs text-gray-400 mr-2 cursor-pointer">Mostrar todos</label>
-                <input type="checkbox" id="show-all-toggle" class="bg-btn-secondary-bg border-primary-border text-blue-500 rounded focus:ring-2 focus:ring-blue-500/50 cursor-pointer">
+            <div class="flex items-center justify-end gap-2 mb-3">
+                <label for="show-all-toggle" class="text-xs text-gray-400 select-none cursor-pointer hover:text-gray-300 transition-colors duration-200">Mostrar todos</label>
+                <input type="checkbox" id="show-all-toggle" class="h-4 w-4 rounded border-gray-600 bg-gray-800 text-war-gold focus:ring-2 focus:ring-war-gold/50 focus:ring-offset-0 cursor-pointer accent-war-gold">
             </div>
             <div id="build-content-container" class="flex-grow overflow-y-auto"></div>
         `;
@@ -514,18 +521,18 @@ class BuildingInfoUI {
             const buttonDisabled = canBuild ? '' : 'disabled';
             const requirementsHTML = canBuild ? '' : this._getMissingBuildingRequirementsHTML(bId);
 
-            categoryContent += `<button data-btype="${bId}" class="text-left p-3 bg-glass-bg rounded-lg w-full ${buttonClasses} border border-primary-border" ${buttonDisabled}>
+            categoryContent += `<button data-btype="${bId}" class="text-left p-3 bg-glass-bg rounded-xl w-full ${buttonClasses} border border-primary-border/60 transition-all duration-200" ${buttonDisabled}>
                 <span class="font-bold text-yellow-400">${buildingData.name}</span>
-                <p class="text-xs text-gray-400 mt-1">${buildingData.description.substring(0, 100)}...</p>
+                <p class="text-xs text-gray-400 mt-1 leading-relaxed">${buildingData.description.substring(0, 100)}...</p>
                 ${requirementsHTML}
             </button>`;
         });
 
         if (categoryContent === '') {
-            categoryContent = `<p class="text-gray-500 text-sm col-span-full text-center py-4">No hay edificios disponibles en esta categoría.</p>`;
+            categoryContent = `<p class="text-gray-500 text-sm col-span-full text-center py-8">No hay edificios disponibles en esta categoría.</p>`;
         }
         
-        contentContainer.innerHTML = `<div class="grid grid-cols-1 md:grid-cols-2 gap-2">${categoryContent}</div>`;
+        contentContainer.innerHTML = `<div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">${categoryContent}</div>`;
     }
 
     _renderBuildingDetails() {
@@ -539,7 +546,7 @@ class BuildingInfoUI {
         
         this.#panelElement.querySelector('#panel-title').textContent = `${buildingStaticData.name} (Nivel ${currentLevel})`;
         
-        mainPanel.innerHTML = `<p class="mb-4 text-gray-300">${buildingStaticData.description}</p>
+        mainPanel.innerHTML = `<p class="mb-5 text-gray-300 text-sm leading-relaxed">${buildingStaticData.description}</p>
                              <div id="upgrade-info-container"></div>
                              <div id="building-details-content"></div>`;
         
@@ -962,7 +969,7 @@ _renderNpcExchangePanel(container) {
             }
         }
 
-        return benefitsList ? `<div class="p-3 bg-glass-bg rounded-lg text-blue-200 text-sm mb-4 border border-primary-border"><ul>${benefitsList}</ul></div>` : '';
+        return benefitsList ? `<div class="p-3 bg-glass-bg rounded-xl text-blue-200 text-sm mb-4 border border-primary-border/60 shadow-sm"><ul class="space-y-1">${benefitsList}</ul></div>` : '';
     }
 
     _getMaxLevelBenefitsHTML(buildingData, currentLevel, activeVillage) {
@@ -1060,7 +1067,7 @@ _renderNpcExchangePanel(container) {
             return '';
         }
 
-        return `<div class="p-3 bg-glass-bg rounded-lg text-blue-200 text-sm mb-4 border border-primary-border"><h3 class="font-bold mb-2 text-gray-300">Bonificacion actual (nivel maximo)</h3><ul>${benefitsList}</ul></div>`;
+        return `<div class="p-3 bg-glass-bg rounded-xl text-blue-200 text-sm mb-4 border border-primary-border/60"><h3 class="font-bold mb-2 text-gray-200">Bonificacion actual (nivel maximo)</h3><ul class="space-y-1">${benefitsList}</ul></div>`;
     }
     
     _createCostsHTML() {
@@ -1068,15 +1075,15 @@ _renderNpcExchangePanel(container) {
         if (!upgradeInfoContainer) return;
 
         let costsHTML = '<div id="benefits-container"></div>';
-        costsHTML += '<h3 class="font-bold mb-1 text-gray-400">Costes de Mejora</h3><div class="grid grid-cols-2 gap-x-4 gap-y-2">';
+        costsHTML += '<h3 class="font-bold mb-2 text-gray-400 text-sm">Costes de Mejora</h3><div class="grid grid-cols-2 sm:grid-cols-3 gap-2">';
         const costKeys = ['wood', 'stone', 'iron', 'food', 'time', 'population'];
 
         for (const key of costKeys) {
             const iconKey = RESOURCE_ICON_MAP[key] || key;
-            costsHTML += `<div class="flex items-center gap-2 p-2 bg-glass-bg rounded-md border border-primary-border" data-cost-key="${key}">
-                <span class="text-yellow-400">${ICONS[iconKey]}</span>
-                <span class="font-semibold" data-cost-value></span>
-                <span class="ml-auto text-xs text-gray-400" data-player-amount></span>
+            costsHTML += `<div class="flex items-center gap-2 p-2.5 bg-glass-bg rounded-lg border border-primary-border/60" data-cost-key="${key}">
+                <span class="text-yellow-400 shrink-0">${ICONS[iconKey]}</span>
+                <span class="font-semibold text-sm leading-tight" data-cost-value></span>
+                <span class="ml-auto text-xs text-gray-400 leading-tight text-right" data-player-amount></span>
             </div>`;
         }
         costsHTML += '</div>';
@@ -1125,7 +1132,7 @@ _renderNpcExchangePanel(container) {
 
         if (!nextLevelData) {
             const maxBenefitsHTML = this._getMaxLevelBenefitsHTML(buildingStaticData, effectiveCurrentLevel, activeVillage);
-            upgradeInfoContainer.innerHTML = `${maxBenefitsHTML}<div class="text-center p-4 max-level-notice">Este edificio ha alcanzado su maximo nivel.</div>`;
+            upgradeInfoContainer.innerHTML = `${maxBenefitsHTML}<div class="text-center p-4 rounded-xl bg-gray-900/40 border border-primary-border/40 border-dashed"><span class="text-gray-400 text-sm">Este edificio ha alcanzado su maximo nivel.</span></div>`;
             footer.classList.toggle('hidden', !demolitionState.canDemolish && !demolitionState.demolitionUnlocked);
             const upgradeButton = this.#panelElement.querySelector('#upgrade-button');
             if (upgradeButton) upgradeButton.classList.add('hidden');
@@ -1192,13 +1199,13 @@ _renderNpcExchangePanel(container) {
     }
 
     _getUnitNameButtonHTML(unit) {
-        return `<button data-action="unit-info" data-unit-id="${unit.id}" class="text-left font-bold text-yellow-400 hover:text-yellow-200 underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-war-gold/70 rounded px-1 -ml-1">${unit.name}</button>`;
+        return `<button data-action="unit-info" data-unit-id="${unit.id}" class="text-left font-bold text-yellow-400 hover:text-yellow-200 underline-offset-2 hover:underline focus:outline-none focus:ring-2 focus:ring-war-gold/70 rounded px-1 -ml-1 transition-colors duration-200">${unit.name}</button>`;
     }
 
     _getUnitHeaderHTML(unit, { showExchange = false } = {}) {
-        return `<div class="inline-flex items-center gap-1.5 min-w-0 align-middle leading-none">
+        return `<div class="inline-flex items-center gap-1.5 min-w-0 align-middle leading-tight">
             ${this._getUnitNameButtonHTML(unit)}
-            ${showExchange ? `<button data-action="optimize-unit-exchange" data-unit-id="${unit.id}" class="shrink-0 inline-flex h-5 w-5 items-center justify-center rounded-md text-amber-200 hover:bg-amber-500/15 focus:outline-none focus:ring-1 focus:ring-war-gold/70" title="Intercambio optimo para reclutar mas ${unit.name}" aria-label="Intercambio optimo para ${unit.name}">${ICONS.exchange}</button>` : ''}
+            ${showExchange ? `<button data-action="optimize-unit-exchange" data-unit-id="${unit.id}" class="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-md text-amber-300 hover:bg-amber-500/20 hover:text-amber-200 focus:outline-none focus:ring-1 focus:ring-war-gold/70 transition-colors duration-200" title="Intercambio optimo para reclutar mas ${unit.name}" aria-label="Intercambio optimo para ${unit.name}">${ICONS.exchange}</button>` : ''}
         </div>`;
     }
 
@@ -1378,9 +1385,9 @@ _renderNpcExchangePanel(container) {
 
     _getCostGridHTML(cost = {}) {
         return RESOURCE_KEYS.map(resourceKey => `
-            <div class="flex items-center gap-2 rounded-lg bg-gray-900/60 border border-primary-border/60 p-2" title="${RESOURCE_LABELS[resourceKey]}">
+            <div class="flex items-center gap-2 rounded-lg bg-gray-900/60 border border-primary-border/40 p-2.5" title="${RESOURCE_LABELS[resourceKey]}">
                 ${ICONS[RESOURCE_ICON_MAP[resourceKey]]}
-                <span class="text-gray-300">${formatNumber(cost[resourceKey] || 0)}</span>
+                <span class="text-gray-200 font-medium">${formatNumber(cost[resourceKey] || 0)}</span>
             </div>
         `).join('');
     }
@@ -1403,32 +1410,38 @@ _renderNpcExchangePanel(container) {
         title.textContent = unit.name;
         subtitle.textContent = `${UNIT_TYPE_LABELS[unit.type] || unit.type || 'Unidad'} · ${UNIT_ROLE_LABELS[unit.role] || unit.role || 'Sin rol definido'}`;
         content.innerHTML = `
-            <div class="flex items-start gap-3">
-                <div class="shrink-0 mt-1">${unitSpriteManager.getUnitSprite(unit.id, activeVillage.race)}</div>
+            <div class="flex items-start gap-4 p-3 rounded-xl bg-glass-bg border border-primary-border/60">
+                <div class="shrink-0">${unitSpriteManager.getUnitSprite(unit.id, activeVillage.race)}</div>
                 <p class="text-sm leading-6 text-gray-300">${unit.description || 'Sin descripcion disponible.'}</p>
             </div>
 
-            <section class="rounded-xl border border-primary-border bg-glass-bg p-3">
-                <h4 class="font-bold text-gray-200 mb-2">${contextDetails.title}</h4>
+            <section class="rounded-xl border border-primary-border/60 bg-glass-bg p-3 sm:p-4">
+                <h4 class="font-bold text-gray-200 mb-3 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-war-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    ${contextDetails.title}
+                </h4>
                 <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm mb-3">
                     ${this._getCostGridHTML(contextDetails.cost)}
                 </div>
-                <div class="flex items-center gap-2 rounded-lg bg-gray-900/60 border border-primary-border/60 p-2 text-sm">
+                <div class="flex items-center gap-2 rounded-lg bg-gray-900/60 border border-primary-border/60 p-2.5 text-sm">
                     ${ICONS.time}
                     <span class="text-gray-400">Tiempo:</span>
-                    <span class="font-mono text-white">${this._formatPreciseTime(contextDetails.time)}</span>
+                    <span class="font-mono text-white font-semibold">${this._formatPreciseTime(contextDetails.time)}</span>
                 </div>
             </section>
 
-            <section class="rounded-xl border border-primary-border bg-glass-bg p-3">
-                <h4 class="font-bold text-gray-200 mb-2">Estadisticas</h4>
-                <div class="grid grid-cols-2 gap-2 text-sm">
-                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2"><span class="text-gray-400">Ataque</span><div class="font-mono text-white">${formatNumber(stats.attack || 0)}</div></div>
-                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2"><span class="text-gray-400">Def. infanteria</span><div class="font-mono text-white">${formatNumber(defense.infantry || 0)}</div></div>
-                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2"><span class="text-gray-400">Def. caballeria</span><div class="font-mono text-white">${formatNumber(defense.cavalry || 0)}</div></div>
-                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2"><span class="text-gray-400">Velocidad</span><div class="font-mono text-white">${formatNumber(stats.speed || 0)} casillas/h</div></div>
-                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2"><span class="text-gray-400">Carga</span><div class="font-mono text-white">${formatNumber(stats.capacity || 0)}</div></div>
-                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2"><span class="text-gray-400">Consumo</span><div class="font-mono text-white">${formatNumber(unit.upkeep || 0)} cereal/h</div></div>
+            <section class="rounded-xl border border-primary-border/60 bg-glass-bg p-3 sm:p-4">
+                <h4 class="font-bold text-gray-200 mb-3 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-war-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                    Estadisticas
+                </h4>
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm">
+                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2.5"><span class="text-gray-400 text-xs">Ataque</span><div class="font-mono text-white font-semibold mt-0.5">${formatNumber(stats.attack || 0)}</div></div>
+                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2.5"><span class="text-gray-400 text-xs">Def. inf.</span><div class="font-mono text-white font-semibold mt-0.5">${formatNumber(defense.infantry || 0)}</div></div>
+                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2.5"><span class="text-gray-400 text-xs">Def. cab.</span><div class="font-mono text-white font-semibold mt-0.5">${formatNumber(defense.cavalry || 0)}</div></div>
+                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2.5"><span class="text-gray-400 text-xs">Velocidad</span><div class="font-mono text-white font-semibold mt-0.5">${formatNumber(stats.speed || 0)} <span class="text-xs font-normal text-gray-400">/h</span></div></div>
+                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2.5"><span class="text-gray-400 text-xs">Carga</span><div class="font-mono text-white font-semibold mt-0.5">${formatNumber(stats.capacity || 0)}</div></div>
+                    <div class="rounded-lg bg-gray-900/60 border border-primary-border/60 p-2.5"><span class="text-gray-400 text-xs">Consumo</span><div class="font-mono text-white font-semibold mt-0.5">${formatNumber(unit.upkeep || 0)} <span class="text-xs font-normal text-gray-400">/h</span></div></div>
                 </div>
             </section>
         `;
@@ -1468,9 +1481,9 @@ _renderNpcExchangePanel(container) {
     _renderUnitToggleCheckbox(container, updateFunction) {
         const label = this.#viewingType === 'academy' ? 'Mostrar todas las unidades' : 'Mostrar no investigadas';
         container.innerHTML = `
-            <div class="flex items-center justify-end my-2">
-                <label for="show-all-units-toggle" class="text-xs text-gray-400 mr-2 cursor-pointer">${label}</label>
-                <input type="checkbox" id="show-all-units-toggle" class="bg-btn-secondary-bg border-primary-border text-blue-500 rounded focus:ring-2 focus:ring-blue-500/50 cursor-pointer">
+            <div class="flex items-center justify-end gap-2 mb-3">
+                <label for="show-all-units-toggle" class="text-xs text-gray-400 select-none cursor-pointer hover:text-gray-300 transition-colors">${label}</label>
+                <input type="checkbox" id="show-all-units-toggle" class="h-4 w-4 rounded border-gray-600 bg-gray-800 text-war-gold focus:ring-2 focus:ring-war-gold/50 focus:ring-offset-0 cursor-pointer accent-war-gold">
             </div>
             <div id="unit-list" class="space-y-3"></div>`;
 
@@ -1642,8 +1655,11 @@ _renderNpcExchangePanel(container) {
     }
 
     _renderTroopTraining(container) {
-        container.innerHTML = `<div class="border-t border-primary-border mt-4 pt-4">
-                            <h3 class="font-bold mb-2 text-gray-400">Entrenar Tropas</h3>
+        container.innerHTML = `<div class="border-t border-primary-border/60 mt-5 pt-5">
+                            <div class="flex items-center gap-2 mb-3">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-war-gold" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                <h3 class="font-bold text-gray-200 text-base">Entrenar Tropas</h3>
+                            </div>
                             <div id="unit-list-container"></div>
                          </div>`;
         const listContainer = container.querySelector('#unit-list-container');
@@ -1799,34 +1815,37 @@ _renderNpcExchangePanel(container) {
             const disabledClasses = !canTrain ? 'opacity-50 cursor-not-allowed' : '';
             
             unitsToShowHTML += `
-                <div class="p-3 bg-glass-bg rounded-lg ${disabledClasses} border border-primary-border" data-unit-id="${unit.id}">
-                    <div class="flex justify-between items-center mb-2">
-                        <div class="flex items-center gap-3">
-                            ${unitSpriteManager.getUnitSprite(unit.id, activeVillage.race)}
-                            ${this._getUnitHeaderHTML(unit, { showExchange: showUnitExchange && canTrain })}
+                <div class="p-3 sm:p-4 bg-glass-bg rounded-xl ${disabledClasses} border border-primary-border/60 hover:border-primary-border transition-colors duration-200" data-unit-id="${unit.id}">
+                    <div class="flex justify-between items-start gap-2 mb-3">
+                        <div class="flex items-center gap-3 min-w-0">
+                            <div class="shrink-0">${unitSpriteManager.getUnitSprite(unit.id, activeVillage.race)}</div>
+                            <div class="min-w-0">
+                                ${this._getUnitHeaderHTML(unit, { showExchange: showUnitExchange && canTrain })}
+                                <span class="block text-xs text-gray-500 mt-0.5">${UNIT_TYPE_LABELS[unit.type] || ''}</span>
+                            </div>
                         </div>
-                        <div class="flex items-center gap-1 text-xs text-gray-400" title="Tiempo de entrenamiento por unidad">
-                            ${ICONS.time} ${formatTime(finalTrainTime)}
+                        <div class="shrink-0 flex items-center gap-1.5 text-xs text-gray-400 bg-gray-900/50 rounded-lg px-2 py-1 border border-primary-border/40" title="Tiempo de entrenamiento por unidad">
+                            ${ICONS.time} <span class="font-mono text-gray-200">${formatTime(finalTrainTime)}</span>
                         </div>
                     </div>
                     
-                    <div class="grid grid-cols-5 gap-2 mb-3 text-xs">
+                    <div class="grid grid-cols-3 sm:grid-cols-5 gap-1.5 mb-3 text-xs">
                         ${Object.entries(unit.cost).map(([res, val]) => `
-                            <div class="flex items-center gap-1" title="${res.charAt(0).toUpperCase() + res.slice(1)}">
+                            <div class="flex items-center gap-1.5 bg-gray-900/40 rounded-md px-2 py-1.5 border border-primary-border/30" title="${res.charAt(0).toUpperCase() + res.slice(1)}">
                                 ${ICONS[RESOURCE_ICON_MAP[res]]}
-                                <span class="text-gray-300">${formatNumber(val)}</span>
+                                <span class="text-gray-300 font-medium">${formatNumber(val)}</span>
                             </div>
                         `).join('')}
-                        <div class="flex items-center gap-1" title="Consumo de cereal">
+                        <div class="flex items-center gap-1.5 bg-gray-900/40 rounded-md px-2 py-1.5 border border-primary-border/30" title="Consumo de cereal">
                             ${ICONS[RESOURCE_ICON_MAP.food]}
-                            <span class="text-gray-300">${unit.upkeep}</span>
+                            <span class="text-gray-300 font-medium">${unit.upkeep}/h</span>
                         </div>
                     </div>
 
-                    <div class="flex gap-2">
-                        <input type="number" inputmode="numeric" min="0" placeholder="Cant." class="w-24 bg-btn-secondary-bg border-primary-border text-white rounded-md p-1 text-center font-mono focus:ring-2 focus:ring-blue-500 focus:border-blue-500" ${disabledState}>
-                        <button data-action="max-train" data-unit-id="${unit.id}" class="px-3 py-1 text-xs bg-btn-secondary-bg hover:bg-btn-secondary-hover rounded-md border border-primary-border" ${disabledState}>Máx</button>
-                        <button data-action="train" data-unit-id="${unit.id}" class="flex-grow bg-btn-primary-bg hover:bg-btn-primary-hover text-white font-bold py-1 px-3 rounded-lg transition duration-300 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed border border-primary-border" ${disabledState}>
+                    <div class="flex gap-2 items-center">
+                        <input type="number" inputmode="numeric" min="0" placeholder="Cant." class="w-20 sm:w-24 bg-gray-900/60 border border-gray-600/60 text-white rounded-lg py-1.5 text-center font-mono text-sm focus:ring-2 focus:ring-war-gold/50 focus:border-war-gold/50 outline-none transition-all duration-200 placeholder:text-gray-600" ${disabledState}>
+                        <button data-action="max-train" data-unit-id="${unit.id}" class="shrink-0 px-3 py-1.5 text-xs font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-600/60 transition-all duration-200" ${disabledState}>Máx</button>
+                        <button data-action="train" data-unit-id="${unit.id}" class="flex-1 bg-btn-primary-bg hover:bg-btn-primary-hover active:scale-[0.98] text-white font-bold py-1.5 px-4 rounded-lg transition-all duration-200 disabled:bg-btn-secondary-bg disabled:cursor-not-allowed disabled:active:scale-100 border border-primary-border shadow-lg shadow-black/20" ${disabledState}>
                             Entrenar
                         </button>
                     </div>

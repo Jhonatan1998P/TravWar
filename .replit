@@ -7,10 +7,6 @@ channel = "stable-25_05"
 expertMode = true
 
 [[ports]]
-localPort = 5173
-externalPort = 80
-
-[[ports]]
 localPort = 5000
 externalPort = 80
 
@@ -38,5 +34,5 @@ outputType = "webview"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npx vite --host 0.0.0.0 --port 5000"
+args = "PORT=5000 npm run dev"
 waitForPort = 5000

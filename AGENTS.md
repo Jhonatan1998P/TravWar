@@ -7,7 +7,7 @@
 
 ## Dev Commands
 ```bash
-npm run dev      # Start dev server (port 5173, or 5000 in Replit)
+npm run dev      # Start dev server (port via $PORT env, default 5173)
 npm run build    # Production build
 npm run build:check  # Build + performance budget check
 npm run preview  # Preview production build
@@ -40,5 +40,5 @@ npm run preview  # Preview production build
 - Performance utilities in `src/shared/lib/perf.js`
 
 ## Replit-Specific
-- `.replit` configures ports 5173 (internal) → 80 (external) and 5000
-- `npx vite --host 0.0.0.0 --port 5000` runs in Replit workflows
+- `.replit` configures port 5000 (internal) → 80 (external)
+- `PORT=5000 npm run dev` runs in Replit workflows
