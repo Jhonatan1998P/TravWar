@@ -4,26 +4,35 @@ import { getUnitTotalCost } from '../utils/AIUnitUtils.js';
 const FARM_MAX_TROOPS = 30;
 const FARM_MIN_RESOURCES = 200;
 const FARM_FAIL_LIMIT = 3;
-const FARM_FAST_INTERVAL_MS = 30 * 60 * 1000;
-const FARM_DEFAULT_INTERVAL_MS = 60 * 60 * 1000;
-const FARM_SLOW_INTERVAL_MS = 2 * 60 * 60 * 1000;
-const FARM_MAX_DISTANCE = 35;
+const FARM_FAST_INTERVAL_BASE_MS = 30 * 60 * 1000;
+const FARM_DEFAULT_INTERVAL_BASE_MS = 60 * 60 * 1000;
+const FARM_SLOW_INTERVAL_BASE_MS = 2 * 60 * 60 * 1000;
+const FARM_INTERVAL_MIN_MS = 5 * 60 * 1000;
+const FARM_BASE_MAX_DISTANCE = 35;
+const FARM_MAX_DISTANCE_CAP = 80;
 
 function countTroops(troops = {}) {
     return Object.values(troops).reduce((s, c) => s + (c || 0), 0);
 }
 
-function resolveFarmInterval(resourceTotal) {
-    if (resourceTotal >= 2000) return FARM_FAST_INTERVAL_MS;
-    if (resourceTotal >= 800) return FARM_DEFAULT_INTERVAL_MS;
-    return FARM_SLOW_INTERVAL_MS;
+function resolveFarmInterval(resourceTotal, gameSpeed) {
+    const speed = Math.max(1, gameSpeed || 1);
+    let base;
+    if (resourceTotal >= 2000) base = FARM_FAST_INTERVAL_BASE_MS;
+    else if (resourceTotal >= 800) base = FARM_DEFAULT_INTERVAL_BASE_MS;
+    else base = FARM_SLOW_INTERVAL_BASE_MS;
+    return Math.max(FARM_INTERVAL_MIN_MS, Math.round(base / speed));
 }
 
-export function updateFarmList(aiState, knownTargets, ownerId, myVillages, maxFarms = 25) {
+function resolveMaxDistance(troopSpeed) {
+    const speed = Math.max(1, troopSpeed || 1);
+    return Math.min(FARM_MAX_DISTANCE_CAP, Math.round(FARM_BASE_MAX_DISTANCE * Math.sqrt(speed)));
+}
+
+export function updateFarmList(aiState, knownTargets, ownerId, myVillages, gameSpeed = 1, maxFarms = 25) {
     if (!Array.isArray(aiState.farmList)) aiState.farmList = [];
     const farmList = aiState.farmList;
     const existingMap = new Map(farmList.map(f => [f.targetId, f]));
-    const now = Date.now();
 
     for (const target of knownTargets) {
         if (target.type !== 'village') continue;
@@ -40,7 +49,7 @@ export function updateFarmList(aiState, knownTargets, ownerId, myVillages, maxFa
             const entry = existingMap.get(target.id);
             entry.knownTroopCount = troopCount;
             entry.knownResourceTotal = resourceTotal;
-            entry.farmIntervalMs = resolveFarmInterval(resourceTotal);
+            entry.farmIntervalMs = resolveFarmInterval(resourceTotal, gameSpeed);
             continue;
         }
 
@@ -52,7 +61,7 @@ export function updateFarmList(aiState, knownTargets, ownerId, myVillages, maxFa
             const d = Math.hypot(v.coords.x - target.coords.x, v.coords.y - target.coords.y);
             return d < min ? d : min;
         }, Infinity);
-        if (minDist > FARM_MAX_DISTANCE) continue;
+        if (minDist > FARM_BASE_MAX_DISTANCE) continue;
 
         farmList.push({
             targetId: target.id,
@@ -61,9 +70,9 @@ export function updateFarmList(aiState, knownTargets, ownerId, myVillages, maxFa
             lastFarmedAt: 0,
             knownTroopCount: troopCount,
             knownResourceTotal: resourceTotal,
-            farmIntervalMs: resolveFarmInterval(resourceTotal),
+            farmIntervalMs: resolveFarmInterval(resourceTotal, gameSpeed),
             failCount: 0,
-            addedAt: now,
+            addedAt: Date.now(),
         });
         existingMap.set(target.id, farmList[farmList.length - 1]);
     }
@@ -78,9 +87,11 @@ export function updateFarmList(aiState, knownTargets, ownerId, myVillages, maxFa
     return aiState.farmList;
 }
 
-function getCheapOffensiveUnit(force, raceUnits) {
+function getOptimalRaidUnit(force, raceUnits) {
+    const smithyUpgrades = force.village?.smithy?.upgrades || {};
     let best = null;
-    let lowestCost = Infinity;
+    let bestScore = -Infinity;
+
     for (const unitId in force.combatTroops) {
         const count = force.combatTroops[unitId] || 0;
         if (count < 5) continue;
@@ -88,13 +99,27 @@ function getCheapOffensiveUnit(force, raceUnits) {
         if (!unitData) continue;
         if (unitData.role !== 'offensive') continue;
         if (unitData.type === 'siege') continue;
-        const cost = getUnitTotalCost(unitData);
-        if (cost > 0 && cost < lowestCost) {
-            lowestCost = cost;
-            best = { unitId, unitData, count };
+        const totalCost = getUnitTotalCost(unitData);
+        if (totalCost <= 0) continue;
+        const smithyBonus = 1 + ((smithyUpgrades[unitId] || 0) * 0.0075);
+        const effectiveAttack = (unitData.stats?.attack || 0) * smithyBonus;
+        if (effectiveAttack <= 0) continue;
+        const attackPerCost = effectiveAttack / totalCost;
+        if (attackPerCost > bestScore) {
+            bestScore = attackPerCost;
+            best = { unitId, unitData, count, effectiveAttack, attackPerCost };
         }
     }
     return best;
+}
+
+function calcRaidCount(optUnit, knownTroopCount) {
+    if (knownTroopCount <= 0) {
+        return Math.min(optUnit.count, 10);
+    }
+    const attackNeeded = knownTroopCount * 4;
+    const unitsNeeded = Math.max(5, Math.ceil(attackNeeded / optUnit.effectiveAttack) + 3);
+    return Math.min(optUnit.count, unitsNeeded);
 }
 
 export function runFarmListCycle({
@@ -103,6 +128,8 @@ export function runFarmListCycle({
     gameState,
     ownerId,
     race,
+    gameSpeed = 1,
+    troopSpeed = 1,
     consumeTroops,
     hasActiveAttackFn,
 }) {
@@ -112,6 +139,7 @@ export function runFarmListCycle({
 
     if (!farmList || farmList.length === 0) return { commands, logs };
 
+    const effectiveMaxDist = resolveMaxDistance(troopSpeed);
     const raceUnits = gameData.units[race]?.troops || [];
 
     const due = farmList.filter(entry => now >= entry.lastFarmedAt + entry.farmIntervalMs);
@@ -136,21 +164,22 @@ export function runFarmListCycle({
                     force.village.coords.x - farmEntry.coords.x,
                     force.village.coords.y - farmEntry.coords.y,
                 ),
-                cheapUnit: getCheapOffensiveUnit(force, raceUnits),
+                optUnit: getOptimalRaidUnit(force, raceUnits),
             }))
-            .filter(e => e.cheapUnit !== null)
-            .sort((a, b) => a.dist - b.dist);
+            .filter(e => e.optUnit !== null && e.dist <= effectiveMaxDist)
+            .sort((a, b) => {
+                const scoreA = a.optUnit.attackPerCost - a.dist * 0.01;
+                const scoreB = b.optUnit.attackPerCost - b.dist * 0.01;
+                return scoreB - scoreA;
+            });
 
         if (viableForces.length === 0) continue;
 
-        const { force, cheapUnit, dist } = viableForces[0];
-        if (dist > 40) continue;
+        const { force, optUnit, dist } = viableForces[0];
+        const raidCount = calcRaidCount(optUnit, farmEntry.knownTroopCount);
+        if (raidCount <= 0) continue;
 
-        const raidCount = Math.min(
-            cheapUnit.count,
-            Math.max(5, farmEntry.knownTroopCount * 2 + 5),
-        );
-        const raidSquad = { [cheapUnit.unitId]: raidCount };
+        const raidSquad = { [optUnit.unitId]: raidCount };
 
         commands.push({
             comando: 'ATTACK',
@@ -167,14 +196,20 @@ export function runFarmListCycle({
         farmEntry.lastFarmedAt = now;
         farmedCount++;
 
+        const intervalMin = Math.round(farmEntry.farmIntervalMs / 60000);
         logs.push(
             `[FARMLIST] ${force.village.name} -> (${farmEntry.coords.x}|${farmEntry.coords.y}) ` +
-            `[${raidCount}x${cheapUnit.unitId}] dist=${dist.toFixed(0)} res=${farmEntry.knownResourceTotal}.`,
+            `[${raidCount}x${optUnit.unitId} atk/cost=${optUnit.attackPerCost.toFixed(2)}] ` +
+            `dist=${dist.toFixed(0)} res=${farmEntry.knownResourceTotal} ` +
+            `intervalo=${intervalMin}min (${gameSpeed}x velocidad).`,
         );
     }
 
     if (farmedCount > 0) {
-        logs.push(`[FARMLIST] ${farmedCount} granjas atacadas. Total en lista: ${farmList.length}.`);
+        logs.push(
+            `[FARMLIST] ${farmedCount} granjas atacadas | maxDist=${effectiveMaxDist} tiles | ` +
+            `gameSpeed=${gameSpeed}x troopSpeed=${troopSpeed}x | total lista: ${farmList.length}.`,
+        );
     }
 
     return { commands, logs };

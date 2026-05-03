@@ -259,7 +259,7 @@ export default class StrategicAI {
             GENERAL_SPY_INTERVAL,
         );
 
-        updateFarmList(aiState, targets.known, ownerId, myVillages);
+        updateFarmList(aiState, targets.known, ownerId, myVillages, gameSpeed);
 
         let isMusteringForWar = false;
         let hasMaxPriorityGoal = false;
@@ -459,6 +459,8 @@ export default class StrategicAI {
                 gameState,
                 ownerId,
                 race,
+                gameSpeed,
+                troopSpeed,
             });
             if (farmListResult.commands.length > 0) {
                 commands.push(...farmListResult.commands);
@@ -1330,13 +1332,15 @@ export default class StrategicAI {
         return { commands, logs };
     }
 
-    _runFarmListCycle({ farmList, forces, gameState, ownerId, race }) {
+    _runFarmListCycle({ farmList, forces, gameState, ownerId, race, gameSpeed = 1, troopSpeed = 1 }) {
         return runFarmListCycle({
             farmList,
             forces,
             gameState,
             ownerId,
             race,
+            gameSpeed,
+            troopSpeed,
             consumeTroops: this._consumeTroops.bind(this),
             hasActiveAttackFn: this._hasActiveAttack.bind(this),
         });

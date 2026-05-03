@@ -91,9 +91,12 @@ Simulador de juego de navegador tipo Travian con IA avanzada para múltiples fac
 ### 2.3 Farmlists Persistentes
 - Nuevo archivo: `src/features/game/ai/strategy/farmlist.js`
 - `updateFarmList(aiState, knownTargets, ownerId, myVillages, maxFarms = 25)` — escanea objetivos conocidos con intel fresco, añade villages con ≤ 30 tropas y ≥ 200 recursos dentro de 35 tiles. Actualiza `aiState.farmList[]` en cada ciclo. Elimina entradas con `failCount ≥ 3` o que ganaron tropas.
-- `runFarmListCycle({ farmList, forces, gameState, ... })` — para cada granja vencida su intervalo (`30/60/120 min` según recursos), busca la fuerza más cercana con tropas ofensivas disponibles, despacha un raid con `Math.max(5, knownTroops * 2 + 5)` unidades.
-- `StrategicAI._runFarmListCycle(...)` — wrapper en StrategicAI, llamado en cada ciclo antes del farming de oasis si `!isMusteringForWar`.
-- `updateFarmList` llamado justo después de `_scanAndClassifyTargets` para mantener la lista fresca.
+- `runFarmListCycle({ farmList, forces, gameState, gameSpeed, troopSpeed, ... })` — para cada granja vencida su intervalo, selecciona la unidad ofensiva con mejor ratio `ataque/coste` (no la más barata), con bonus de herrería aplicado. Cantidad enviada: `max(10, ceil(defensaConocida * 4 / efectividad) + 3)`.
+- **Escala con velocidad de juego**: `farmIntervalMs = base / gameSpeed` (mínimo 5 min). A 10x la velocidad los recursos se acumulan 10x más rápido → re-farmeo 10x más frecuente.
+- **Escala con velocidad de tropas**: `maxDist = min(80, 35 * sqrt(troopSpeed))`. Tropas más rápidas pueden farmear más lejos en el mismo tiempo.
+- Fuerza seleccionada: la de mayor `attackPerCost - dist * 0.01` (preferencia por eficiencia sobre proximidad pura).
+- `StrategicAI._runFarmListCycle(...)` — wrapper en StrategicAI, recibe y propaga `gameSpeed` + `troopSpeed`.
+- `updateFarmList` llamado justo después de `_scanAndClassifyTargets`; recibe `gameSpeed` para re-calcular intervalos con intel fresco.
 - Persistencia: la lista vive en `aiState.farmList` (por jugador IA), sobrevive entre ciclos.
 
 ## Comandos de desarrollo
