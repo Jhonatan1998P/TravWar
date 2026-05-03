@@ -27,6 +27,8 @@ Simulador de juego de navegador tipo Travian con IA avanzada para múltiples fac
 - `processReinforcementRecalls` — recall de refuerzos tras batalla
 - `planResourceEvacuation` — evacúa recursos en riesgo vía mercaderes
 - `evaluateThreatAndChooseResponse` — evaluación táctica completa
+- `planSnipeTasks` — programa envío retardado de refuerzos para llegar instantes antes del ataque
+- `processSnipeTasks` — despacha snipe tasks cuando llega su `dispatchAt`
 
 ## Mejoras IA implementadas (Sprint 1 — Plan_Mejora_IA.md)
 
@@ -60,6 +62,23 @@ Simulador de juego de navegador tipo Travian con IA avanzada para múltiples fac
 - `selectBestNemesisCandidate()`: elige el candidato con mayor score
 - `reevaluateNemesis()`: abandona némesis si está demasiado lejos (>80 tiles) o demasiado atacada por otros (≥3 AIs)
 - `getPlayerVillages()`: helper exportado
+
+## Mejoras IA implementadas (Sprint 2 — Plan_Mejora_IA.md)
+
+### 1.2 Sniping — Envío Cronometrado de Refuerzos
+- `planSnipeTasks()` en `reactive.js`: detecta aldeas propias con tropas defensivas capaces de llegar con ventana de 2–25 segundos antes del impacto. Programa el `dispatchAt = arrivalTime - travelTime - 2s`.
+- `processSnipeTasks()` en `reactive.js`: en cada tick de `makeDecision`, despacha las tareas cuyo `dispatchAt <= now`. Valida que el ataque siga activo y que las tropas estén disponibles.
+- `AIController._snipeTasks = new Map()` — almacén de tareas de snipe con clave `${originVillageId}:${targetVillageId}`.
+- `AIController._processSnipeTasks(gameState)` — llamado en `makeDecision` junto a `processDodgeTasks`.
+- Hook en `_handleAttackReact`: si el combatState es real (no fake) y la respuesta no es dodge, se llama `planSnipeTasks` automáticamente.
+- Condición de activación: `threatLevel >= medium` y `preferredResponse` distinto de `full_dodge`/`partial_dodge`.
+
+### 1.5 Defensa Avanzada de Frontera (Forward Defense)
+- `AIController._manageForwardDefense(gameState)` — llamado al inicio de cada ciclo militar (`_processMilitaryDecision`).
+- Define "aldeas frontera": propias con enemigos a ≤ 30 tiles.
+- Envía el 25% del superávit defensivo de aldeas interiores a cada aldea frontera sub-defendida (< 150 tropas defensivas).
+- Cooldown de 10 min por aldea frontera (`_forwardDefenseCooldownByVillage`) para evitar spam.
+- No actúa si la aldea frontera o la fuente están bajo amenaza activa.
 
 ## Comandos de desarrollo
 ```bash

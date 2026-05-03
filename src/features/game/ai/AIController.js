@@ -7,7 +7,7 @@ import { AI_CONTROLLER_CONSTANTS } from './config/AIConstants.js';
 import { gameData } from '../core/GameData.js';
 import { resolvePhaseEngineRolloutFlags } from '../core/data/constants.js';
 import { executeCommands } from './controller/commands.js';
-import { handleAttackReact, handleEspionageReact, processDodgeTasks, processReinforcementRecalls, evaluateThreatAndChooseResponse, planResourceEvacuation } from './controller/reactive.js';
+import { handleAttackReact, handleEspionageReact, processDodgeTasks, processReinforcementRecalls, evaluateThreatAndChooseResponse, planResourceEvacuation, planSnipeTasks, processSnipeTasks } from './controller/reactive.js';
 import { runMilitaryDecision } from './controller/military.js';
 import { getHunDefenseAdvice, getHunAttackAdvice, getHunDeepSeekStatus } from './hun/hun-combat-advisor.js';
 import {
@@ -565,6 +565,8 @@ class AIController {
     _siegeArrivalPendingByVillage = new Map();
     _emergencyRepairTargetsByVillage = new Map();
     _merchantEvacuationCooldownByVillage = new Map();
+    _snipeTasks = new Map();
+    _forwardDefenseCooldownByVillage = new Map();
 
     constructor(ownerId, personality, race, archetype, sendCommandCallback, gameConfig, difficulty = 'Pesadilla') {
         this._ownerId = ownerId;
@@ -1914,6 +1916,26 @@ class AIController {
                     });
                 }
             }
+
+            const canSnipe = combatState
+                && !combatState.isFake
+                && movement.arrivalTime
+                && combatState.preferredResponse !== 'full_dodge'
+                && combatState.preferredResponse !== 'partial_dodge'
+                && (combatState.threatLevel === 'medium' || combatState.threatLevel === 'high' || combatState.threatLevel === 'critical');
+            if (canSnipe) {
+                planSnipeTasks({
+                    targetVillage,
+                    movementArrivalTime: movement.arrivalTime,
+                    movementId: movement.id,
+                    gameState,
+                    ownerId: this._ownerId,
+                    race: this._race,
+                    snipeTasks: this._snipeTasks,
+                    gameConfig: this._gameConfig,
+                    log: this.log.bind(this),
+                });
+            }
         }
     }
 
@@ -2053,6 +2075,118 @@ class AIController {
         }
     }
 
+    _processSnipeTasks(gameState) {
+        processSnipeTasks({
+            gameState,
+            snipeTasks: this._snipeTasks,
+            sendCommand: this._getCommandSender({ sourceLayer: 'reactive', layerPriority: 'reactive_high' }),
+            log: this.log.bind(this),
+        });
+    }
+
+    _manageForwardDefense(gameState) {
+        const FORWARD_DEFENSE_RADIUS = 30;
+        const MIN_GARRISON_UNITS = 50;
+        const SURPLUS_RATIO = 0.25;
+        const COOLDOWN_MS = 10 * 60 * 1000;
+        const HOSTILE_TYPES = new Set(['attack', 'raid']);
+        const now = Date.now();
+
+        const myVillages = gameState.villages.filter(v => v.ownerId === this._ownerId);
+        if (myVillages.length <= 1) return;
+
+        const enemyVillages = gameState.villages.filter(
+            v => v.ownerId !== this._ownerId && v.ownerId !== 'nature',
+        );
+        if (enemyVillages.length === 0) return;
+
+        const raceUnits = gameData.units[this._race]?.troops || [];
+
+        const getDefensiveTroops = village => {
+            const result = {};
+            for (const unitId in village.unitsInVillage || {}) {
+                const count = village.unitsInVillage[unitId] || 0;
+                if (count <= 0) continue;
+                const unitData = raceUnits.find(u => u.id === unitId);
+                if (!unitData) continue;
+                if (unitData.role === 'defensive' || unitData.role === 'versatile') {
+                    result[unitId] = count;
+                }
+            }
+            return result;
+        };
+
+        const isThreatened = village => gameState.movements.some(m => {
+            if (!HOSTILE_TYPES.has(m.type)) return false;
+            if (m.ownerId === this._ownerId) return false;
+            return m.targetCoords?.x === village.coords.x
+                && m.targetCoords?.y === village.coords.y;
+        });
+
+        const frontierVillages = myVillages.filter(mv =>
+            enemyVillages.some(ev =>
+                Math.hypot(ev.coords.x - mv.coords.x, ev.coords.y - mv.coords.y) <= FORWARD_DEFENSE_RADIUS,
+            ),
+        );
+        if (frontierVillages.length === 0) return;
+
+        const frontierIds = new Set(frontierVillages.map(v => v.id));
+        const interiorVillages = myVillages.filter(v => !frontierIds.has(v.id) && !isThreatened(v));
+        if (interiorVillages.length === 0) return;
+
+        const sender = this._getCommandSender({ sourceLayer: 'military', layerPriority: 'military_low' });
+
+        for (const frontier of frontierVillages) {
+            if (isThreatened(frontier)) continue;
+
+            const cooldownExpiry = this._forwardDefenseCooldownByVillage.get(frontier.id);
+            if (cooldownExpiry && cooldownExpiry > now) continue;
+
+            const currentDef = getDefensiveTroops(frontier);
+            const totalCurrentDef = Object.values(currentDef).reduce((s, c) => s + c, 0);
+            if (totalCurrentDef >= MIN_GARRISON_UNITS * 3) continue;
+
+            const candidates = interiorVillages
+                .map(v => ({
+                    village: v,
+                    dist: Math.hypot(v.coords.x - frontier.coords.x, v.coords.y - frontier.coords.y),
+                    defensiveTroops: getDefensiveTroops(v),
+                }))
+                .filter(({ defensiveTroops }) => {
+                    const total = Object.values(defensiveTroops).reduce((s, c) => s + c, 0);
+                    return total > MIN_GARRISON_UNITS * 2;
+                })
+                .sort((a, b) => a.dist - b.dist);
+
+            if (candidates.length === 0) continue;
+
+            const source = candidates[0];
+            const troopsToSend = {};
+            for (const unitId in source.defensiveTroops) {
+                const toSend = Math.floor((source.defensiveTroops[unitId] || 0) * SURPLUS_RATIO);
+                if (toSend > 0) troopsToSend[unitId] = toSend;
+            }
+
+            const totalToSend = Object.values(troopsToSend).reduce((s, c) => s + c, 0);
+            if (totalToSend < 10) continue;
+
+            sender('send_movement', {
+                originVillageId: source.village.id,
+                targetCoords: frontier.coords,
+                troops: troopsToSend,
+                missionType: 'reinforcement',
+            }, {
+                strategicIntent: 'forward_defense',
+            });
+
+            this._forwardDefenseCooldownByVillage.set(frontier.id, now + COOLDOWN_MS);
+
+            this.log('info', frontier, 'Forward Defense',
+                `Refuerzo preventivo desde ${source.village.name || source.village.id} (${totalToSend} tropas).`,
+                { sourceVillageId: source.village.id, troopsToSend }, 'military');
+        }
+    }
+
     _processDodgeTasks(gameState) {
         processDodgeTasks({
             gameState,
@@ -2078,6 +2212,7 @@ class AIController {
         this._expireReactiveCoordinationState();
         this._processReinforcementRecalls(gameState);
         this._processDodgeTasks(gameState);
+        this._processSnipeTasks(gameState);
         this._processCounterWindows(gameState);
         this._processEmergencyRepairs(gameState);
 
@@ -2178,7 +2313,9 @@ class AIController {
         this._lastMilitaryDecisionTime = Date.now();
         const myVillages = gameState.villages.filter(village => village.ownerId === this._ownerId);
         this._logBudgetSnapshotForCycle('military', myVillages);
-        
+
+        this._manageForwardDefense(gameState);
+
         try {
             if (this._race === 'huns') {
                 await this._logHunDeepSeekAttackAdvisory(gameState, myVillages);

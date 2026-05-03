@@ -3,6 +3,9 @@ import { CombatFormulas } from '../../core/CombatFormulas.js';
 
 const HOSTILE_MOVEMENT_TYPES = new Set(['attack', 'raid']);
 const MULTI_WAVE_WINDOW_MS = 90000;
+const SNIPE_LEAD_MIN_MS = 2000;
+const SNIPE_LEAD_MAX_MS = 25000;
+const SNIPE_MIN_DISPATCH_BUFFER_MS = 500;
 const DEFAULT_DODGE_CONFIG = Object.freeze({
     offensivePartialRatio: 0.75,
     defensivePartialRatio: 0.35,
@@ -2056,6 +2059,150 @@ export function handleAttackReact({
     }
 
     setBaseLocks();
+}
+
+export function planSnipeTasks({
+    targetVillage,
+    movementArrivalTime,
+    movementId,
+    gameState,
+    ownerId,
+    race,
+    snipeTasks,
+    gameConfig,
+    log,
+}) {
+    const now = Date.now();
+    const troopSpeed = gameConfig?.troopSpeed || 1;
+    const raceUnits = gameData.units[race]?.troops || [];
+
+    const myOtherVillages = gameState.villages.filter(
+        v => v.ownerId === ownerId && v.id !== targetVillage.id,
+    );
+
+    let tasksPlanned = 0;
+
+    for (const originVillage of myOtherVillages) {
+        const hasIncomingThreat = gameState.movements.some(m => {
+            if (!HOSTILE_MOVEMENT_TYPES.has(m.type)) return false;
+            if (m.ownerId === ownerId) return false;
+            return m.targetCoords?.x === originVillage.coords.x
+                && m.targetCoords?.y === originVillage.coords.y;
+        });
+        if (hasIncomingThreat) continue;
+
+        const defensiveTroops = {};
+        for (const unitId in originVillage.unitsInVillage || {}) {
+            const count = originVillage.unitsInVillage[unitId] || 0;
+            if (count <= 0) continue;
+            const unitData = raceUnits.find(u => u.id === unitId);
+            if (!unitData) continue;
+            if (unitData.role === 'defensive' || unitData.role === 'versatile') {
+                defensiveTroops[unitId] = count;
+            }
+        }
+
+        const totalDef = Object.values(defensiveTroops).reduce((s, c) => s + c, 0);
+        if (totalDef < 5) continue;
+
+        const slowestSpeed = getSlowestUnitSpeed(defensiveTroops, race);
+        const travelTime = calculateTravelTime(
+            originVillage.coords, targetVillage.coords, slowestSpeed, troopSpeed,
+        );
+        if (!Number.isFinite(travelTime) || travelTime <= 0) continue;
+
+        const leadMs = movementArrivalTime - now - travelTime;
+        if (leadMs < SNIPE_LEAD_MIN_MS || leadMs > SNIPE_LEAD_MAX_MS) continue;
+
+        const dispatchAt = movementArrivalTime - travelTime - SNIPE_LEAD_MIN_MS;
+        if (dispatchAt <= now + SNIPE_MIN_DISPATCH_BUFFER_MS) continue;
+
+        const taskKey = `${originVillage.id}:${targetVillage.id}`;
+        const existingTask = snipeTasks.get(taskKey);
+        if (existingTask && existingTask.dispatchAt <= dispatchAt) continue;
+
+        snipeTasks.set(taskKey, {
+            originVillageId: originVillage.id,
+            targetVillageId: targetVillage.id,
+            targetCoords: { ...targetVillage.coords },
+            troops: { ...defensiveTroops },
+            dispatchAt,
+            movementId,
+            movementArrivalTime,
+        });
+        tasksPlanned++;
+    }
+
+    if (tasksPlanned > 0) {
+        log('info', targetVillage, 'Snipe Programado',
+            `${tasksPlanned} aldea(s) programadas para envio de refuerzo cronometrado.`,
+            { movementId, arrivalTime: movementArrivalTime }, 'military');
+    }
+
+    return { tasksPlanned };
+}
+
+export function processSnipeTasks({ gameState, snipeTasks, sendCommand, log }) {
+    if (snipeTasks.size === 0) return;
+    const now = Date.now();
+
+    for (const [taskKey, task] of snipeTasks.entries()) {
+        if (task.dispatchAt > now) continue;
+
+        if (task.movementArrivalTime < now - 30000) {
+            snipeTasks.delete(taskKey);
+            continue;
+        }
+
+        const attackStillPending = gameState.movements.some(m =>
+            m.id === task.movementId
+            || (HOSTILE_MOVEMENT_TYPES.has(m.type)
+                && m.targetCoords?.x === task.targetCoords.x
+                && m.targetCoords?.y === task.targetCoords.y
+                && (m.arrivalTime || 0) > now),
+        );
+
+        if (!attackStillPending) {
+            snipeTasks.delete(taskKey);
+            continue;
+        }
+
+        const originVillage = gameState.villages.find(v => v.id === task.originVillageId);
+        if (!originVillage) {
+            snipeTasks.delete(taskKey);
+            continue;
+        }
+
+        const actualTroops = {};
+        for (const unitId in task.troops) {
+            const available = originVillage.unitsInVillage?.[unitId] || 0;
+            const planned = task.troops[unitId] || 0;
+            const toSend = Math.min(available, planned);
+            if (toSend > 0) actualTroops[unitId] = toSend;
+        }
+
+        snipeTasks.delete(taskKey);
+
+        if (Object.keys(actualTroops).length === 0) {
+            log('warn', originVillage, 'Snipe Fallido',
+                'Tropas defensivas no disponibles al momento del snipe.',
+                { taskKey }, 'military');
+            continue;
+        }
+
+        sendCommand('send_movement', {
+            originVillageId: originVillage.id,
+            targetCoords: task.targetCoords,
+            troops: actualTroops,
+            missionType: 'reinforcement',
+        }, {
+            reactiveIntent: 'snipe',
+        });
+
+        log('success', originVillage, 'Snipe Ejecutado',
+            `Refuerzo cronometrado enviado a (${task.targetCoords.x}|${task.targetCoords.y}).`,
+            { troops: actualTroops }, 'military');
+    }
 }
 
 export function planResourceEvacuation({
