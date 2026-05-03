@@ -80,6 +80,22 @@ Simulador de juego de navegador tipo Travian con IA avanzada para múltiples fac
 - Cooldown de 10 min por aldea frontera (`_forwardDefenseCooldownByVillage`) para evitar spam.
 - No actúa si la aldea frontera o la fuente están bajo amenaza activa.
 
+## Mejoras IA implementadas (Sprint 3 — Plan_Mejora_IA.md)
+
+### 2.1 Ataques Falsos (Fake Attacks)
+- `StrategicAI._planFakeAttacks({ realTargetCoords, forces, gameState, ownerId, race, maxFakes })` — genera 2-3 raids de 1 unidad de infantería ofensiva barata hacia aldeas enemigas a ≤ 10 tiles del objetivo real.
+- Se activa automáticamente cuando se confirma un ataque nemesis (post `_planNemesisDestruction`) y cuando se confirma una ofensiva doctrinal (post `_planDoctrinalStrategicOffense`).
+- La unidad elegida: infantería ofensiva más barata disponible con mínimo `maxFakes` en stock.
+- Los comandos van marcados con `meta: { isFakeAttack: true }` para trazabilidad en logs.
+
+### 2.3 Farmlists Persistentes
+- Nuevo archivo: `src/features/game/ai/strategy/farmlist.js`
+- `updateFarmList(aiState, knownTargets, ownerId, myVillages, maxFarms = 25)` — escanea objetivos conocidos con intel fresco, añade villages con ≤ 30 tropas y ≥ 200 recursos dentro de 35 tiles. Actualiza `aiState.farmList[]` en cada ciclo. Elimina entradas con `failCount ≥ 3` o que ganaron tropas.
+- `runFarmListCycle({ farmList, forces, gameState, ... })` — para cada granja vencida su intervalo (`30/60/120 min` según recursos), busca la fuerza más cercana con tropas ofensivas disponibles, despacha un raid con `Math.max(5, knownTroops * 2 + 5)` unidades.
+- `StrategicAI._runFarmListCycle(...)` — wrapper en StrategicAI, llamado en cada ciclo antes del farming de oasis si `!isMusteringForWar`.
+- `updateFarmList` llamado justo después de `_scanAndClassifyTargets` para mantener la lista fresca.
+- Persistencia: la lista vive en `aiState.farmList` (por jugador IA), sobrevive entre ciclos.
+
 ## Comandos de desarrollo
 ```bash
 pnpm dev      # Inicia servidor Vite en puerto 5173/5000

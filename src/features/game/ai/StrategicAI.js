@@ -9,6 +9,7 @@ import {
 } from './utils/AIUnitUtils.js';
 import { calculateDeployedTroops, mergeTroops } from './utils/AITroopUtils.js';
 import { performOptimizedFarming } from './strategy/farming.js';
+import { updateFarmList, runFarmListCycle } from './strategy/farmlist.js';
 import { manageNemesis } from './strategy/nemesis.js';
 import { planSiegeTrain } from './strategy/siege.js';
 import { dispatchSpies, performGeneralIntelligence, scanAndClassifyTargets } from './strategy/scouting.js';
@@ -258,6 +259,8 @@ export default class StrategicAI {
             GENERAL_SPY_INTERVAL,
         );
 
+        updateFarmList(aiState, targets.known, ownerId, myVillages);
+
         let isMusteringForWar = false;
         let hasMaxPriorityGoal = false;
         let oasisFarmingTelemetry = null;
@@ -303,6 +306,17 @@ export default class StrategicAI {
                                             commands.push(...this._markCommandsAsMaxPriorityGoal(attackCmds, 'nemesis_assault'));
                                             strategicAttackIssued = true;
                                             markStrategicAttackCommitted();
+                                            const fakesNemesis = this._planFakeAttacks({
+                                                realTargetCoords: nemesisTarget.coords,
+                                                forces: offensiveReadyForces,
+                                                gameState,
+                                                ownerId,
+                                                race,
+                                            });
+                                            if (fakesNemesis.commands.length > 0) {
+                                                commands.push(...fakesNemesis.commands);
+                                                reasoningLog.push(...fakesNemesis.logs);
+                                            }
                                             reasoningLog.push(
                                                 `[PVP-GATE] Némesis habilitado. p=${(gate.probability * 100).toFixed(1)}% ` +
                                                 `roll=${(gate.roll * 100).toFixed(1)}% cd=${Math.round(gate.cooldownMs / 60000)}m.`
@@ -396,6 +410,22 @@ export default class StrategicAI {
                     commands.push(...strategicOffense.commands);
                     strategicAttackIssued = true;
                     markStrategicAttackCommitted();
+                    const firstRealAttack = strategicOffense.commands.find(
+                        c => c.comando === 'ATTACK' && c.parametros?.mision === 'attack',
+                    );
+                    if (firstRealAttack) {
+                        const fakesOffense = this._planFakeAttacks({
+                            realTargetCoords: firstRealAttack.parametros.targetCoords,
+                            forces: offensiveReadyForces,
+                            gameState,
+                            ownerId,
+                            race,
+                        });
+                        if (fakesOffense.commands.length > 0) {
+                            commands.push(...fakesOffense.commands);
+                            reasoningLog.push(...fakesOffense.logs);
+                        }
+                    }
                 } else {
                     strategicAttackGateState.cyclesWithoutAttack = Math.max(0, (strategicAttackGateState.cyclesWithoutAttack || 0) + 1);
                 }
@@ -421,6 +451,20 @@ export default class StrategicAI {
         if (!isMusteringForWar) {
             if (hasMaxPriorityGoal || strategicAttackIssued) {
                 reasoningLog.push('[FARMEO ROI] Farm de oasis en paralelo con ofensiva estrategica (tropas remanentes).');
+            }
+
+            const farmListResult = this._runFarmListCycle({
+                farmList: aiState.farmList || [],
+                forces: offensiveReadyForces,
+                gameState,
+                ownerId,
+                race,
+            });
+            if (farmListResult.commands.length > 0) {
+                commands.push(...farmListResult.commands);
+                reasoningLog.push(...farmListResult.logs);
+            } else if (farmListResult.logs.length > 0) {
+                reasoningLog.push(...farmListResult.logs);
             }
 
             const farmingResults = this._performOptimizedFarming(
@@ -1213,6 +1257,89 @@ export default class StrategicAI {
             if (remaining > 0) result[unitId] = remaining;
         });
         return result;
+    }
+
+    _planFakeAttacks({ realTargetCoords, forces, gameState, ownerId, race, maxFakes = 3 }) {
+        const DECOY_RADIUS = 10;
+        const commands = [];
+        const logs = [];
+
+        const raceUnits = gameData.units[race]?.troops || [];
+
+        let cheapestUnit = null;
+        let lowestCost = Infinity;
+        let sourceForce = null;
+
+        for (const force of forces) {
+            for (const unitId in force.combatTroops) {
+                const count = force.combatTroops[unitId] || 0;
+                if (count < maxFakes) continue;
+                const unitData = raceUnits.find(u => u.id === unitId);
+                if (!unitData) continue;
+                if (unitData.role !== 'offensive') continue;
+                if (unitData.type !== 'infantry') continue;
+                const cost = (unitData.stats?.attack || 0) > 0
+                    ? (unitData.cost?.wood || 0) + (unitData.cost?.stone || 0) + (unitData.cost?.iron || 0)
+                    : 0;
+                if (cost > 0 && cost < lowestCost) {
+                    lowestCost = cost;
+                    cheapestUnit = { unitId, unitData, count };
+                    sourceForce = force;
+                }
+            }
+        }
+
+        if (!cheapestUnit || !sourceForce) return { commands, logs };
+
+        const decoyTargets = gameState.villages
+            .filter(v => {
+                if (v.ownerId === ownerId || v.ownerId === 'nature') return false;
+                const dist = Math.hypot(
+                    v.coords.x - realTargetCoords.x,
+                    v.coords.y - realTargetCoords.y,
+                );
+                return dist > 0 && dist <= DECOY_RADIUS;
+            })
+            .slice(0, maxFakes);
+
+        if (decoyTargets.length === 0) return { commands, logs };
+
+        const fakesCount = Math.min(decoyTargets.length, maxFakes, cheapestUnit.count);
+        const toConsume = {};
+
+        for (let i = 0; i < fakesCount; i++) {
+            commands.push({
+                comando: 'ATTACK',
+                villageId: sourceForce.village.id,
+                parametros: {
+                    targetCoords: decoyTargets[i].coords,
+                    tropas: { [cheapestUnit.unitId]: 1 },
+                    mision: 'raid',
+                },
+                meta: { isFakeAttack: true, realTargetCoords },
+            });
+            toConsume[cheapestUnit.unitId] = (toConsume[cheapestUnit.unitId] || 0) + 1;
+        }
+
+        this._consumeTroops(sourceForce, toConsume);
+        logs.push(
+            `[FAKES] ${fakesCount} raids de 1x${cheapestUnit.unitId} enviados desde ` +
+            `${sourceForce.village.name} a aldeas vecinas del objetivo real.`,
+        );
+
+        return { commands, logs };
+    }
+
+    _runFarmListCycle({ farmList, forces, gameState, ownerId, race }) {
+        return runFarmListCycle({
+            farmList,
+            forces,
+            gameState,
+            ownerId,
+            race,
+            consumeTroops: this._consumeTroops.bind(this),
+            hasActiveAttackFn: this._hasActiveAttack.bind(this),
+        });
     }
 
     _manageNemesis(gameState, myOwnerId, aiState, log) {
