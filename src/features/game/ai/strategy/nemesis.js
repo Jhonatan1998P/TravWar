@@ -4,6 +4,64 @@ export function getPlayerTotalPopulation(gameState, ownerId) {
         .reduce((sum, village) => sum + village.population.current, 0);
 }
 
+export function getPlayerVillages(gameState, playerId) {
+    return gameState.villages.filter(village => village.ownerId === playerId);
+}
+
+function minDistanceToAnyMyVillage(candidateVillages, myVillages) {
+    if (myVillages.length === 0 || candidateVillages.length === 0) return Infinity;
+    let minDist = Infinity;
+    for (const myVillage of myVillages) {
+        for (const theirVillage of candidateVillages) {
+            const dist = Math.hypot(theirVillage.coords.x - myVillage.coords.x, theirVillage.coords.y - myVillage.coords.y);
+            if (dist < minDist) minDist = dist;
+        }
+    }
+    return minDist;
+}
+
+function computeVillageClusterScore(playerVillages) {
+    if (playerVillages.length <= 1) return 1;
+    let totalDist = 0;
+    let pairs = 0;
+    for (let i = 0; i < playerVillages.length; i++) {
+        for (let j = i + 1; j < playerVillages.length; j++) {
+            totalDist += Math.hypot(
+                playerVillages[i].coords.x - playerVillages[j].coords.x,
+                playerVillages[i].coords.y - playerVillages[j].coords.y,
+            );
+            pairs++;
+        }
+    }
+    const avgDist = pairs > 0 ? totalDist / pairs : 0;
+    return 1 / (1 + avgDist * 0.05);
+}
+
+function countOtherAITargetingPlayer(gameState, playerId, myOwnerId) {
+    let count = 0;
+    for (const aiId in gameState.aiState || {}) {
+        if (aiId === myOwnerId) continue;
+        if (gameState.aiState[aiId].nemesisId === playerId) count++;
+    }
+    return count;
+}
+
+export function scoreNemesisCandidate(candidate, myVillages, candidateVillages) {
+    const dist = minDistanceToAnyMyVillage(candidateVillages, myVillages);
+    const pop = candidate.pop || 0;
+    const villages = candidateVillages.length;
+    const clusterScore = computeVillageClusterScore(candidateVillages);
+    const proximityScore = 1000 / (dist + 1);
+
+    return (
+        proximityScore * 0.35 +
+        (pop * 0.005) * 0.10 +
+        (villages * 8) * 0.15 +
+        (clusterScore * 60) * 0.25 +
+        10 * 0.15
+    );
+}
+
 export function findPotentialVictims(gameState, myOwnerId) {
     const targetCounts = {};
     gameState.players.forEach(player => {
@@ -44,6 +102,45 @@ export function findPotentialVictims(gameState, myOwnerId) {
     return candidates;
 }
 
+export function selectBestNemesisCandidate(candidates, gameState, myOwnerId) {
+    if (candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0];
+
+    const myVillages = getPlayerVillages(gameState, myOwnerId);
+    let bestCandidate = null;
+    let bestScore = -Infinity;
+
+    for (const candidate of candidates) {
+        const candidateVillages = getPlayerVillages(gameState, candidate.id);
+        const score = scoreNemesisCandidate(candidate, myVillages, candidateVillages);
+        if (score > bestScore) {
+            bestScore = score;
+            bestCandidate = candidate;
+        }
+    }
+
+    return bestCandidate;
+}
+
+export function reevaluateNemesis(gameState, myOwnerId, aiState, currentNemesisId, log) {
+    if (!currentNemesisId) return null;
+
+    const myVillages = getPlayerVillages(gameState, myOwnerId);
+    const nemesisVillages = getPlayerVillages(gameState, currentNemesisId);
+    const dist = minDistanceToAnyMyVillage(nemesisVillages, myVillages);
+
+    const tooFar = dist > 80;
+    const otherTargetCount = countOtherAITargetingPlayer(gameState, currentNemesisId, myOwnerId);
+    const overTargeted = otherTargetCount >= 3;
+
+    if (tooFar || overTargeted) {
+        log.push(`[POLITICS] Reevaluando nemesis ${currentNemesisId}: tooFar=${tooFar}, overTargeted=${overTargeted}.`);
+        return null;
+    }
+
+    return currentNemesisId;
+}
+
 export function manageNemesis(gameState, myOwnerId, aiState, log) {
     let currentNemesisId = aiState.nemesisId;
 
@@ -56,13 +153,23 @@ export function manageNemesis(gameState, myOwnerId, aiState, log) {
         }
     }
 
+    if (currentNemesisId) {
+        const reevaluated = reevaluateNemesis(gameState, myOwnerId, aiState, currentNemesisId, log);
+        if (!reevaluated) {
+            currentNemesisId = null;
+            aiState.nemesisId = null;
+        }
+    }
+
     if (!currentNemesisId) {
         const potentialVictims = findPotentialVictims(gameState, myOwnerId);
         if (potentialVictims.length > 0) {
-            const victim = potentialVictims[Math.floor(Math.random() * potentialVictims.length)];
-            currentNemesisId = victim.id;
-            aiState.nemesisId = currentNemesisId;
-            log.push(`[POLÍTICA] Nuevo Rival: ${victim.id} (Pob: ${victim.pop}).`);
+            const victim = selectBestNemesisCandidate(potentialVictims, gameState, myOwnerId);
+            if (victim) {
+                currentNemesisId = victim.id;
+                aiState.nemesisId = currentNemesisId;
+                log.push(`[POLÍTICA] Nuevo Rival (scoring): ${victim.id} (Pob: ${victim.pop}).`);
+            }
         }
     }
 

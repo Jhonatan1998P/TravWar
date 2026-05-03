@@ -7,7 +7,7 @@ import { AI_CONTROLLER_CONSTANTS } from './config/AIConstants.js';
 import { gameData } from '../core/GameData.js';
 import { resolvePhaseEngineRolloutFlags } from '../core/data/constants.js';
 import { executeCommands } from './controller/commands.js';
-import { handleAttackReact, handleEspionageReact, processDodgeTasks, processReinforcementRecalls, evaluateThreatAndChooseResponse } from './controller/reactive.js';
+import { handleAttackReact, handleEspionageReact, processDodgeTasks, processReinforcementRecalls, evaluateThreatAndChooseResponse, planResourceEvacuation } from './controller/reactive.js';
 import { runMilitaryDecision } from './controller/military.js';
 import { getHunDefenseAdvice, getHunAttackAdvice, getHunDeepSeekStatus } from './hun/hun-combat-advisor.js';
 import {
@@ -562,6 +562,9 @@ class AIController {
     _commandWindowByVillage = new Map();
     _lastKnownGameState = null;
     _phaseEngineRollout = resolvePhaseEngineRolloutFlags(null);
+    _siegeArrivalPendingByVillage = new Map();
+    _emergencyRepairTargetsByVillage = new Map();
+    _merchantEvacuationCooldownByVillage = new Map();
 
     constructor(ownerId, personality, race, archetype, sendCommandCallback, gameConfig, difficulty = 'Pesadilla') {
         this._ownerId = ownerId;
@@ -1873,6 +1876,7 @@ class AIController {
         );
         if (targetVillage) {
             const combatState = this.getVillageCombatState(targetVillage.id);
+
             if (combatState?.shouldPauseEconomicConstruction) {
                 const durationMs = combatState.threatLevel === 'critical' ? 45000 : BASE_LOCK_DURATIONS_MS.constructionEmergencyLockByVillage;
                 this.setConstructionEmergencyLockForVillage(
@@ -1880,6 +1884,35 @@ class AIController {
                     durationMs,
                     { reason: 'reactive_macro_emergency_lock', sourceMovementId: movement.id },
                 );
+            }
+
+            if (combatState && !combatState.isFake && (combatState.threatLevel === 'high' || combatState.threatLevel === 'critical')) {
+                const now = Date.now();
+                const cooldownEntry = this._merchantEvacuationCooldownByVillage.get(targetVillage.id);
+                if (!cooldownEntry || cooldownEntry < now) {
+                    const evacuationSender = this._getCommandSender({ sourceLayer: 'reactive', layerPriority: 'reactive_dodge_reinforce' });
+                    const evacuationResult = planResourceEvacuation({
+                        targetVillage,
+                        gameState,
+                        ownerId: this._ownerId,
+                        sendCommand: evacuationSender,
+                        log: this.log.bind(this),
+                    });
+                    if (evacuationResult.evacuated) {
+                        this._merchantEvacuationCooldownByVillage.set(targetVillage.id, now + 120000);
+                    }
+                }
+            }
+
+            const hasSiegeAttack = combatState && !combatState.isFake && (combatState.threatType === 'siege_attack' || combatState.threatType === 'conquest_attack');
+            if (hasSiegeAttack && movement.arrivalTime) {
+                const existing = this._siegeArrivalPendingByVillage.get(targetVillage.id);
+                if (!existing || existing.arrivalTime > movement.arrivalTime) {
+                    this._siegeArrivalPendingByVillage.set(targetVillage.id, {
+                        arrivalTime: movement.arrivalTime,
+                        movementId: movement.id,
+                    });
+                }
             }
         }
     }
@@ -1966,11 +1999,66 @@ class AIController {
         }
     }
 
+    _processEmergencyRepairs(gameState) {
+        const now = Date.now();
+        const REPAIR_PRIORITY_ORDER = ['cityWall', 'barracks', 'granary', 'warehouse', 'mainBuilding'];
+
+        for (const [villageId, entry] of this._siegeArrivalPendingByVillage.entries()) {
+            if (entry.arrivalTime > now) continue;
+            this._siegeArrivalPendingByVillage.delete(villageId);
+
+            if (!this._emergencyRepairTargetsByVillage.has(villageId)) {
+                this._emergencyRepairTargetsByVillage.set(villageId, new Set(REPAIR_PRIORITY_ORDER));
+            }
+        }
+
+        if (this._emergencyRepairTargetsByVillage.size === 0) return;
+
+        const sender = this._getCommandSender({ sourceLayer: 'macro', layerPriority: 'macro_emergency' });
+
+        for (const [villageId, buildingSet] of this._emergencyRepairTargetsByVillage.entries()) {
+            if (buildingSet.size === 0) {
+                this._emergencyRepairTargetsByVillage.delete(villageId);
+                continue;
+            }
+
+            const village = gameState.villages.find(candidate => candidate.id === villageId && candidate.ownerId === this._ownerId);
+            if (!village) {
+                this._emergencyRepairTargetsByVillage.delete(villageId);
+                continue;
+            }
+
+            for (const buildingType of REPAIR_PRIORITY_ORDER) {
+                if (!buildingSet.has(buildingType)) continue;
+                buildingSet.delete(buildingType);
+
+                const building = village.buildings.find(b => b.type === buildingType);
+                if (!building || building.level <= 0) continue;
+
+                const result = sender('upgrade_building', {
+                    villageId: village.id,
+                    buildingId: building.id,
+                    buildingType,
+                });
+
+                if (result?.success) {
+                    this.log('success', village, 'Reparacion Emergencia', `Edificio ${buildingType} en reparacion prioritaria post-asedio.`, { buildingType, level: building.level }, 'economic');
+                    break;
+                }
+            }
+
+            if (buildingSet.size === 0) {
+                this._emergencyRepairTargetsByVillage.delete(villageId);
+            }
+        }
+    }
+
     _processDodgeTasks(gameState) {
         processDodgeTasks({
             gameState,
             dodgeTasks: this._dodgeTasks,
             dodgeTimeThresholdMs: AI_CONTROLLER_CONSTANTS.dodgeTimeThresholdMs,
+            ownerId: this._ownerId,
             sendCommand: this._getCommandSender({ sourceLayer: 'reactive', layerPriority: 'reactive_high' }),
             log: this.log.bind(this),
         });
@@ -1991,6 +2079,7 @@ class AIController {
         this._processReinforcementRecalls(gameState);
         this._processDodgeTasks(gameState);
         this._processCounterWindows(gameState);
+        this._processEmergencyRepairs(gameState);
 
         const now = Date.now();
         const myVillages = gameState.villages.filter(v => v.ownerId === this._ownerId);

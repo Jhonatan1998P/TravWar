@@ -1315,10 +1315,43 @@ export function evaluateThreatAndChooseResponse({
     };
 }
 
-function executeDodge({ village, troopsToDodge, gameState, sendCommand, log }) {
+function executeDodge({ village, troopsToDodge, gameState, ownerId, sendCommand, log }) {
     if (Object.keys(troopsToDodge).length === 0) {
         log('info', village, 'Dodge Maneuver Skipped', 'No troops specified to dodge.', null, 'military');
         return;
+    }
+
+    if (ownerId) {
+        const myOtherVillages = gameState.villages.filter(candidate => candidate.ownerId === ownerId && candidate.id !== village.id);
+
+        const safeHavens = myOtherVillages.filter(candidate => {
+            const hasIncoming = gameState.movements.some(movement => {
+                if (!HOSTILE_MOVEMENT_TYPES.has(movement.type)) return false;
+                if (movement.ownerId === ownerId) return false;
+                return movement.targetCoords?.x === candidate.coords.x && movement.targetCoords?.y === candidate.coords.y;
+            });
+            return !hasIncoming;
+        });
+
+        if (safeHavens.length > 0) {
+            const sortedHavens = safeHavens.slice().sort((a, b) => {
+                const da = Math.hypot(a.coords.x - village.coords.x, a.coords.y - village.coords.y);
+                const db = Math.hypot(b.coords.x - village.coords.x, b.coords.y - village.coords.y);
+                return da - db;
+            });
+
+            const safeTarget = sortedHavens[0];
+            sendCommand('send_movement', {
+                originVillageId: village.id,
+                targetCoords: { x: safeTarget.coords.x, y: safeTarget.coords.y },
+                troops: troopsToDodge,
+                missionType: 'reinforcement',
+            }, {
+                reactiveIntent: 'dodge',
+            });
+            log('success', village, 'Dodge Maneuver', `Tropas enviadas a aldea propia segura en (${safeTarget.coords.x}|${safeTarget.coords.y}) como refugio.`, { troops: troopsToDodge, safeHavenId: safeTarget.id }, 'military');
+            return;
+        }
     }
 
     const nearbyOases = gameState.mapData.filter(tile => tile.type === 'oasis' && Math.hypot(tile.x - village.coords.x, tile.y - village.coords.y) <= 10);
@@ -1634,6 +1667,36 @@ export function handleEspionageReact({
     cooldowns?.setReactionCooldown?.(movement.id, 20000, { reason: 'espionage_react', sourceMovementId: movement.id });
 }
 
+function classifyIncomingMovement(movement, payloadTroops, attackerRace) {
+    const totalUnits = getTroopCount(payloadTroops);
+
+    if (totalUnits === 0) {
+        return { isFake: false, reason: 'no_intel' };
+    }
+
+    if (totalUnits === 1) {
+        return { isFake: true, reason: 'single_unit' };
+    }
+
+    if (movement.type === 'raid' && totalUnits < 5) {
+        return { isFake: true, reason: 'raid_minimal_units' };
+    }
+
+    if (movement.type === 'attack' && totalUnits <= 3) {
+        const { hasSiege, hasConquest } = getAttackerTroopFlags(payloadTroops, attackerRace);
+        if (!hasSiege && !hasConquest) {
+            return { isFake: true, reason: 'attack_minimal_units_no_siege' };
+        }
+    }
+
+    const { hasSiege } = getAttackerTroopFlags(payloadTroops, attackerRace);
+    if (!hasSiege && movement.type === 'raid' && totalUnits < 10) {
+        return { isFake: true, reason: 'small_raid_no_siege' };
+    }
+
+    return { isFake: false, reason: 'real_threat' };
+}
+
 export function handleAttackReact({
     movement,
     gameState,
@@ -1659,6 +1722,32 @@ export function handleAttackReact({
     if (locks?.hasMovementLock?.(targetVillage.id)) {
         log('info', targetVillage, 'Reactive Lock', 'Skipping reaction due active village movement lock.', { villageId: targetVillage.id }, 'military');
         return;
+    }
+
+    const payloadTroops = movement.payload?.troops || {};
+    const attackerRace = gameState.players.find(player => player.id === movement.ownerId)?.race || 'romans';
+    const fakeClassification = classifyIncomingMovement(movement, payloadTroops, attackerRace);
+
+    if (fakeClassification.isFake) {
+        log('info', targetVillage, 'Fake Detectado', `Movimiento clasificado como FAKE (${fakeClassification.reason}). Sin reaccion defensiva.`, {
+            movementId: movement.id,
+            movementType: movement.type,
+            totalUnits: getTroopCount(payloadTroops),
+            reason: fakeClassification.reason,
+        }, 'military');
+
+        villageCombatState?.upsert?.(targetVillage.id, {
+            threatLevel: 'none',
+            threatType: 'fake',
+            isFake: true,
+            lastDecisionReason: `fake_detected:${fakeClassification.reason}`,
+        }, {
+            sourceMovementIds: [movement.id],
+            lastDecisionReason: `fake_detected:${fakeClassification.reason}`,
+        });
+
+        cooldowns?.setReactionCooldown?.(movement.id, 20000, { reason: 'fake_classified', sourceMovementId: movement.id });
+        return { isFake: true };
     }
 
     const attackerVillage = gameState.villages.find(village => village.id === movement.originVillageId);
@@ -1969,7 +2058,85 @@ export function handleAttackReact({
     setBaseLocks();
 }
 
-export function processDodgeTasks({ gameState, dodgeTasks, dodgeTimeThresholdMs, sendCommand, log }) {
+export function planResourceEvacuation({
+    targetVillage,
+    gameState,
+    ownerId,
+    sendCommand,
+    log,
+}) {
+    const cranny = targetVillage.buildings.find(b => b.type === 'cranny');
+    const crannyLevel = cranny?.level || 0;
+    const crannyCapacityPerResource = crannyLevel > 0 ? crannyLevel * 400 : 0;
+
+    const resources = targetVillage.resources || {};
+    const resourceKeys = ['wood', 'stone', 'iron', 'food'];
+    const evacuationPackage = {};
+    let totalToEvacuate = 0;
+
+    for (const key of resourceKeys) {
+        const current = resources[key] || 0;
+        const crannyProtected = Math.min(current, crannyCapacityPerResource);
+        const atRisk = current - crannyProtected;
+        if (atRisk > 500) {
+            evacuationPackage[key] = Math.floor(atRisk * 0.9);
+            totalToEvacuate += evacuationPackage[key];
+        }
+    }
+
+    if (totalToEvacuate === 0) {
+        log('info', targetVillage, 'Escondite de Recursos', 'No hay recursos en riesgo suficiente para evacuar.', null, 'military');
+        return { evacuated: false, reason: 'NO_RESOURCES_AT_RISK' };
+    }
+
+    const marketBuilding = targetVillage.buildings.find(b => b.type === 'marketplace');
+    if (!marketBuilding || marketBuilding.level < 1) {
+        log('info', targetVillage, 'Escondite de Recursos', 'Sin mercado disponible para evacuacion.', null, 'military');
+        return { evacuated: false, reason: 'NO_MARKETPLACE' };
+    }
+
+    const myOtherVillages = gameState.villages.filter(v => v.ownerId === ownerId && v.id !== targetVillage.id);
+
+    const candidateVillages = myOtherVillages
+        .filter(v => {
+            const hasIncoming = gameState.movements.some(m => {
+                if (!HOSTILE_MOVEMENT_TYPES.has(m.type)) return false;
+                if (m.ownerId === ownerId) return false;
+                return m.targetCoords?.x === v.coords.x && m.targetCoords?.y === v.coords.y;
+            });
+            return !hasIncoming;
+        })
+        .map(v => ({
+            village: v,
+            dist: Math.hypot(v.coords.x - targetVillage.coords.x, v.coords.y - targetVillage.coords.y),
+        }))
+        .sort((a, b) => a.dist - b.dist);
+
+    if (candidateVillages.length === 0) {
+        log('warn', targetVillage, 'Escondite de Recursos', 'No hay aldeas propias seguras como destino.', null, 'military');
+        return { evacuated: false, reason: 'NO_SAFE_DESTINATION' };
+    }
+
+    const destination = candidateVillages[0].village;
+
+    const result = sendCommand('send_merchants', {
+        originVillageId: targetVillage.id,
+        targetCoords: destination.coords,
+        resources: evacuationPackage,
+    }, {
+        reactiveIntent: 'evacuate_resources',
+    });
+
+    if (result?.success === false) {
+        log('warn', targetVillage, 'Escondite de Recursos', `Fallo el envio de mercaderes: ${result.reason || 'desconocido'}.`, null, 'military');
+        return { evacuated: false, reason: result.reason || 'SEND_MERCHANTS_FAILED' };
+    }
+
+    log('success', targetVillage, 'Escondite de Recursos', `Evacuando ${totalToEvacuate} recursos a aldea (${destination.coords.x}|${destination.coords.y}).`, { evacuationPackage, destinationId: destination.id }, 'military');
+    return { evacuated: true, destinationId: destination.id, evacuationPackage };
+}
+
+export function processDodgeTasks({ gameState, dodgeTasks, dodgeTimeThresholdMs, ownerId, sendCommand, log }) {
     if (dodgeTasks.size === 0) return;
     const now = Date.now();
 
@@ -1979,7 +2146,7 @@ export function processDodgeTasks({ gameState, dodgeTasks, dodgeTimeThresholdMs,
         const village = gameState.villages.find(candidate => candidate.id === task.villageId);
         if (village) {
             log('warn', village, 'Executing Dodge', `Imminent hostile movement (${((task.arrivalTime - now) / 1000).toFixed(1)}s). Dodging troops.`, task.troops, 'military');
-            executeDodge({ village, troopsToDodge: task.troops, gameState, sendCommand, log });
+            executeDodge({ village, troopsToDodge: task.troops, gameState, ownerId, sendCommand, log });
         }
         dodgeTasks.delete(movementId);
     }
