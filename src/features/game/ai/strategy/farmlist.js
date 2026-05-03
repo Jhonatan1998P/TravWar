@@ -193,7 +193,6 @@ export function runFarmListCycle({
         });
 
         consumeTroops(force, raidSquad);
-        farmEntry.lastFarmedAt = now;
         farmedCount++;
 
         const intervalMin = Math.round(farmEntry.farmIntervalMs / 60000);
@@ -212,5 +211,5 @@ export function runFarmListCycle({
         );
     }
 
-    return { commands, logs };
+    return { commands, logs, farmedTargetIds: due.slice(0, farmedCount).map(e => e.targetId) };
 }

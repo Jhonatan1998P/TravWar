@@ -4,7 +4,7 @@ import { CombatFormulas } from '../../core/CombatFormulas.js';
 const HOSTILE_MOVEMENT_TYPES = new Set(['attack', 'raid']);
 const MULTI_WAVE_WINDOW_MS = 90000;
 const SNIPE_LEAD_MIN_MS = 2000;
-const SNIPE_LEAD_MAX_MS = 25000;
+const SNIPE_LEAD_MAX_MS = 72 * 3600 * 1000; // 72 hours
 const SNIPE_MIN_DISPATCH_BUFFER_MS = 500;
 const DEFAULT_DODGE_CONFIG = Object.freeze({
     offensivePartialRatio: 0.75,
@@ -386,9 +386,9 @@ function splitTroopsForEgyptianPartialDodge(village, race, evaluation, gameConfi
             dodgeRatio,
             minGarrisonUnits: Math.max(30, dodgeConfig.minDefensiveGarrisonUnits + 12),
             priorityGroups: [
+                unit => isConquestUnit(unit),
                 unit => unit.type === 'scout' || unit.role === 'scout',
                 unit => unit.role === 'offensive' || unit.type === 'siege' || unit.role === 'catapult' || unit.role === 'ram',
-                unit => isConquestUnit(unit),
                 unit => unit.role === 'versatile',
                 unit => unit.role === 'defensive',
             ],
@@ -866,8 +866,9 @@ function buildCounterTroopPlan({ targetVillage, attackerVillage, race, ownerId, 
     const allTroops = toPositiveTroopMap(targetVillage.unitsInVillage || {});
     const totalUnits = getTroopCount(allTroops);
 
+    const includeSiege = counterMode === 'punitive_siege';
     const offensivePool = collectTroopsByPriority(targetVillage, race, [
-        unit => unit.type === 'siege' || unit.role === 'catapult' || unit.role === 'ram',
+        ...(includeSiege ? [unit => unit.type === 'siege' || unit.role === 'catapult' || unit.role === 'ram'] : []),
         unit => unit.role === 'offensive',
         unit => unit.role === 'versatile',
         unit => unit.type === 'scout' || unit.role === 'scout',
@@ -931,7 +932,8 @@ function buildCounterTroopPlan({ targetVillage, attackerVillage, race, ownerId, 
         attackerVillage.buildings.find(building => building.type === 'palace')?.level || 0,
     );
     const outgoingAttackEstimate = CombatFormulas.calculateAttackPoints(selectedTroops, race, targetVillage.smithy?.upgrades || {}).total;
-    const vulnerabilityRatio = outgoingAttackEstimate / Math.max(attackerDefenseEstimate, 1);
+    const conservativeAttackerDefense = attackerDefenseEstimate * 1.5;
+    const vulnerabilityRatio = outgoingAttackEstimate / Math.max(conservativeAttackerDefense, 1);
 
     const minVulnerabilityRatio = counterMode === 'counterpressure'
         ? (doctrine?.counter?.minCounterpressureVulnerability || 0.6)
@@ -1207,8 +1209,8 @@ export function evaluateThreatAndChooseResponse({
 
     const imperialDefenseEstimate = localDefenseEstimate + imperialDefenseData.projectedDefense;
 
-    const canHoldLocally = localDefenseEstimate >= attackPower * 1.02;
-    const canHoldWithReinforcements = imperialDefenseEstimate >= attackPower * 1.02;
+    const canHoldLocally = localDefenseEstimate >= attackPower * 1.25;
+    const canHoldWithReinforcements = imperialDefenseEstimate >= attackPower * 1.15;
     const projectedLocalOutcome = canHoldLocally ? 'hold' : 'break';
     const projectedEmpireOutcome = canHoldWithReinforcements ? 'hold' : 'break';
     const projectedLossSeverity = getLossSeverity(attackPower, localDefenseEstimate);
@@ -1358,21 +1360,22 @@ function executeDodge({ village, troopsToDodge, gameState, ownerId, sendCommand,
     }
 
     const nearbyOases = gameState.mapData.filter(tile => tile.type === 'oasis' && Math.hypot(tile.x - village.coords.x, tile.y - village.coords.y) <= 10);
-    if (nearbyOases.length === 0) {
-        log('fail', village, 'Dodge Maneuver', 'No nearby oases found to dodge troops.', null, 'military');
-        return;
-    }
+    const safeOases = nearbyOases.filter(oasis => (oasis.defensePower || 0) === 0);
 
-    const targetOasis = nearbyOases[Math.floor(Math.random() * nearbyOases.length)];
-    sendCommand('send_movement', {
-        originVillageId: village.id,
-        targetCoords: { x: targetOasis.x, y: targetOasis.y },
-        troops: troopsToDodge,
-        missionType: 'raid',
-    }, {
-        reactiveIntent: 'dodge',
-    });
-    log('success', village, 'Dodge Maneuver', `Troops sent to raid oasis at (${targetOasis.x}|${targetOasis.y}) to avoid combat.`, { troops: troopsToDodge }, 'military');
+    if (safeOases.length > 0) {
+        const targetOasis = safeOases[Math.floor(Math.random() * safeOases.length)];
+        sendCommand('send_movement', {
+            originVillageId: village.id,
+            targetCoords: { x: targetOasis.x, y: targetOasis.y },
+            troops: troopsToDodge,
+            missionType: 'raid',
+        }, {
+            reactiveIntent: 'dodge',
+        });
+        log('success', village, 'Dodge Maneuver', `Troops sent to raid safe oasis at (${targetOasis.x}|${targetOasis.y}) to avoid combat.`, { troops: troopsToDodge }, 'military');
+    } else {
+        log('warn', village, 'Dodge Maneuver', 'No safe havens or safe oases available. Holding troops in village rather than risking unknown oasis defense.', null, 'military');
+    }
 }
 
 function planDodgeTask({ dodgeTasks, movementId, movementArrivalTime, village, troops }) {
@@ -1402,14 +1405,14 @@ function manageReinforcements({
         ? ((threatType === 'conquest_attack' || threatType === 'siege_attack') ? new Set(['defensive', 'versatile']) : new Set(['defensive']))
         : new Set(['defensive', 'versatile']);
 
-    const getDefensiveTroops = units => {
+    const getDefensiveTroops = (units, villageRace = race) => {
         const defensive = {};
         for (const unitId in units) {
             const count = units[unitId] || 0;
             if (count <= 0) continue;
 
-            const role = raceUnits.find(unit => unit.id === unitId)?.role;
-            if (reinforcementRoles.has(role)) {
+            const unitData = getUnitData(villageRace, unitId);
+            if (unitData && reinforcementRoles.has(unitData.role)) {
                 defensive[unitId] = count;
             }
         }
@@ -1440,10 +1443,10 @@ function manageReinforcements({
     const potentialReinforcements = [];
 
     for (const village of myOtherVillages) {
-        const defensiveTroops = getDefensiveTroops(village.unitsInVillage || {});
+        const defensiveTroops = getDefensiveTroops(village.unitsInVillage || {}, village.race);
         if (Object.keys(defensiveTroops).length === 0) continue;
 
-        const slowestSpeed = getSlowestUnitSpeed(defensiveTroops, race);
+        const slowestSpeed = getSlowestUnitSpeed(defensiveTroops, village.race);
         const travelTime = calculateTravelTime(village.coords, targetVillage.coords, slowestSpeed, gameConfig.troopSpeed || 1);
         if (!ignoreTravelTime && Date.now() + travelTime >= (movementArrivalTime || Date.now() + 999999)) continue;
 
@@ -1469,7 +1472,7 @@ function manageReinforcements({
     }
 
     const totalProjectedDefense = localDefensePower + accumulatedPower;
-    if (totalProjectedDefense >= attackPower) {
+    if (totalProjectedDefense >= neededPower) {
         log('success', targetVillage, 'Defensa Coordinada', `Enjambre activado. ${reinforcementsToSend.length} aldeas enviando ayuda. Poder Total: ${totalProjectedDefense.toFixed(0)} vs Ataque: ${attackPower.toFixed(0)}`, null, 'military');
         reinforcementsToSend.forEach(({ village, troops }) => {
             sendCommand('send_movement', {
@@ -1608,22 +1611,21 @@ export function handleEspionageReact({
             }
         }
         log('info', targetVillage, 'Counter-espionage', 'Espionage detected. Keeping scouts and dodging other troops.', { troopsToDodge }, 'military');
+        
+        if (Object.keys(troopsToDodge).length > 0) {
+            planDodgeTask({
+                dodgeTasks,
+                movementId: movement.id,
+                movementArrivalTime: movement.arrivalTime,
+                village: targetVillage,
+                troops: troopsToDodge,
+            });
+        }
     } else {
-        Object.assign(troopsToDodge, targetVillage.unitsInVillage);
-        log('info', targetVillage, 'Counter-espionage', 'Espionage detected. No scouts to defend. Dodging all troops.', null, 'military');
+        log('info', targetVillage, 'Counter-espionage', 'Espionage detected. No scouts to defend. Maintaining garrison (espionage causes no casualties).', null, 'military');
     }
 
-    if (Object.keys(troopsToDodge).length > 0) {
-        planDodgeTask({
-            dodgeTasks,
-            movementId: movement.id,
-            movementArrivalTime: movement.arrivalTime,
-            village: targetVillage,
-            troops: troopsToDodge,
-        });
-    }
-
-    const preferredResponse = hasScouts ? 'partial_dodge' : 'full_dodge';
+    const preferredResponse = hasScouts ? 'partial_dodge' : 'hold';
     const doctrine = getReactiveDoctrine(race, null);
     const contract = buildReactiveCombatContract({
         targetVillage,
@@ -1688,7 +1690,10 @@ function classifyIncomingMovement(movement, payloadTroops, attackerRace) {
     if (movement.type === 'attack' && totalUnits <= 3) {
         const { hasSiege, hasConquest } = getAttackerTroopFlags(payloadTroops, attackerRace);
         if (!hasSiege && !hasConquest) {
-            return { isFake: true, reason: 'attack_minimal_units_no_siege' };
+            const estimatedAttackPower = CombatFormulas.calculateAttackPoints(payloadTroops, attackerRace, {}).total;
+            if (estimatedAttackPower < 200) {
+                return { isFake: true, reason: 'attack_minimal_units_no_siege' };
+            }
         }
     }
 
@@ -1862,7 +1867,7 @@ export function handleAttackReact({
             sendCommand,
             log,
             movementArrivalTime: movement.arrivalTime,
-            ignoreTravelTime: evaluation.threatType === 'siege_attack' || evaluation.threatType === 'conquest_attack',
+            ignoreTravelTime: false,
         });
 
         if (!reinforcementResult.canHold) {
@@ -2045,6 +2050,34 @@ export function handleAttackReact({
                 sourceMovementIds: [movement.id],
                 lastDecisionReason: `counter_blocked_${counterResult.reason}`,
             });
+
+            const shouldFallbackToDodge = evaluation.threatLevel === 'high' || evaluation.threatLevel === 'critical';
+            if (shouldFallbackToDodge) {
+                const fallbackResponse = 'full_dodge';
+                const fallbackPlan = buildDodgeTroopPlan({
+                    targetVillage,
+                    race,
+                    posture: evaluation.posture,
+                    responseType: fallbackResponse,
+                    evaluation,
+                    doctrine: evaluation.doctrine,
+                    gameConfig,
+                });
+                const fallbackTroops = fallbackPlan.troopsToDodge;
+                if (Object.keys(fallbackTroops).length > 0) {
+                    planDodgeTask({
+                        dodgeTasks,
+                        movementId: movement.id,
+                        movementArrivalTime: movement.arrivalTime,
+                        village: targetVillage,
+                        troops: fallbackTroops,
+                    });
+                    log('warn', targetVillage, 'Counter Fallback', `Counter blocked (${counterResult.reason}). Threat ${evaluation.threatLevel}. Fallback to ${fallbackResponse}.`, { fallbackTroops }, 'military');
+                    setBaseLocks();
+                    return;
+                }
+            }
+
             log('warn', targetVillage, 'Counter Reaction', `Counter action blocked (${counterResult.reason}). Holding.`, counterResult.plan || null, 'military');
             setBaseLocks();
             return;
@@ -2074,7 +2107,6 @@ export function planSnipeTasks({
 }) {
     const now = Date.now();
     const troopSpeed = gameConfig?.troopSpeed || 1;
-    const raceUnits = gameData.units[race]?.troops || [];
 
     const myOtherVillages = gameState.villages.filter(
         v => v.ownerId === ownerId && v.id !== targetVillage.id,
@@ -2095,7 +2127,7 @@ export function planSnipeTasks({
         for (const unitId in originVillage.unitsInVillage || {}) {
             const count = originVillage.unitsInVillage[unitId] || 0;
             if (count <= 0) continue;
-            const unitData = raceUnits.find(u => u.id === unitId);
+            const unitData = getUnitData(originVillage.race, unitId);
             if (!unitData) continue;
             if (unitData.role === 'defensive' || unitData.role === 'versatile') {
                 defensiveTroops[unitId] = count;
@@ -2105,7 +2137,7 @@ export function planSnipeTasks({
         const totalDef = Object.values(defensiveTroops).reduce((s, c) => s + c, 0);
         if (totalDef < 5) continue;
 
-        const slowestSpeed = getSlowestUnitSpeed(defensiveTroops, race);
+        const slowestSpeed = getSlowestUnitSpeed(defensiveTroops, originVillage.race);
         const travelTime = calculateTravelTime(
             originVillage.coords, targetVillage.coords, slowestSpeed, troopSpeed,
         );
@@ -2117,7 +2149,7 @@ export function planSnipeTasks({
         const dispatchAt = movementArrivalTime - travelTime - SNIPE_LEAD_MIN_MS;
         if (dispatchAt <= now + SNIPE_MIN_DISPATCH_BUFFER_MS) continue;
 
-        const taskKey = `${originVillage.id}:${targetVillage.id}`;
+        const taskKey = `${movementId}:${originVillage.id}:${targetVillage.id}`;
         const existingTask = snipeTasks.get(taskKey);
         if (existingTask && existingTask.dispatchAt <= dispatchAt) continue;
 
@@ -2287,15 +2319,46 @@ export function processDodgeTasks({ gameState, dodgeTasks, dodgeTimeThresholdMs,
     if (dodgeTasks.size === 0) return;
     const now = Date.now();
 
+    const processedVillages = new Set();
+
     for (const [movementId, task] of dodgeTasks.entries()) {
         if (task.arrivalTime - now >= dodgeTimeThresholdMs) continue;
 
         const village = gameState.villages.find(candidate => candidate.id === task.villageId);
-        if (village) {
-            log('warn', village, 'Executing Dodge', `Imminent hostile movement (${((task.arrivalTime - now) / 1000).toFixed(1)}s). Dodging troops.`, task.troops, 'military');
-            executeDodge({ village, troopsToDodge: task.troops, gameState, ownerId, sendCommand, log });
+        if (!village) {
+            dodgeTasks.delete(movementId);
+            continue;
         }
+
+        if (processedVillages.has(village.id)) {
+            log('info', village, 'Dodge Skipped', 'Multiple dodge tasks for same village; already processed in this tick.', { movementId }, 'military');
+            dodgeTasks.delete(movementId);
+            continue;
+        }
+
+        const availableTroops = village.unitsInVillage || {};
+        const troopsStillPresent = {};
+        let missingTroops = false;
+        for (const [unitId, plannedCount] of Object.entries(task.troops || {})) {
+            const availableCount = availableTroops[unitId] || 0;
+            if (availableCount <= 0) {
+                missingTroops = true;
+                continue;
+            }
+            troopsStillPresent[unitId] = Math.min(plannedCount, availableCount);
+        }
+
+        if (missingTroops || Object.keys(troopsStillPresent).length === 0) {
+            log('warn', village, 'Dodge Aborted', 'Planned troops no longer available (likely already dodged or lost). Skipping.', { planned: task.troops, available: availableTroops }, 'military');
+            dodgeTasks.delete(movementId);
+            processedVillages.add(village.id);
+            continue;
+        }
+
+        log('warn', village, 'Executing Dodge', `Imminent hostile movement (${((task.arrivalTime - now) / 1000).toFixed(1)}s). Dodging troops.`, troopsStillPresent, 'military');
+        executeDodge({ village, troopsToDodge: troopsStillPresent, gameState, ownerId, sendCommand, log });
         dodgeTasks.delete(movementId);
+        processedVillages.add(village.id);
     }
 }
 

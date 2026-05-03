@@ -26,6 +26,7 @@ import {
     runEgyptianEconomicPhaseCycle,
     serializeEgyptianPhaseStates,
 } from './controller/egyptian-phase-engine.js';
+import { assignVillageRoles } from './strategy/village-roles.js';
 
 const PHASE_LABELS_BY_RACE = Object.freeze({
     germans: {
@@ -229,6 +230,7 @@ function createDefaultVillageCombatState(villageId, now = Date.now()) {
         counterDecisionState: 'none',
         counterDecisionReason: null,
         counterDecisionAt: null,
+        isFake: false,
         expiresAt: now + DEFAULT_COMBAT_STATE_TTL_MS,
         sourceMovementIds: [],
         lastDecisionReason: 'initialized',
@@ -1148,6 +1150,12 @@ class AIController {
                 this._commandWindowByVillage.delete(villageId);
             }
         }
+
+        for (const [villageId, cooldownExpiry] of this._forwardDefenseCooldownByVillage.entries()) {
+            if (!Number.isFinite(cooldownExpiry) || cooldownExpiry <= now) {
+                this._forwardDefenseCooldownByVillage.delete(villageId);
+            }
+        }
     }
 
     _getCommandSender(context = {}) {
@@ -2029,6 +2037,12 @@ class AIController {
             if (entry.arrivalTime > now) continue;
             this._siegeArrivalPendingByVillage.delete(villageId);
 
+            const movementStillExists = gameState.movements.some(m => m.id === entry.movementId);
+            if (!movementStillExists) {
+                this.log('info', null, 'Emergency Repair Skip', `Asedio recallado o cancelado para aldea ${villageId}; omitiendo reparaciones.`, { movementId: entry.movementId }, 'economic');
+                continue;
+            }
+
             if (!this._emergencyRepairTargetsByVillage.has(villageId)) {
                 this._emergencyRepairTargetsByVillage.set(villageId, new Set(REPAIR_PRIORITY_ORDER));
             }
@@ -2052,10 +2066,12 @@ class AIController {
 
             for (const buildingType of REPAIR_PRIORITY_ORDER) {
                 if (!buildingSet.has(buildingType)) continue;
-                buildingSet.delete(buildingType);
 
                 const building = village.buildings.find(b => b.type === buildingType);
-                if (!building || building.level <= 0) continue;
+                if (!building || building.level <= 0) {
+                    buildingSet.delete(buildingType);
+                    continue;
+                }
 
                 const result = sender('upgrade_building', {
                     villageId: village.id,
@@ -2064,6 +2080,7 @@ class AIController {
                 });
 
                 if (result?.success) {
+                    buildingSet.delete(buildingType);
                     this.log('success', village, 'Reparacion Emergencia', `Edificio ${buildingType} en reparacion prioritaria post-asedio.`, { buildingType, level: building.level }, 'economic');
                     break;
                 }
@@ -2135,6 +2152,19 @@ class AIController {
         if (interiorVillages.length === 0) return;
 
         const sender = this._getCommandSender({ sourceLayer: 'military', layerPriority: 'military_low' });
+        const sourceUsageTracker = new Map();
+
+        const getAvailableDefensiveTroops = (village) => {
+            const allDef = getDefensiveTroops(village);
+            const reserved = this.getVillageCombatState(village.id)?.reservedTroops || {};
+            const available = {};
+            for (const unitId in allDef) {
+                const reservedCount = reserved[unitId] || 0;
+                const availCount = allDef[unitId] - reservedCount;
+                if (availCount > 0) available[unitId] = availCount;
+            }
+            return available;
+        };
 
         for (const frontier of frontierVillages) {
             if (isThreatened(frontier)) continue;
@@ -2150,11 +2180,13 @@ class AIController {
                 .map(v => ({
                     village: v,
                     dist: Math.hypot(v.coords.x - frontier.coords.x, v.coords.y - frontier.coords.y),
-                    defensiveTroops: getDefensiveTroops(v),
+                    defensiveTroops: getAvailableDefensiveTroops(v),
                 }))
-                .filter(({ defensiveTroops }) => {
+                .filter(({ defensiveTroops, village }) => {
                     const total = Object.values(defensiveTroops).reduce((s, c) => s + c, 0);
-                    return total > MIN_GARRISON_UNITS * 2;
+                    if (total <= MIN_GARRISON_UNITS * 2) return false;
+                    const alreadySent = sourceUsageTracker.get(village.id) || 0;
+                    return alreadySent < MIN_GARRISON_UNITS;
                 })
                 .sort((a, b) => a.dist - b.dist);
 
@@ -2179,6 +2211,8 @@ class AIController {
                 strategicIntent: 'forward_defense',
             });
 
+            const currentUsage = sourceUsageTracker.get(source.village.id) || 0;
+            sourceUsageTracker.set(source.village.id, currentUsage + totalToSend);
             this._forwardDefenseCooldownByVillage.set(frontier.id, now + COOLDOWN_MS);
 
             this.log('info', frontier, 'Forward Defense',
@@ -2230,7 +2264,10 @@ class AIController {
                     myVillages.forEach(village => this._goalManager.ensureVillageStateExists(village.id));
                 }
 
+                const villageRolesMap = assignVillageRoles(myVillages, gameState);
+
                 myVillages.forEach((village, index) => {
+                    const villageRole = villageRolesMap.get(village.id) || 'support';
                     if (this._race === 'germans' && this._isPhaseEngineEnabledForRace('germans')) {
                         const phaseState = this._ensureGermanPhaseState(village.id);
                         const result = runGermanEconomicPhaseCycle({
@@ -2242,6 +2279,7 @@ class AIController {
                             villageCombatState: this.getVillageCombatState(village.id),
                             actionExecutor: this._actionExecutor,
                             log: this.log.bind(this),
+                            villageRole,
                         });
 
                         this._germanPhaseStates.set(village.id, result.phaseState);
@@ -2270,6 +2308,7 @@ class AIController {
                             villageCombatState: this.getVillageCombatState(village.id),
                             actionExecutor: this._actionExecutor,
                             log: this.log.bind(this),
+                            villageRole,
                         });
 
                         this._egyptianPhaseStates.set(village.id, result.phaseState);

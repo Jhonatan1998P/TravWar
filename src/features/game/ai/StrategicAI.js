@@ -32,6 +32,101 @@ function clamp01(value) {
     return Math.max(0, Math.min(1, Number(value) || 0));
 }
 
+function getSlowestUnitSpeed(troops, race) {
+    let slowestSpeed = Infinity;
+    for (const unitId in troops) {
+        if ((troops[unitId] || 0) <= 0) continue;
+        const unitData = gameData.units[race]?.troops?.find(unit => unit.id === unitId);
+        if (unitData && unitData.stats.speed < slowestSpeed) {
+            slowestSpeed = unitData.stats.speed;
+        }
+    }
+    return slowestSpeed === Infinity ? 0 : slowestSpeed;
+}
+
+function calculateTravelTimeFromForce(force, targetCoords, troopSpeed) {
+    const troops = force.combatTroops || {};
+    const slowestSpeed = getSlowestUnitSpeed(troops, force.village?.race || 'romans');
+    if (slowestSpeed <= 0) return Infinity;
+    const distance = Math.hypot(targetCoords.x - force.village.coords.x, targetCoords.y - force.village.coords.y);
+    return ((distance / (slowestSpeed * (troopSpeed || 1))) * 3600) * 1000;
+}
+
+function coordinateLandingTimes(commands, forces, troopSpeed) {
+    if (!commands || commands.length <= 1) return commands;
+
+    const attackCommands = commands.filter(c => c.comando === 'ATTACK' && c.parametros?.mision === 'attack');
+    if (attackCommands.length <= 1) return commands;
+
+    const forceByVillageId = new Map();
+    for (const force of forces) {
+        forceByVillageId.set(force.village.id, force);
+    }
+
+    const withTravelTimes = attackCommands.map(cmd => {
+        const force = forceByVillageId.get(cmd.villageId);
+        if (!force) return { cmd, travelTime: Infinity, targetCoords: cmd.parametros?.targetCoords };
+        const travelTime = calculateTravelTimeFromForce(force, cmd.parametros.targetCoords, troopSpeed);
+        return { cmd, travelTime, targetCoords: cmd.parametros.targetCoords };
+    }).filter(e => Number.isFinite(e.travelTime));
+
+    if (withTravelTimes.length <= 1) return commands;
+
+    const now = Date.now();
+    const maxTravelTime = Math.max(...withTravelTimes.map(e => e.travelTime));
+    const syncPoint = now + maxTravelTime + 5000;
+
+    const coordinatedCommands = [];
+    const villageCoordTimes = new Map();
+
+    for (const { cmd, travelTime } of withTravelTimes) {
+        const dispatchAt = syncPoint - travelTime;
+        villageCoordTimes.set(cmd.villageId, { dispatchAt, targetCoords: cmd.parametros.targetCoords });
+    }
+
+    const minDispatchAt = Math.min(...[...villageCoordTimes.values()].map(v => v.dispatchAt));
+    const MIN_DISPATCH_BUFFER_MS = 1000;
+    const delayMs = Math.max(0, now + MIN_DISPATCH_BUFFER_MS - minDispatchAt);
+
+    for (const { cmd, travelTime } of withTravelTimes) {
+        const adjustedDispatchAt = villageCoordTimes.get(cmd.villageId).dispatchAt + delayMs;
+        const arrivalTime = adjustedDispatchAt + travelTime;
+
+        coordinatedCommands.push({
+            ...cmd,
+            meta: {
+                ...(cmd.meta || {}),
+                landingSync: {
+                    dispatchAt: Math.round(adjustedDispatchAt),
+                    arrivalTime: Math.round(arrivalTime),
+                    travelTime: Math.round(travelTime),
+                    delayMs: Math.round(delayMs),
+                    syncPoint: Math.round(syncPoint),
+                },
+            },
+        });
+    }
+
+    for (const cmd of commands) {
+        if (cmd.comando !== 'ATTACK' || cmd.parametros?.mision !== 'attack') {
+            coordinatedCommands.push(cmd);
+        }
+    }
+
+    coordinatedCommands.sort((a, b) => {
+        const aIsAttack = a.comando === 'ATTACK' && a.parametros?.mision === 'attack';
+        const bIsAttack = b.comando === 'ATTACK' && b.parametros?.mision === 'attack';
+        if (aIsAttack && !bIsAttack) return -1;
+        if (!aIsAttack && bIsAttack) return 1;
+        if (aIsAttack && bIsAttack) {
+            return (a.meta?.landingSync?.arrivalTime || 0) - (b.meta?.landingSync?.arrivalTime || 0);
+        }
+        return 0;
+    });
+
+    return coordinatedCommands;
+}
+
 function getStrategicAttackCooldownMs(gameSpeed = 1) {
     const speed = Math.max(1, Number(gameSpeed) || 1);
     const scaled = Math.floor(STRATEGIC_ATTACK_GATE_CONFIG.baseCooldownMs / speed);
@@ -176,6 +271,17 @@ export default class StrategicAI {
             const reservedScoutCount = scoutId ? Math.max(0, Number(combatContract.reservedTroops?.[scoutId] || 0)) : 0;
             const scoutCountFree = Math.max(0, scoutCountAtHome - reservedScoutCount);
             const offenseGate = this._resolveVillageOffenseGate(combatContract);
+
+            const hasIncomingHostile = gameState.movements.some(m =>
+                m.targetCoords?.x === village.coords.x &&
+                m.targetCoords?.y === village.coords.y &&
+                (m.type === 'attack' || m.type === 'raid') &&
+                m.ownerId !== ownerId
+            );
+            if (hasIncomingHostile && !offenseGate.blocked) {
+                offenseGate.blocked = true;
+                offenseGate.reasons.push('incoming_hostile_movement_detected');
+            }
 
             const powerAtHome = CombatFormulas.calculateAttackPoints(combatTroopsAtHome, race, village.smithy.upgrades).total;
             const freePowerAtHome = CombatFormulas.calculateAttackPoints(freeCombatTroops, race, village.smithy.upgrades).total;
@@ -469,6 +575,14 @@ export default class StrategicAI {
                 reasoningLog.push(...farmListResult.logs);
             }
 
+            if (farmListResult.farmedTargetIds?.length > 0 && aiState.farmList) {
+                const now = Date.now();
+                for (const targetId of farmListResult.farmedTargetIds) {
+                    const entry = aiState.farmList.find(f => f.targetId === targetId);
+                    if (entry) entry.lastFarmedAt = now;
+                }
+            }
+
             const farmingResults = this._performOptimizedFarming(
                 offensiveReadyForces,
                 safeKnownTargets,
@@ -485,9 +599,25 @@ export default class StrategicAI {
             oasisFarmingTelemetry = farmingResults.telemetry || null;
         }
 
+        const coordinatedCommands = coordinateLandingTimes(commands, offensiveReadyForces, troopSpeed);
+
+        if (coordinatedCommands !== commands) {
+            const attackCmds = coordinatedCommands.filter(c => c.comando === 'ATTACK' && c.meta?.landingSync);
+            if (attackCmds.length > 0) {
+                const arrivalTimes = attackCmds.map(c => c.meta.landingSync.arrivalTime);
+                const minArrival = Math.min(...arrivalTimes);
+                const maxArrival = Math.max(...arrivalTimes);
+                reasoningLog.push(
+                    `[LANDING-SYNC] ${attackCmds.length} ataques sincronizados. ` +
+                    `Arrival window: ${((maxArrival - minArrival) / 1000).toFixed(1)}s. ` +
+                    `Sync point: ${new Date(minArrival).toISOString()}.`
+                );
+            }
+        }
+
         return {
             razonamiento: reasoningLog.join('\n'),
-            comandos: commands,
+            comandos: coordinatedCommands,
             telemetry: {
                 oasisFarming: oasisFarmingTelemetry,
                 militaryGate: {
@@ -540,8 +670,18 @@ export default class StrategicAI {
         const defPower = this._calculateEstimatedDefense(target, this._getAttackerProportions(attackerPreview));
 
         if (defPower < 100) {
-            const siegeCmds = this._planSiegeTrain(bestForce, target, log);
-            if (siegeCmds.length > 0) return siegeCmds;
+            const troopsToSend = { ...bestForce.combatTroops };
+            this._consumeTroops(bestForce, troopsToSend);
+            log.push(`[GUERRA] Objetivo casi indefenso (${defPower.toFixed(0)} def). Ataque directo en lugar de asedio.`);
+            return [{
+                comando: 'ATTACK',
+                villageId: bestForce.village.id,
+                parametros: {
+                    targetCoords: target.coords,
+                    tropas: troopsToSend,
+                    mision: 'attack',
+                },
+            }];
         }
 
         const fullAttack = { ...bestForce.combatTroops };
@@ -1316,9 +1456,9 @@ export default class StrategicAI {
                 parametros: {
                     targetCoords: decoyTargets[i].coords,
                     tropas: { [cheapestUnit.unitId]: 1 },
-                    mision: 'raid',
+                    mision: 'attack',
                 },
-                meta: { isFakeAttack: true, realTargetCoords },
+                meta: { isFakeAttack: true },
             });
             toConsume[cheapestUnit.unitId] = (toConsume[cheapestUnit.unitId] || 0) + 1;
         }
@@ -1382,7 +1522,7 @@ export default class StrategicAI {
     _hasActiveAttack(gameState, targetId, ownerId) {
         return gameState.movements.some(movement =>
             movement.ownerId === ownerId &&
-            movement.type === 'attack' &&
+            (movement.type === 'attack' || movement.type === 'raid') &&
             this._getTargetIdFromCoords(gameState, movement.targetCoords) === targetId,
         );
     }

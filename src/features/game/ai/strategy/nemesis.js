@@ -46,19 +46,51 @@ function countOtherAITargetingPlayer(gameState, playerId, myOwnerId) {
     return count;
 }
 
-export function scoreNemesisCandidate(candidate, myVillages, candidateVillages) {
+function getAllianceStrength(gameState, allianceId) {
+    if (!allianceId || allianceId === 'nature') return Infinity;
+    const members = gameState.players.filter(p => p.allianceId === allianceId);
+    if (members.length === 0) return 0;
+    return members.reduce((sum, p) => sum + (p.pop || 0), 0);
+}
+
+function countKnownInactiveVillages(gameState, playerId) {
+    if (!gameState.aiState) return 0;
+    const myAiState = Object.values(gameState.aiState);
+    let count = 0;
+    for (const aiState of myAiState) {
+        if (!aiState.farmList) continue;
+        for (const farm of aiState.farmList) {
+            if (farm.ownerId === playerId) count++;
+        }
+    }
+    return count;
+}
+
+export function scoreNemesisCandidate(candidate, myVillages, candidateVillages, gameState = null) {
     const dist = minDistanceToAnyMyVillage(candidateVillages, myVillages);
     const pop = candidate.pop || 0;
     const villages = candidateVillages.length;
     const clusterScore = computeVillageClusterScore(candidateVillages);
     const proximityScore = 1000 / (dist + 1);
 
+    let allianceStrength = 50;
+    if (candidate.allianceId && gameState) {
+        allianceStrength = getAllianceStrength(gameState, candidate.allianceId);
+    }
+    const allianceWeaknessScore = 100 / (allianceStrength + 1);
+
+    let farmableScore = 0;
+    if (gameState) {
+        farmableScore = countKnownInactiveVillages(gameState, candidate.id) * 5;
+    }
+
     return (
-        proximityScore * 0.35 +
-        (pop * 0.005) * 0.10 +
+        proximityScore * 0.30 +
+        (pop * 0.005) * 0.15 +
         (villages * 8) * 0.15 +
-        (clusterScore * 60) * 0.25 +
-        10 * 0.15
+        (clusterScore * 60) * 0.20 +
+        allianceWeaknessScore * 0.10 +
+        farmableScore * 0.10
     );
 }
 
@@ -112,7 +144,7 @@ export function selectBestNemesisCandidate(candidates, gameState, myOwnerId) {
 
     for (const candidate of candidates) {
         const candidateVillages = getPlayerVillages(gameState, candidate.id);
-        const score = scoreNemesisCandidate(candidate, myVillages, candidateVillages);
+        const score = scoreNemesisCandidate(candidate, myVillages, candidateVillages, gameState);
         if (score > bestScore) {
             bestScore = score;
             bestCandidate = candidate;

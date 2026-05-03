@@ -2,6 +2,7 @@ import { getBuildingLevelData, getRaceTroops } from '../../core/data/lookups.js'
 import { RESOURCE_FIELD_BUILDING_TYPES } from '../../core/data/constants.js';
 import { rebalanceVillageBudgetToRatio } from '../../state/worker/budget.js';
 import { resolveUnitIdForRace } from '../utils/AIUnitUtils.js';
+import { getPhaseModifierForRole, VILLAGE_ROLE } from '../strategy/village-roles.js';
 import {
     buildPrerequisiteResolverStepFromBlock,
     clonePhaseStep,
