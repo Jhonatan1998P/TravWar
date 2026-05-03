@@ -5,3 +5,4 @@ export { default as AIActionExecutor } from './AIActionExecutor.js';
 export { default as StrategicAI } from './StrategicAI.js';
 export { MemoryManager } from './MemoryManager.js';
 export { default as ReputationManager } from './ReputationManager.js';
+export { isHunDeepSeekEnabled, setHunDeepSeekEnabled, getHunDeepSeekStatus } from './hun/hun-combat-advisor.js';

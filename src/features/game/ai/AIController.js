@@ -7,8 +7,9 @@ import { AI_CONTROLLER_CONSTANTS } from './config/AIConstants.js';
 import { gameData } from '../core/GameData.js';
 import { resolvePhaseEngineRolloutFlags } from '../core/data/constants.js';
 import { executeCommands } from './controller/commands.js';
-import { handleAttackReact, handleEspionageReact, processDodgeTasks, processReinforcementRecalls } from './controller/reactive.js';
+import { handleAttackReact, handleEspionageReact, processDodgeTasks, processReinforcementRecalls, evaluateThreatAndChooseResponse } from './controller/reactive.js';
 import { runMilitaryDecision } from './controller/military.js';
+import { getHunDefenseAdvice, getHunAttackAdvice, getHunDeepSeekStatus } from './hun/hun-combat-advisor.js';
 import {
     createDefaultGermanPhaseState,
     GERMAN_PHASE_IDS,
@@ -1833,6 +1834,11 @@ class AIController {
     }
 
     _handleAttackReact(movement, gameState) {
+        if (this._race === 'huns') {
+            this._handleHunAttackReactWithDeepSeek(movement, gameState);
+            return;
+        }
+
         handleAttackReact({
             movement,
             gameState,
@@ -1875,6 +1881,88 @@ class AIController {
                     { reason: 'reactive_macro_emergency_lock', sourceMovementId: movement.id },
                 );
             }
+        }
+    }
+
+    async _handleHunAttackReactWithDeepSeek(movement, gameState) {
+        const targetVillage = gameState.villages.find(
+            village => village.coords.x === movement.targetCoords?.x && village.coords.y === movement.targetCoords?.y,
+        );
+        if (!targetVillage) return;
+
+        const attackerVillage = gameState.villages.find(village => village.id === movement.originVillageId);
+        const evaluation = evaluateThreatAndChooseResponse({
+            movement,
+            gameState,
+            race: this._race,
+            archetype: this._archetype,
+            ownerId: this._ownerId,
+            gameConfig: this._gameConfig,
+            targetVillage,
+            attackerVillage,
+        });
+
+        const dsResult = await getHunDefenseAdvice({
+            movement,
+            targetVillage,
+            attackerVillage,
+            attackPower: evaluation.attackPowerEstimate,
+            localDefense: evaluation.localDefenseEstimate,
+            canHoldLocally: evaluation.canHoldLocally,
+            canHoldWithReinforcements: evaluation.canHoldWithReinforcements,
+            threatType: evaluation.threatType,
+            threatLevel: evaluation.threatLevel,
+            posture: evaluation.posture,
+            projectedLossSeverity: evaluation.projectedLossSeverity,
+            fallbackResponse: evaluation.preferredResponse,
+            log: this.log.bind(this),
+        });
+
+        const finalResponse = dsResult.overridden ? dsResult.response : evaluation.preferredResponse;
+        const finalEvaluation = { ...evaluation, preferredResponse: finalResponse };
+
+        this.upsertVillageCombatState(targetVillage.id, {
+            threatLevel: finalEvaluation.threatLevel,
+            threatType: finalEvaluation.threatType,
+            intelFresh: finalEvaluation.intelFresh,
+            lastIntelAt: finalEvaluation.lastIntelAt,
+            posture: finalEvaluation.posture,
+            preferredResponse: finalEvaluation.preferredResponse,
+            offenseSuppressed: finalEvaluation.offenseSuppressed,
+            reservedTroops: finalEvaluation.reservedTroops,
+            attackPowerEstimate: finalEvaluation.attackPowerEstimate,
+            localDefenseEstimate: finalEvaluation.localDefenseEstimate,
+            imperialDefenseEstimate: finalEvaluation.imperialDefenseEstimate,
+            canHoldLocally: finalEvaluation.canHoldLocally,
+            canHoldWithReinforcements: finalEvaluation.canHoldWithReinforcements,
+            shouldPreserveOffense: finalEvaluation.shouldPreserveOffense,
+            shouldCounterattack: finalEvaluation.shouldCounterattack,
+            shouldPauseEconomicConstruction: finalEvaluation.shouldPauseEconomicConstruction,
+            shouldBoostEmergencyRecruitment: finalEvaluation.shouldBoostEmergencyRecruitment,
+            attackerVillageId: finalEvaluation.attackerVillageId,
+            shouldRescoutAttacker: finalEvaluation.shouldRescoutAttacker,
+            rescoutReason: finalEvaluation.rescoutReason,
+            doctrineId: finalEvaluation.doctrineId,
+            attackerRace: finalEvaluation.attackerRace,
+            counterWindowOpen: finalEvaluation.counterWindowOpen,
+            counterWindowExpiresAt: finalEvaluation.counterWindowExpiresAt,
+            sourceMovementIds: [movement.id],
+            lastDecisionReason: `hun_deepseek:${finalResponse}`,
+        }, {
+            sourceMovementIds: [movement.id],
+            lastDecisionReason: `hun_deepseek:${finalResponse}`,
+        });
+
+        this.setMovementLockForVillage(targetVillage.id, 15000, { reason: `hun_reactive_${finalResponse}`, sourceMovementId: movement.id });
+        this.setReactionCooldownForMovement(movement.id, 20000, { reason: `hun_reactive_${finalResponse}`, sourceMovementId: movement.id });
+
+        if (finalEvaluation.shouldPauseEconomicConstruction) {
+            const durationMs = finalEvaluation.threatLevel === 'critical' ? 45000 : BASE_LOCK_DURATIONS_MS.constructionEmergencyLockByVillage;
+            this.setConstructionEmergencyLockForVillage(
+                targetVillage.id,
+                durationMs,
+                { reason: 'hun_reactive_macro_emergency_lock', sourceMovementId: movement.id },
+            );
         }
     }
 
@@ -2003,6 +2091,10 @@ class AIController {
         this._logBudgetSnapshotForCycle('military', myVillages);
         
         try {
+            if (this._race === 'huns') {
+                await this._logHunDeepSeekAttackAdvisory(gameState, myVillages);
+            }
+
             const telemetry = runMilitaryDecision({
                 gameState,
                 ownerId: this._ownerId,
@@ -2028,6 +2120,44 @@ class AIController {
             this.log('error', null, 'Error en Ciclo Militar', 'Error en la logica militar.', error.message + '\n' + error.stack, 'military');
         } finally {
             this._isThinkingMilitary = false;
+        }
+    }
+
+    async _logHunDeepSeekAttackAdvisory(gameState, myVillages) {
+        try {
+            const status = getHunDeepSeekStatus();
+            if (!status.enabled || !status.apiKeyPresent) return;
+
+            const myVillageIds = new Set(myVillages.map(village => village.id));
+            const allOtherVillages = gameState.villages.filter(village => !myVillageIds.has(village.id));
+            const knownTargets = allOtherVillages.slice(0, 8).map(village => ({
+                id: village.id,
+                ownerId: village.ownerId,
+                targetType: village.ownerId === 'nature' ? 'oasis' : 'player',
+                spyStatus: 'unknown',
+                coords: village.coords,
+                estimatedDefense: null,
+                intel: null,
+            }));
+
+            await getHunAttackAdvice({
+                myVillages,
+                availableForces: myVillages.map(village => ({
+                    village,
+                    power: 0,
+                    totalPower: 0,
+                    scoutCount: 0,
+                    isArmyBusy: false,
+                })),
+                targets: { known: knownTargets, unknown: [] },
+                race: this._race,
+                archetype: this._archetype,
+                gameState,
+                ownerId: this._ownerId,
+                log: this.log.bind(this),
+            });
+        } catch (err) {
+            this.log('warn', null, 'Huno DeepSeek Ataque', `Error en advisory de ataque: ${err.message}`, null, 'military');
         }
     }
     
