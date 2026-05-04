@@ -1,6 +1,6 @@
 ## FASE 1: Budget Ratios 65/35
 
-**Lane Construcción:**
+**Lane Construcción (PHASE_ONE_INFRASTRUCTURE_TARGETS):**
 - Campos al 8
 - Edificio principal al 10
 - Cuartel al 10
@@ -20,30 +20,31 @@
 - Nada
 
 **Lane de Reclutamiento:**
-- Nada
+- Nada (target 0 total)
 
 ---
 
 ## FASE 2: Budget Ratios 65/35
 
-**Lane Construcción:**
+**Lane Construcción (PHASE_TWO_INFRASTRUCTURE_TARGETS):**
 - Campos al 9
 
 **Lane Investigación:**
+- Nada
 
 **Lane Mejora:**
 - Mejora `defensive_infantry` al 8
 - Mejora `defensive_cavalry` al 5
 
-**Lane de Reclutamiento:**
-- 30 ciclos de `defensive_infantry`
-- 5 ciclo de `scout`
+**Lane de Reclutamiento (target: 35 total):**
+- 30 unidades `defensive_infantry`
+- 5 unidades `scout`
 
 ---
 
 ## FASE 3: Budget Ratios 65/35
 
-**Lane Construcción:**
+**Lane Construcción (PHASE_THREE_INFRASTRUCTURE_TARGETS):**
 - Campos al 10
 - Cuartel al 15
 - Academia al 15
@@ -59,47 +60,47 @@
 - Mejora `defensive_infantry` al 10
 - Mejora `defensive_cavalry` al 8
 
-**Lane de Reclutamiento:**
-- 60 ciclos de `defensive_infantry`
-- 30 ciclos de `defensive_cavalry`
-- 10 ciclos de `scout`
+**Lane de Reclutamiento (target: 100 total):**
+- 60 unidades `defensive_infantry`
+- 30 unidades `defensive_cavalry`
+- 10 unidades `scout`
 
 ---
 
 ## FASE 4: Budget Ratios 65/35
 
-**Lane Construcción:**
+**Lane Construcción (PHASE_FOUR_INFRASTRUCTURE_TARGETS):**
 - Campos al 11
-- Herreria al 15
+- Herrería al 15
 - Muralla al 20
 
 **Lane Investigación:**
-- Investigar `catapulta`
+- Investigar `catapult`
 
-**Lane Mejora:**
+**Lane Mejora (PHASE_FOUR_UPGRADE_TARGETS):**
 - Mejora `defensive_infantry` al 12
 - Mejora `defensive_cavalry` al 10
 
-**Lane de Reclutamiento:**
-- 80 ciclos de `defensive_infantry`
-- 10 ciclo de `scout`
-- 50 ciclos de `defensive_cavalry`
+**Lane de Reclutamiento (target: 140 total):**
+- 80 unidades `defensive_infantry`
+- 50 unidades `defensive_cavalry`
+- 10 unidades `scout`
 
 ---
 
 ## FASE 5: Budget Ratios 65/35
 
-**Lane Construcción:**
+**Lane Construcción (PHASE_FIVE_INFRASTRUCTURE_TARGETS):**
 - Campos al 12
-- Herreria al 18
+- Herrería al 18
 
 **Lane Investigación:**
 - Nada
 
-**Lane Mejora:**
+**Lane Mejora (PHASE_FIVE_UPGRADE_TARGETS):**
 - Mejora `defensive_infantry` al 15
 - Mejora `defensive_cavalry` al 12
 
-**Lane de Reclutamiento:**
-- 120 ciclos de `defensive_infantry`
-- 80 ciclos de `defensive_cavalry`
+**Lane de Reclutamiento (target: 200 total):**
+- 120 unidades `defensive_infantry`
+- 80 unidades `defensive_cavalry`

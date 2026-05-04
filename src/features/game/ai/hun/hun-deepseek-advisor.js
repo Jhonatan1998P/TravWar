@@ -1,9 +1,11 @@
+import { AI_HUN_CONSTANTS } from '../config/AIConstants.js';
+
 const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
 const DEEPSEEK_MODEL = 'deepseek-chat';
 const REQUEST_TIMEOUT_MS = 8000;
 
 function getApiKey() {
-    return import.meta.env?.VITE_DEEPSEEK_API_KEY || null;
+    return AI_HUN_CONSTANTS.deepseekApiKey || import.meta.env?.VITE_DEEPSEEK_API_KEY || null;
 }
 
 function buildAttackContext({ myVillages, availableForces, targets, race, archetype, gameState, ownerId }) {

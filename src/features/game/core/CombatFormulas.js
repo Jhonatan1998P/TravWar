@@ -142,6 +142,34 @@ function calculateBuildingDamage(catapultCount, effectiveness, initialBuildingLe
     return Math.min(initialBuildingLevel, levelsDestroyed);
 }
 
+const ESPIONAGE_SMITHY_BONUS = {
+    romans: 0.020,
+    gauls: 0.020,
+    germans: 0.0175,
+    egyptians: 0.030,
+    huns: 0.0175,
+};
+
+const PATKE_BASE = 35;
+const PDEFE_BASE = 20;
+
+function calculateEspionagePower(count, smithyLevel, race, mode) {
+    const base = mode === 'attack' ? PATKE_BASE : PDEFE_BASE;
+    const bonus = ESPIONAGE_SMITHY_BONUS[race] || 0.020;
+    return count * base * (1 + smithyLevel * bonus);
+}
+
+function calculateEspionageOutcome(attackerCount, patkeTotal, defenderCount, pdefeTotal) {
+    if (patkeTotal > pdefeTotal) {
+        const survivors = Math.floor(attackerCount * (1 - pdefeTotal / patkeTotal));
+        return { survivingAttackers: Math.max(0, survivors), survivingDefenders: 0 };
+    } else if (pdefeTotal > patkeTotal) {
+        const survivors = Math.floor(defenderCount * (1 - patkeTotal / pdefeTotal));
+        return { survivingAttackers: 0, survivingDefenders: Math.max(0, survivors) };
+    }
+    return { survivingAttackers: 0, survivingDefenders: 0 };
+}
+
 export const CombatFormulas = {
     calculateAttackPoints,
     calculateDefensePoints,
@@ -151,5 +179,10 @@ export const CombatFormulas = {
     calculateSiegeEffectiveness,
     calculateRamEffectiveness,
     calculateWallDamage,
-    calculateBuildingDamage
+    calculateBuildingDamage,
+    calculateEspionageOutcome,
+    calculateEspionagePower,
+    ESPIONAGE_SMITHY_BONUS,
+    PATKE_BASE,
+    PDEFE_BASE,
 };

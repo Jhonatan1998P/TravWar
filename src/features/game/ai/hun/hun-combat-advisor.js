@@ -4,39 +4,29 @@ import {
     buildAttackContext,
     buildDefenseContext,
 } from './hun-deepseek-advisor.js';
+import { AI_HUN_CONSTANTS } from '../config/AIConstants.js';
 
-const HUN_DEEPSEEK_FLAG_KEY = 'hun_deepseek_enabled';
+let _runtimeOverride = null;
 
 export function isHunDeepSeekEnabled() {
-    try {
-        const envFlag = import.meta.env?.VITE_HUN_DEEPSEEK_ENABLED;
-        if (envFlag === 'false') return false;
-        if (envFlag === 'true') return true;
-        const stored = typeof localStorage !== 'undefined'
-            ? localStorage.getItem(HUN_DEEPSEEK_FLAG_KEY)
-            : null;
-        if (stored === 'false') return false;
-        if (stored === 'true') return true;
-        return true;
-    } catch {
-        return true;
-    }
+    if (_runtimeOverride !== null) return _runtimeOverride;
+    return AI_HUN_CONSTANTS.deepseekEnabled;
 }
 
 export function setHunDeepSeekEnabled(value) {
-    try {
-        if (typeof localStorage !== 'undefined') {
-            localStorage.setItem(HUN_DEEPSEEK_FLAG_KEY, value ? 'true' : 'false');
-        }
-    } catch {
-        // ignore
-    }
+    _runtimeOverride = value;
+}
+
+export function resetHunDeepSeekEnabled() {
+    _runtimeOverride = null;
 }
 
 export function getHunDeepSeekStatus() {
     return {
         enabled: isHunDeepSeekEnabled(),
-        apiKeyPresent: Boolean(import.meta.env?.VITE_DEEPSEEK_API_KEY),
+        constantValue: AI_HUN_CONSTANTS.deepseekEnabled,
+        runtimeOverride: _runtimeOverride,
+        apiKeyPresent: Boolean(AI_HUN_CONSTANTS.deepseekApiKey || import.meta.env?.VITE_DEEPSEEK_API_KEY),
     };
 }
 
@@ -57,7 +47,7 @@ export async function getHunAttackAdvice({
         return { used: false, reason: 'DISABLED' };
     }
 
-    if (!import.meta.env?.VITE_DEEPSEEK_API_KEY) {
+    if (!AI_HUN_CONSTANTS.deepseekApiKey && !import.meta.env?.VITE_DEEPSEEK_API_KEY) {
         return { used: false, reason: 'NO_API_KEY' };
     }
 
@@ -115,7 +105,7 @@ export async function getHunDefenseAdvice({
         return { used: false, reason: 'DISABLED', response: fallbackResponse };
     }
 
-    if (!import.meta.env?.VITE_DEEPSEEK_API_KEY) {
+    if (!AI_HUN_CONSTANTS.deepseekApiKey && !import.meta.env?.VITE_DEEPSEEK_API_KEY) {
         return { used: false, reason: 'NO_API_KEY', response: fallbackResponse };
     }
 

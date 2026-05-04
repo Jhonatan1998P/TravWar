@@ -94,135 +94,205 @@ export class CombatEngine {
     
     _handleEspionageArrival() {
         const attackerInfo = this._getParticipantInfo(this._movement.ownerId, this._movement.originVillageId);
-        
-        // OPTIMIZADO: Uso de spatialIndex
+        const attackerRace = attackerInfo.race;
+        const attackerVillage = this._gameState.villages.find(v => v.id === this._movement.originVillageId);
+        const attackerSmithy = attackerVillage?.smithy.upgrades || {};
+
         const targetTile = this._gameState.spatialIndex.get(`${this._movement.targetCoords.x}|${this._movement.targetCoords.y}`);
-        
         const isOasis = targetTile?.type === 'oasis';
         const defenderVillage = !isOasis && targetTile?.type === 'village' ? this._gameState.villages.find(v => v.id === targetTile.villageId) : null;
         const defenderInfo = this._getParticipantInfo(defenderVillage?.ownerId, defenderVillage?.id, this._movement.targetCoords);
 
-        let attackerScoutingPower = 0;
-        const attackerRaceData = gameData.units[attackerInfo.race];
+        // 1. Attacker PatkE
+        const attackerRaceData = gameData.units[attackerRace];
+        let totalAttackerScouts = 0;
+        let attackerPatkeTotal = 0;
+
         for (const unitId in this._movement.payload.troops) {
             const count = this._movement.payload.troops[unitId];
-            const unitData = attackerRaceData.troops.find(u => u.id === unitId);
-            if (unitData && unitData.type === 'scout') {
-                attackerScoutingPower += count * 35;
-            }
+            const unitData = attackerRaceData?.troops.find(u => u.id === unitId);
+            if (!unitData || unitData.type !== 'scout') continue;
+
+            const smithyLevel = attackerSmithy[unitId] || 0;
+            const countPower = CombatFormulas.calculateEspionagePower(count, smithyLevel, attackerRace, 'attack');
+            totalAttackerScouts += count;
+            attackerPatkeTotal += countPower;
         }
 
-        let defenderScoutingPower = 0;
+        if (totalAttackerScouts === 0) return;
+
+        // 2. Defender PdefE
+        let totalDefenderScouts = 0;
+        let defenderPdefeTotal = 0;
         const defendingScouts = {};
 
-        const addDefendingScouts = (troops, race) => {
+        const addDefendingScouts = (troops, race, smithyUpgrades = {}) => {
             const raceData = gameData.units[race];
             if (!raceData) return;
+
             for (const unitId in troops) {
+                const count = troops[unitId];
                 const unitData = raceData.troops.find(u => u.id === unitId);
-                if (unitData && unitData.type === 'scout') {
-                    const count = troops[unitId];
-                    defenderScoutingPower += count * 20;
-                    defendingScouts[unitId] = (defendingScouts[unitId] || 0) + count;
-                }
+                if (!unitData || unitData.type !== 'scout') continue;
+
+                const smithyLevel = smithyUpgrades[unitId] || 0;
+                const countPower = CombatFormulas.calculateEspionagePower(count, smithyLevel, race, 'defense');
+                totalDefenderScouts += count;
+                defenderPdefeTotal += countPower;
+                defendingScouts[unitId] = (defendingScouts[unitId] || 0) + count;
             }
         };
 
         if (defenderVillage) {
-            addDefendingScouts(defenderVillage.unitsInVillage, defenderVillage.race);
-            defenderVillage.reinforcements.forEach(reinf => addDefendingScouts(reinf.troops, reinf.race));
-            
-            const rallyPointLevel = defenderVillage.buildings.find(b => b.type === 'rallyPoint')?.level || 0;
-            defenderScoutingPower += rallyPointLevel * 5;
+            addDefendingScouts(defenderVillage.unitsInVillage, defenderVillage.race, defenderVillage.smithy.upgrades || {});
+            defenderVillage.reinforcements.forEach(reinf => {
+                const reinforcingVillage = this._gameState.villages.find(v => v.id === reinf.fromVillageId);
+                const reinfSmithy = reinforcingVillage ? (reinforcingVillage.smithy.upgrades || {}) : (reinf.smithyUpgradesSnapshot || {});
+                addDefendingScouts(reinf.troops, reinf.race, reinfSmithy);
+            });
         } else if (isOasis && targetTile.state?.beasts) {
             addDefendingScouts(targetTile.state.beasts, 'nature');
         }
 
-        let attackerLossPercent = 0;
-        let defenderLossPercent = 0;
-        
-        if (attackerScoutingPower > 0 || defenderScoutingPower > 0) {
-            const isAttackerStronger = attackerScoutingPower > defenderScoutingPower;
+        // 3. Resolve combat
+        const { survivingAttackers, survivingDefenders } = CombatFormulas.calculateEspionageOutcome(
+            totalAttackerScouts, attackerPatkeTotal,
+            totalDefenderScouts, defenderPdefeTotal
+        );
 
-            if (isAttackerStronger) {
-                const ratio = defenderScoutingPower / attackerScoutingPower;
-                attackerLossPercent = Math.pow(ratio, 1.5);
-                defenderLossPercent = 1;
+        // 4. Attacker losses (proportional)
+        const attackerLossCount = totalAttackerScouts - survivingAttackers;
+        const attackerLosses = {};
+        const survivingScouts = {};
+        let survivingScoutsCount = 0;
+
+        const scoutUnitIds = Object.keys(this._movement.payload.troops);
+        let remainingLosses = attackerLossCount;
+        for (let i = 0; i < scoutUnitIds.length; i++) {
+            const unitId = scoutUnitIds[i];
+            const count = this._movement.payload.troops[unitId];
+            const unitData = attackerRaceData?.troops.find(u => u.id === unitId);
+            if (!unitData || unitData.type !== 'scout') continue;
+
+            let lostCount;
+            if (i === scoutUnitIds.length - 1) {
+                lostCount = Math.min(count, Math.max(0, remainingLosses));
+            } else if (totalAttackerScouts > 0) {
+                lostCount = Math.min(count, Math.round(count * attackerLossCount / totalAttackerScouts));
+                remainingLosses -= lostCount;
             } else {
-                const ratio = attackerScoutingPower / defenderScoutingPower;
-                attackerLossPercent = 1;
-                defenderLossPercent = Math.pow(ratio, 1.5);
+                lostCount = 0;
+            }
+
+            if (lostCount > 0) attackerLosses[unitId] = lostCount;
+            const surv = count - lostCount;
+            if (surv > 0) {
+                survivingScouts[unitId] = surv;
+                survivingScoutsCount += surv;
             }
         }
-        
-        const attackerLosses = {};
-        let survivingScoutsCount = 0;
-        const survivingScouts = { ...this._movement.payload.troops };
 
-        for (const unitId in this._movement.payload.troops) {
-            const lostCount = Math.round(this._movement.payload.troops[unitId] * attackerLossPercent);
-            if (lostCount > 0) attackerLosses[unitId] = lostCount;
-            survivingScouts[unitId] -= lostCount;
-            if (survivingScouts[unitId] <= 0) delete survivingScouts[unitId];
-            else survivingScoutsCount += survivingScouts[unitId];
-        }
-
-        const informationObtained = survivingScoutsCount > 0;
-        const winnerName = attackerScoutingPower > defenderScoutingPower ? attackerInfo.playerName : defenderInfo.playerName;
-        
+        // 5. Defender losses (proportional)
+        const defenderLossCount = totalDefenderScouts - survivingDefenders;
         const defenderLosses = {};
-        for(const unitId in defendingScouts) {
-            const lostCount = Math.round(defendingScouts[unitId] * defenderLossPercent);
-            if(lostCount > 0) defenderLosses[unitId] = lostCount;
+        const defUnitIds = Object.keys(defendingScouts);
+        let defRemainingLosses = defenderLossCount;
+        for (let i = 0; i < defUnitIds.length; i++) {
+            const unitId = defUnitIds[i];
+            const count = defendingScouts[unitId];
+
+            let lostCount;
+            if (i === defUnitIds.length - 1) {
+                lostCount = Math.min(count, Math.max(0, defRemainingLosses));
+            } else if (totalDefenderScouts > 0) {
+                lostCount = Math.min(count, Math.round(count * defenderLossCount / totalDefenderScouts));
+                defRemainingLosses -= lostCount;
+            } else {
+                lostCount = 0;
+            }
+
+            if (lostCount > 0) defenderLosses[unitId] = lostCount;
         }
 
+        // 6. Intel level by loss rate
+        const lossRate = totalAttackerScouts > 0 ? attackerLossCount / totalAttackerScouts : 1;
+        const informationObtained = survivingScoutsCount > 0;
+
+        let intelLevel = 'none';
+        if (informationObtained) {
+            if (lossRate <= 0.25) intelLevel = 'complete';
+            else if (lossRate <= 0.50) intelLevel = 'high';
+            else if (lossRate <= 0.75) intelLevel = 'medium';
+            else intelLevel = 'minimal';
+        }
+
+        const winnerName = attackerPatkeTotal > defenderPdefeTotal
+            ? attackerInfo.playerName
+            : (attackerPatkeTotal < defenderPdefeTotal ? defenderInfo.playerName : 'Empate');
+
+        // 7. Attacker report
         const attackerReport = {
-            id: `rep-att-${this._movement.arrivalTime}`, ownerId: this._movement.ownerId, type: 'espionage',
-            time: this._movement.arrivalTime, winner: winnerName,
+            id: `rep-att-${this._movement.arrivalTime}`,
+            ownerId: this._movement.ownerId,
+            type: 'espionage',
+            time: this._movement.arrivalTime,
+            winner: winnerName,
+            intelLevel,
             attacker: { ...attackerInfo, troops: this._movement.payload.troops, losses: attackerLosses },
             defender: { ...defenderInfo, troops: defendingScouts, losses: defenderLosses },
-            payload: null
+            payload: null,
         };
 
+        // 8. Build payload by intel level
         if (informationObtained) {
-            let payloadData = null;
+            let payloadData = { intelLevel };
+
             if (defenderVillage) {
-                const wallLevel = defenderVillage.buildings.find(b => b.type === 'cityWall')?.level || 0;
-                const residenceLevel = defenderVillage.buildings.find(b => b.type === 'residence' || b.type === 'palace')?.level || 0;
-                
-                const defendingContingents = [{ id: defenderVillage.id, troops: { ...defenderVillage.unitsInVillage }, race: defenderVillage.race, smithyUpgrades: defenderVillage.smithy.upgrades || {} }];
-                defenderVillage.reinforcements.forEach(reinforcement => {
-                    const reinforcingVillage = this._gameState.villages.find(v => v.id === reinforcement.fromVillageId);
-                    const smithyUpgrades = reinforcingVillage ? (reinforcingVillage.smithy.upgrades || {}) : (reinforcement.smithyUpgradesSnapshot || {});
-                    const contingentRace = reinforcement.race && gameData.units[reinforcement.race] ? reinforcement.race : 'romans';
-                    defendingContingents.push({ id: reinforcement.fromVillageId, troops: { ...reinforcement.troops }, race: contingentRace, smithyUpgrades: smithyUpgrades });
-                });
-
-                payloadData = {
-                    resources: {
-                        wood: Math.floor(defenderVillage.resources.wood.current), stone: Math.floor(defenderVillage.resources.stone.current),
-                        iron: Math.floor(defenderVillage.resources.iron.current), food: Math.floor(defenderVillage.resources.food.current)
-                    },
-                    buildings: { wallLevel, residenceLevel },
-                    troops: defenderVillage.unitsInVillage,
-                    refuerzos_vistos: defenderVillage.reinforcements,
+                payloadData.resources = {
+                    wood: Math.floor(defenderVillage.resources.wood.current),
+                    stone: Math.floor(defenderVillage.resources.stone.current),
+                    iron: Math.floor(defenderVillage.resources.iron.current),
+                    food: Math.floor(defenderVillage.resources.food.current),
                 };
 
-                const genericAttackerProportions = { infantry: 0.5, cavalry: 0.5 };
-                const calculatedDefense = CombatFormulas.calculateDefensePoints(defendingContingents, genericAttackerProportions, defenderVillage.race, wallLevel, residenceLevel);
-                payloadData.poder_defensivo_calculado = Math.floor(calculatedDefense);
+                if (intelLevel !== 'minimal') {
+                    const wallLevel = defenderVillage.buildings.find(b => b.type === 'cityWall')?.level || 0;
+                    const residenceLevel = defenderVillage.buildings.find(b => b.type === 'residence' || b.type === 'palace')?.level || 0;
+                    payloadData.buildings = { wallLevel, residenceLevel };
 
+                    if (intelLevel === 'high' || intelLevel === 'complete') {
+                        payloadData.troops = { ...defenderVillage.unitsInVillage };
+
+                        if (intelLevel === 'complete') {
+                            payloadData.refuerzos_vistos = defenderVillage.reinforcements.map(r => ({ ...r }));
+
+                            const defendingContingents = [
+                                { id: defenderVillage.id, troops: { ...defenderVillage.unitsInVillage }, race: defenderVillage.race, smithyUpgrades: defenderVillage.smithy.upgrades || {} },
+                            ];
+                            defenderVillage.reinforcements.forEach(reinf => {
+                                const reinforcingVillage = this._gameState.villages.find(v => v.id === reinf.fromVillageId);
+                                const reinfSmithy = reinforcingVillage ? (reinforcingVillage.smithy.upgrades || {}) : (reinf.smithyUpgradesSnapshot || {});
+                                const contingentRace = reinf.race && gameData.units[reinf.race] ? reinf.race : 'romans';
+                                defendingContingents.push({ id: reinf.fromVillageId, troops: { ...reinf.troops }, race: contingentRace, smithyUpgrades: reinfSmithy });
+                            });
+
+                            const genericProportions = { infantry: 0.5, cavalry: 0.5 };
+                            const calculatedDefense = CombatFormulas.calculateDefensePoints(defendingContingents, genericProportions, defenderVillage.race, wallLevel, residenceLevel);
+                            payloadData.poder_defensivo_calculado = Math.floor(calculatedDefense);
+                        }
+                    }
+                }
             } else if (isOasis) {
-                payloadData = {
-                    resources: null, buildings: null,
-                    troops: targetTile.state?.beasts || {},
-                    refuerzos_vistos: []
-                };
+                payloadData.resources = null;
+                payloadData.buildings = null;
+                payloadData.troops = { ...(targetTile.state?.beasts || {}) };
+                payloadData.refuerzos_vistos = [];
                 const natureContingents = [{ troops: targetTile.state?.beasts, race: 'nature', smithyUpgrades: {} }];
-                const genericAttackerProportions = { infantry: 0.5, cavalry: 0.5 };
-                const calculatedDefense = CombatFormulas.calculateDefensePoints(natureContingents, genericAttackerProportions, 'nature', 0, 0);
+                const genericProportions = { infantry: 0.5, cavalry: 0.5 };
+                const calculatedDefense = CombatFormulas.calculateDefensePoints(natureContingents, genericProportions, 'nature', 0, 0);
                 payloadData.poder_defensivo_calculado = Math.floor(calculatedDefense);
             }
+
             attackerReport.payload = payloadData;
 
             if (attackerInfo.ownerId.startsWith('ai_')) {
@@ -231,24 +301,62 @@ export class CombatEngine {
                 this._results.aiNotifications.push({
                     type: 'espionage_success',
                     targetAiId: attackerInfo.ownerId,
-                    payload: { report: attackerReport }
+                    payload: { report: attackerReport },
                 });
             }
         }
+
         this._results.reportsToCreate.push(attackerReport);
-        
+
+        // 9. Defender report (always, with own payload)
         if (defenderVillage && defenderInfo.ownerId) {
             const defenderReport = {
-                id: `rep-def-${this._movement.arrivalTime}`, ownerId: defenderInfo.ownerId, type: 'espionage_defense',
-                time: this._movement.arrivalTime, winner: winnerName,
+                id: `rep-def-${this._movement.arrivalTime}`,
+                ownerId: defenderInfo.ownerId,
+                type: 'espionage_defense',
+                time: this._movement.arrivalTime,
+                winner: winnerName,
                 attacker: { ...attackerInfo, troops: this._movement.payload.troops, losses: attackerLosses },
                 defender: { ...defenderInfo, troops: defendingScouts, losses: defenderLosses },
                 espionageDetected: true,
-                payload: attackerReport.payload 
+                payload: informationObtained ? { intelObtained: true } : null,
             };
             this._results.reportsToCreate.push(defenderReport);
         }
-    
+
+        // 10. Apply defender losses to village
+        if (defenderVillage && Object.keys(defenderLosses).length > 0) {
+            let defenderLostUpkeep = 0;
+            const defenderLostResources = { wood: 0, stone: 0, iron: 0, food: 0 };
+            for (const unitId in defenderLosses) {
+                const raceData = gameData.units[defenderVillage.race];
+                const unitData = raceData?.troops.find(u => u.id === unitId);
+                if (unitData) {
+                    defenderLostUpkeep += unitData.upkeep * defenderLosses[unitId];
+                    if (unitData.cost) {
+                        for (const res in unitData.cost) {
+                            defenderLostResources[res] += unitData.cost[res] * defenderLosses[unitId];
+                        }
+                    }
+                }
+            }
+
+            const defenderContingentResults = [{
+                id: defenderVillage.id,
+                troops: { ...defenderVillage.unitsInVillage },
+                race: defenderVillage.race,
+                losses: defenderLosses,
+                lostUpkeep: defenderLostUpkeep,
+                lostResources: defenderLostResources,
+            }];
+
+            this._results.stateChanges.villageUpdates.push({
+                villageId: defenderVillage.id,
+                changes: { troopLosses: defenderContingentResults },
+            });
+        }
+
+        // 11. Return survivors
         const returnMovement = this._createReturnMovement(survivingScouts);
         if (returnMovement) {
             this._results.movementsToCreate.push(returnMovement);

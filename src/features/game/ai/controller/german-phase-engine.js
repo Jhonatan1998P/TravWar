@@ -1400,15 +1400,9 @@ function tryPhaseOnePriorityConstruction({ village, gameState, actionExecutor, p
     const prioritySteps = gateResourceFieldStepsByAverage(village, PHASE_ONE_EXIT_CONDITIONS.resourceFieldsLevel, [
         { type: 'resource_fields_level', level: PHASE_ONE_EXIT_CONDITIONS.resourceFieldsLevel },
         { type: 'building', buildingType: 'mainBuilding', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.mainBuilding },
-        { type: 'building', buildingType: 'barracks', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.barracks },
-        { type: 'building', buildingType: 'academy', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.academy },
-        { type: 'building', buildingType: 'smithy', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.smithy },
         { type: 'building', buildingType: 'rallyPoint', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.rallyPoint },
         { type: 'building', buildingType: 'warehouse', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.warehouse },
         { type: 'building', buildingType: 'granary', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.granary },
-        { type: 'building', buildingType: 'grainMill', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.grainMill },
-        { type: 'building', buildingType: 'marketplace', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.marketplace },
-        { type: 'building', buildingType: 'cityWall', level: PHASE_ONE_EXIT_CONDITIONS.buildingLevels.cityWall },
     ]);
 
     return runConstructionStepList({
@@ -1496,7 +1490,7 @@ function tryPhaseThreePriorityConstruction({ village, gameState, actionExecutor,
         { type: 'building', buildingType: 'rallyPoint', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.rallyPoint },
         { type: 'building', buildingType: 'warehouse', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.warehouse },
         { type: 'building', buildingType: 'granary', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.granary },
-        { type: 'building', buildingType: 'grainMill', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.grainMill },
+        { type: 'building', buildingType: 'bakery', level: PHASE_THREE_INFRASTRUCTURE_TARGETS.buildingLevels.bakery },
     ]);
 
     return runConstructionStepList({

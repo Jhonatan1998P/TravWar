@@ -22,3 +22,8 @@ export const AI_RECRUITMENT_CONSTANTS = Object.freeze({
     laneRecruitmentBatchMode: 'dynamic_cycle',
     dynamicCycleFraction: 0.2,
 });
+
+export const AI_HUN_CONSTANTS = Object.freeze({
+    deepseekEnabled: true,
+    deepseekApiKey: 'sk-9f6f0ba847444efcb4f7f12385935131',
+});

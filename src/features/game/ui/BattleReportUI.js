@@ -258,22 +258,43 @@ class BattleReportUI {
     
     _renderEspionageDefenseReport(report) {
         const attackerName = report.attacker.villageName || 'una aldea desconocida';
+        const attackerTroops = report.attacker.troops || {};
+        const attackerLosses = report.attacker.losses || {};
+        const defenderLosses = report.defender.losses || {};
+        const totalSent = Object.values(attackerTroops).reduce((a, b) => a + b, 0);
+        const totalKilled = Object.values(attackerLosses).reduce((a, b) => a + b, 0);
+        const totalDefLost = Object.values(defenderLosses).reduce((a, b) => a + b, 0);
+
         let resultText = '';
         let colorClass = '';
 
         if (report.payload) {
-            resultText = '¡Espionaje Exitoso! El enemigo ha obtenido información sobre tus recursos y tropas.';
+            resultText = 'El enemigo logró obtener información.';
             colorClass = 'text-red-400';
         } else {
-            resultText = 'Tus defensas han detectado y repelido con éxito el intento de espionaje.';
+            resultText = 'El intento de espionaje fue repelido exitosamente.';
             colorClass = 'text-green-400';
         }
     
         return `
             <div class="text-center p-4 bg-gray-900/30 rounded-lg">
-                <h3 class="text-xl font-bold ${colorClass}">¡Intento de Espionaje!</h3>
-                <p class="text-gray-300 mt-2">Has sido espiado por un jugador de ${attackerName}.</p>
-                <p class="text-gray-300 mt-2">${resultText}</p>
+                <h3 class="text-xl font-bold text-yellow-300">¡Intento de Espionaje!</h3>
+                <p class="text-gray-300 mt-2">Has sido espiado por <strong>${attackerName}</strong>.</p>
+                <div class="mt-3 grid grid-cols-3 gap-3 text-sm">
+                    <div class="p-2 bg-gray-900/50 rounded-md">
+                        <div class="text-gray-400">Exploradores Enviados</div>
+                        <div class="text-lg font-bold text-white">${totalSent}</div>
+                    </div>
+                    <div class="p-2 bg-gray-900/50 rounded-md">
+                        <div class="text-gray-400">Eliminados</div>
+                        <div class="text-lg font-bold text-green-400">${totalKilled}</div>
+                    </div>
+                    <div class="p-2 bg-gray-900/50 rounded-md">
+                        <div class="text-gray-400">Tus Bajas</div>
+                        <div class="text-lg font-bold text-red-400">${totalDefLost}</div>
+                    </div>
+                </div>
+                <p class="text-gray-300 mt-3 ${colorClass} font-semibold">${resultText}</p>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
                 ${this._renderSide(report.attacker, 'Atacante')}
@@ -283,7 +304,7 @@ class BattleReportUI {
     }
 
     _renderEspionageReport(report) {
-        const { payload, defender } = report;
+        const { payload, defender, intelLevel } = report;
     
         if (!payload) {
             return `<div class="text-center p-6 bg-red-900/30 rounded-lg">
@@ -291,6 +312,17 @@ class BattleReportUI {
                         <p class="text-gray-300 mt-2">Tus espías fueron detectados y eliminados. No se ha obtenido información.</p>
                     </div>`;
         }
+
+        const intelLabels = { minimal: 'MÍNIMA', medium: 'MEDIA', high: 'ALTA', complete: 'COMPLETA' };
+        const intelColors = { minimal: 'text-yellow-300', medium: 'text-yellow-200', high: 'text-orange-300', complete: 'text-green-400' };
+        const label = intelLabels[intelLevel] || 'DESCONOCIDA';
+        const color = intelColors[intelLevel] || 'text-gray-400';
+
+        let intelHeaderHTML = `
+            <div class="text-center mb-4 p-3 bg-gray-900/40 rounded-lg">
+                <span class="text-sm text-gray-400">Nivel de información:</span>
+                <span class="text-lg font-bold ml-2 ${color}">${label}</span>
+            </div>`;
     
         let resourcesHTML = '';
         if (payload.resources) {
@@ -344,7 +376,14 @@ class BattleReportUI {
                          </div>`;
         }
     
-        return `<div>${resourcesHTML}${buildingsHTML}${troopsHTML}</div>`;
+        return `
+            <div>
+                ${intelHeaderHTML}${resourcesHTML}${buildingsHTML}${troopsHTML}
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                    ${this._renderSide(report.attacker, 'Atacante')}
+                    ${this._renderSide(report.defender, 'Defensor')}
+                </div>
+            </div>`;
     }
 
     _renderOasisConquestSection(report) {
